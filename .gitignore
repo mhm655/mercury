@@ -1,0 +1,38 @@
+# Build output
+target/
+build/
+out/
+*.class
+*.jar
+*.war
+
+# Maven
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+nbproject/
+
+# JMH / benchmark output
+*.jfr
+jmh-result.*
+benchmarks/results/*.raw
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+hs_err_pid*
+replay_pid*
