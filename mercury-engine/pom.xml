@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.mercury</groupId>
+    <artifactId>mercury-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>mercury-engine</artifactId>
+  <name>Mercury :: Engine</name>
+  <description>
+    The domain model and all computation: instruments, market data, curves, pricing,
+    portfolio, matching, risk, trade lifecycle and simulation.
+
+    This module has no compile-scope dependencies at all. That is deliberate and is the
+    point of the module: the engine must be usable from a plain main() with no framework,
+    no container and no web server. Any dependency added here should be argued for.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>net.jqwik</groupId>
+      <artifactId>jqwik</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+</project>
