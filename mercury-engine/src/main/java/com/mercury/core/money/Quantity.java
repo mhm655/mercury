@@ -58,18 +58,6 @@ public record Quantity(BigDecimal value) implements Comparable<Quantity> {
         return new Quantity(value.add(other.value));
     }
 
-    public Quantity minus(Quantity other) {
-        return new Quantity(value.subtract(other.value));
-    }
-
-    public Quantity negated() {
-        return new Quantity(value.negate());
-    }
-
-    public Quantity abs() {
-        return new Quantity(value.abs());
-    }
-
     /** The smaller of two quantities - the fill size when an order meets a resting order. */
     public Quantity min(Quantity other) {
         return compareTo(other) <= 0 ? this : other;

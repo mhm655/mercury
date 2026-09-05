@@ -43,10 +43,6 @@ public record Price(BigDecimal value) implements Comparable<Price> {
         return new Price(value);
     }
 
-    public static Price of(long value) {
-        return new Price(BigDecimal.valueOf(value));
-    }
-
     public static Price of(String value) {
         return new Price(new BigDecimal(value));
     }

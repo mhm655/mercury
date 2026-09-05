@@ -62,13 +62,6 @@ public record FloatingRateLeg(
         }
     }
 
-    /** A leg with no spread over the index. */
-    public static FloatingRateLeg of(Money notional, FloatingRateIndex index, Schedule schedule,
-                                     PayReceive payReceive) {
-        return new FloatingRateLeg(notional, index, BasisPoints.ZERO, schedule, payReceive,
-                index.dayCount());
-    }
-
     /**
      * The coupon for one period, once the index rate for it is known.
      *

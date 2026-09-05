@@ -121,6 +121,69 @@ A partially enforced rule is worse than an absent one, because it is believed.
 
 ---
 
+## Fixed during the second pre-M4 audit
+
+The second pass found **no correctness bugs** — the order book's invariants held under 400
+runs at 264 resting orders and 21 price levels, roughly twenty times the depth the tests had
+been reaching. The findings were about quality, and one about the tests themselves.
+
+### B-1 · The property tests barely exercised the order book · fixed
+
+Measured coverage of the original generator:
+
+| | Reached |
+|---|---|
+| Max resting orders in any run | 14 |
+| Max price levels touched | 9 of 22 |
+| Submissions into a completely empty book | 26% |
+
+Both sides drew prices from a single 95–105 range, so nearly every order crossed on arrival
+and the book never accumulated. Eight properties over a thousand sequences were, in effect,
+testing a book with fourteen orders in it — while the states the structure exists for (deep
+queues, interior cancellation, level exhaustion mid-sweep) went untouched.
+
+**Fixed** by separating the bid and ask ranges with roughly one order in eight crossing.
+Now reaches 50+ resting orders in 36% of runs and never falls below 10.
+
+**And guarded.** `theGeneratorActuallyBuildsDepth` asserts via jqwik statistics that at least
+a fifth of sequences build a book of 50+ orders. That guard earned its place immediately: the
+first version of the rewrite still only reached depth 9% of the time, and without the check
+the improvement would have looked complete. A property suite's strength is the state space it
+reaches, not the number of cases it runs.
+
+### B-2 · `PayReceive.sign()` — dead, and contradicted by its own javadoc · fixed
+
+Documented as letting cashflows be "flipped by multiplication rather than by branching", while
+both `FixedRateLeg` and `FloatingRateLeg` branched on the constant with a ternary. Never
+called. Removed.
+
+### B-3 · Fifteen further public methods with no caller · fixed
+
+Deleted, except three that were legitimate untested configuration —
+`businessDayConvention(..)` on both builders and `spread(..)` on the swap builder, now covered
+by `BuilderConfigurationTest`. Those were public, documented options through which the
+non-default rolling and spread paths were never executed.
+
+**The pattern, and the mechanical fix.** Three findings across two audits were the same
+mistake: write the javadoc describing the intended design, implement something slightly
+different, never reconcile. For a project whose documentation *is* the product, a comment
+asserting behaviour the code lacks costs more than the dead code — a reader who catches one
+stops trusting the rest. Vigilance had failed three times, so `NoOrphanedApiTest` now fails
+the build when a public method has no caller anywhere.
+
+### B-4 · Instruments disagreed about what equality meant · fixed
+
+`Stock`, `FxForward` and `EuropeanOption` were records with component-wise value equality;
+`Bond` and `InterestRateSwap` compared on id. Two entirely different bonds sharing an id
+compared equal and collapsed in a `HashSet`; conversely, under value semantics an amended
+instrument would stop matching the position that referenced it.
+
+Settled on **entity equality** — same `InstrumentId` means the same instrument — documented on
+`FinancialInstrument` and enforced by `InstrumentIdentityTest`. Market data and positions are
+both keyed by id, so identity is the domain's own answer.
+
+---
+
 ## Not a gap, but worth stating
 
 `MODIFIED_FOLLOWING` will escape its month if an entire calendar month is closed — it rolls

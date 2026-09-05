@@ -24,17 +24,6 @@ public enum OrderStatus {
         this.displayName = displayName;
     }
 
-    /** True if any quantity traded. */
-    public boolean hasFills() {
-        return this == FILLED || this == PARTIALLY_FILLED_RESTING
-                || this == PARTIALLY_FILLED_CANCELLED;
-    }
-
-    /** True if the order is now sitting in the book awaiting a counterparty. */
-    public boolean isResting() {
-        return this == RESTING || this == PARTIALLY_FILLED_RESTING;
-    }
-
     public String displayName() {
         return displayName;
     }

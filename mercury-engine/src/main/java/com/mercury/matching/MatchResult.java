@@ -40,11 +40,6 @@ public record MatchResult(
         }
     }
 
-    /** True if any quantity traded. */
-    public boolean hasFills() {
-        return !fills.isEmpty();
-    }
-
     /** True if the order is now queued in the book. */
     public boolean isResting() {
         return restingQuantity > 0;

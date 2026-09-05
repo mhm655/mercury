@@ -37,21 +37,6 @@ public record Cashflow(LocalDate paymentDate, Money amount) {
         return amount.isPositive();
     }
 
-    /** True if this cashflow is money going out. */
-    public boolean isPayment() {
-        return amount.isNegative();
-    }
-
-    /** The same cashflow in the opposite direction - the counterparty's view of it. */
-    public Cashflow negated() {
-        return new Cashflow(paymentDate, amount.negated());
-    }
-
-    /** True if this cashflow has not yet been paid as of {@code valuationDate}. */
-    public boolean isFutureAsOf(LocalDate valuationDate) {
-        return paymentDate.isAfter(valuationDate);
-    }
-
     @Override
     public String toString() {
         return paymentDate + ": " + amount;

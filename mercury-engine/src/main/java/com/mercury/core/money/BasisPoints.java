@@ -57,20 +57,12 @@ public record BasisPoints(double value) {
         return value / 100.0;
     }
 
-    public BasisPoints plus(BasisPoints other) {
-        return new BasisPoints(value + other.value);
-    }
-
     public BasisPoints minus(BasisPoints other) {
         return new BasisPoints(value - other.value);
     }
 
     public BasisPoints negated() {
         return new BasisPoints(-value);
-    }
-
-    public BasisPoints scaledBy(double factor) {
-        return new BasisPoints(value * factor);
     }
 
     @Override

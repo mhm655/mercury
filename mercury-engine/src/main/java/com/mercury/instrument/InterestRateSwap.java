@@ -149,18 +149,9 @@ public final class InterestRateSwap implements FinancialInstrument, Maturing {
         return fixedLeg.notional();
     }
 
-    /** The contractual fixed rate as a decimal: 4.25% is {@code 0.0425}. */
-    public BigDecimal fixedRate() {
-        return fixedLeg.fixedRate();
-    }
-
     /** True if the holder pays fixed and receives floating - a position that gains as rates rise. */
     public boolean isPayerSwap() {
         return fixedLeg.payReceive() == PayReceive.PAY;
-    }
-
-    public LocalDate effectiveDate() {
-        return fixedLeg.schedule().effectiveDate();
     }
 
     @Override
@@ -226,11 +217,6 @@ public final class InterestRateSwap implements FinancialInstrument, Maturing {
         /** The fixed rate as a decimal: {@code "0.0425"} for 4.25%. */
         public Builder fixedRate(String fixedRate) {
             this.fixedRate = new BigDecimal(fixedRate);
-            return this;
-        }
-
-        public Builder fixedRate(BigDecimal fixedRate) {
-            this.fixedRate = fixedRate;
             return this;
         }
 

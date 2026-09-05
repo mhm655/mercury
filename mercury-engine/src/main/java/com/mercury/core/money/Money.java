@@ -78,10 +78,6 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
         return new Money(new BigDecimal(amount), currency);
     }
 
-    public static Money of(long amount, Currency currency) {
-        return new Money(BigDecimal.valueOf(amount), currency);
-    }
-
     /**
      * Builds an amount from a count of minor units - cents, pence, whole yen.
      * {@code ofMinor(150, USD)} is {@code 1.50}; {@code ofMinor(150, JPY)} is {@code 150}.

@@ -40,6 +40,22 @@ import com.mercury.core.money.Currency;
  * would make that false by construction. The M15 extensibility proof adds a sixth
  * instrument in a single commit precisely to demonstrate that.
  *
+ * <h2>Instruments are entities, not values</h2>
+ * <b>Two instruments are equal when their {@link #id()} matches, whatever else differs.</b>
+ * An instrument has a continuous identity: market data is keyed by {@code InstrumentId},
+ * positions are keyed by it, and two objects carrying the same id denote the same real-world
+ * instrument - one of them merely being a stale or amended copy of the other.
+ *
+ * <p>The alternative, structural equality over every field, would mean an amended instrument
+ * no longer equalled the position that referenced it, and that a {@code Map} keyed by
+ * instrument silently grew a second entry after any amendment.
+ *
+ * <p>This was inconsistent until it was noticed: the record-based instruments inherited
+ * component-wise equality while {@code Bond} and {@code InterestRateSwap} compared on id, so
+ * one hierarchy carried two contradictory notions of sameness. Every implementation now
+ * overrides {@code equals} and {@code hashCode} on the id, and
+ * {@code InstrumentIdentityTest} enforces it.
+ *
  * <p>Implementations must be immutable and thread-safe. Instrument definitions are read
  * concurrently by every Monte Carlo worker, and a mutable instrument would make a
  * simulation's result depend on thread timing.

@@ -14,8 +14,17 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M3 complete**, plus a pre-M4 audit that found and fixed three real defects. 276 tests
-green across unit, property-based and architecture suites; CI builds on every push.
+**M3 complete**, plus two pre-M4 audits. CI green on every push.
+
+The audits found four real defects and one weak test suite — including a bond that reported
+itself matured while still owing its principal, and property tests that looked thorough while
+only ever building a book of fourteen orders. Both are written up in
+[KNOWN_GAPS.md](docs/KNOWN_GAPS.md), along with what was deliberately left undone.
+
+*(This section used to lead with a test count. It was removed on purpose: the audit showed
+the number was uninformative — the eight property tests it was flattering covered almost none
+of the state space they were supposed to. What a suite reaches matters; how many assertions
+it runs does not.)*
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
 model, architecture, the design problems that drive it, justified pattern choices,

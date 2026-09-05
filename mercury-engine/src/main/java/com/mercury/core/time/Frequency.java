@@ -32,15 +32,4 @@ public enum Frequency {
     public int periodsPerYear() {
         return periodsPerYear;
     }
-
-    /**
-     * Splits an annual rate into the rate for one period.
-     *
-     * <p>Simple division, which is the market convention for coupon accrual - a 6%
-     * semi-annual bond pays 3% twice, not {@code (1.06)^0.5 - 1}. Compounding is a
-     * separate concern belonging to curve construction, not to coupon calculation.
-     */
-    public double periodRate(double annualRate) {
-        return annualRate / periodsPerYear;
-    }
 }

@@ -16,6 +16,7 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 import net.jqwik.api.constraints.IntRange;
+import net.jqwik.api.statistics.Statistics;
 
 /**
  * Property-based tests for the matching engine.
@@ -34,18 +35,63 @@ class OrderBookProperties {
 
     private static final InstrumentId AAPL = InstrumentId.of("AAPL");
 
+    private static final String DEPTH = "book depth reached";
+
     /** A random order action: submit a buy, submit a sell, or cancel something resting. */
     record Action(Side side, boolean isCancel, int priceTicks, long quantity) {
     }
 
+    /**
+     * Generates sequences that actually build a book.
+     *
+     * <h2>Why the price ranges are separated</h2>
+     * An earlier generator drew both sides from a single 95-105 range. That looked thorough
+     * and was not: almost every order crossed on arrival, so the book never grew past
+     * <b>14 resting orders and 9 price levels</b>, and a quarter of all submissions went into
+     * a completely empty book. Eight properties over a thousand sequences were, in effect,
+     * testing a book with fourteen orders in it - while the structure they exist to verify
+     * (deep queues, interior cancellation, level exhaustion mid-sweep) went untouched.
+     *
+     * <p>Bids are now drawn mostly below the ask range and asks mostly above it, with about
+     * one order in eight deliberately crossing and one in eight cancelling. The book builds
+     * genuine depth while matching and cancellation still happen constantly, so the fill and
+     * level-removal paths stay exercised.
+     *
+     * <p>The weights and sequence length were tuned against
+     * {@link #theGeneratorActuallyBuildsDepth}, which measures what is actually reached. The
+     * first attempt at this rewrite still only reached fifty resting orders in 9% of runs -
+     * better than fourteen, and still not good enough. Without that guard the improvement
+     * would have looked complete.
+     *
+     * <p>The lesson generalises: a property test's strength is the state space it reaches, not
+     * the number of cases it runs. Generator design is part of the test, not setup for it.
+     */
     @Provide
     Arbitrary<List<Action>> actionSequences() {
-        Arbitrary<Action> action = Arbitraries.of(Side.BUY, Side.SELL)
-                .flatMap(side -> Arbitraries.integers().between(95, 105)
-                        .flatMap(price -> Arbitraries.longs().between(1, 500)
-                                .flatMap(quantity -> Arbitraries.of(true, false)
-                                        .map(cancel -> new Action(side, cancel, price, quantity)))));
-        return action.list().ofMinSize(1).ofMaxSize(120);
+        Arbitrary<Action> passiveBuy = order(Side.BUY, 90, 99);
+        Arbitrary<Action> passiveSell = order(Side.SELL, 101, 110);
+        Arbitrary<Action> crossingBuy = order(Side.BUY, 100, 105);
+        Arbitrary<Action> crossingSell = order(Side.SELL, 95, 100);
+        Arbitrary<Action> cancel = Arbitraries.of(Side.BUY, Side.SELL)
+                .map(side -> new Action(side, true, 100, 1));
+
+        // Weighted so the book accumulates depth, with steady crossing and cancellation.
+        Arbitrary<Action> action = Arbitraries.frequencyOf(
+                net.jqwik.api.Tuple.of(6, passiveBuy),
+                net.jqwik.api.Tuple.of(6, passiveSell),
+                net.jqwik.api.Tuple.of(1, crossingBuy),
+                net.jqwik.api.Tuple.of(1, crossingSell),
+                net.jqwik.api.Tuple.of(2, cancel));
+
+        // Long enough that a book can actually accumulate. Short sequences cannot reach depth
+        // however they are weighted, and jqwik's list sizing favours the small end.
+        return action.list().ofMinSize(60).ofMaxSize(400);
+    }
+
+    private static Arbitrary<Action> order(Side side, int minTick, int maxTick) {
+        return Arbitraries.integers().between(minTick, maxTick)
+                .flatMap(price -> Arbitraries.longs().between(1, 500)
+                        .map(quantity -> new Action(side, false, price, quantity)));
     }
 
     /** Replays a generated sequence against a fresh book, tracking what it should contain. */
@@ -87,6 +133,31 @@ class OrderBookProperties {
             }
             live.removeIf(id -> !book.contains(id));
         }
+    }
+
+    /**
+     * Guards the generator itself.
+     *
+     * <p>The properties below are only as strong as the states they reach, and the previous
+     * generator quietly reached almost none - a book of fourteen orders, while every property
+     * reported green. Nothing failed, so nothing revealed it.
+     *
+     * <p>This asserts that a fifth of generated sequences build a book of at least fifty
+     * resting orders. If someone weakens the generator again, this fails rather than the suite
+     * silently becoming decorative.
+     */
+    @Property
+    void theGeneratorActuallyBuildsDepth(@ForAll("actionSequences") List<Action> actions) {
+        Replay replay = new Replay();
+        replay.run(actions);
+
+        int depth = replay.book.restingOrderCount();
+        // The coverage check must target the same label the samples were collected under.
+        // Statistics.coverage(..) alone inspects the default collector, which is empty here.
+        Statistics.label(DEPTH)
+                .collect(depth >= 50 ? "deep (50+)" : depth >= 10 ? "moderate (10-49)" : "shallow (<10)");
+        Statistics.label(DEPTH).coverage(coverage ->
+                coverage.check("deep (50+)").percentage(percentage -> percentage >= 20.0));
     }
 
     @Property

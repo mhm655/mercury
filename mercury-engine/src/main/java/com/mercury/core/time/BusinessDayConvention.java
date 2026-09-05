@@ -95,13 +95,6 @@ public enum BusinessDayConvention {
      */
     public abstract LocalDate adjust(LocalDate date, HolidayCalendar calendar);
 
-    /** Null-checking entry point; the abstract overrides assume non-null arguments. */
-    public final LocalDate adjustChecked(LocalDate date, HolidayCalendar calendar) {
-        Objects.requireNonNull(date, "date");
-        Objects.requireNonNull(calendar, "calendar");
-        return adjust(date, calendar);
-    }
-
     public String displayName() {
         return displayName;
     }

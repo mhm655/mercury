@@ -36,10 +36,6 @@ public record Stock(InstrumentId id, String ticker, Currency currency) implement
         return new Stock(InstrumentId.of(ticker), ticker, currency);
     }
 
-    public static Stock of(InstrumentId id, String ticker, Currency currency) {
-        return new Stock(id, ticker, currency);
-    }
-
     @Override
     public AssetClass assetClass() {
         return AssetClass.EQUITY;
@@ -53,5 +49,19 @@ public record Stock(InstrumentId id, String ticker, Currency currency) implement
     @Override
     public String description() {
         return ticker + " (" + currency.code() + " equity)";
+    }
+
+    /**
+     * Entity equality: two instruments are the same when their ids match.
+     * See {@link FinancialInstrument} for why identity rather than structure.
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Stock other && id.equals(other.id());
+    }
+
+    @Override
+    public int hashCode() {
+        return id.hashCode();
     }
 }

@@ -168,4 +168,18 @@ public record FxForward(
     public String toString() {
         return description();
     }
+
+    /**
+     * Entity equality: two instruments are the same when their ids match.
+     * See {@link FinancialInstrument} for why identity rather than structure.
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof FxForward other && id.equals(other.id());
+    }
+
+    @Override
+    public int hashCode() {
+        return id.hashCode();
+    }
 }

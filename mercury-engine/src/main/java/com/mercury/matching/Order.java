@@ -87,12 +87,12 @@ public record Order(
                 quantity, TimeInForce.IMMEDIATE_OR_CANCEL);
     }
 
-    public boolean isMarketOrder() {
-        return type == OrderType.MARKET;
-    }
-
     public boolean isBuy() {
         return side.isBuy();
+    }
+
+    public boolean isMarketOrder() {
+        return type == OrderType.MARKET;
     }
 
     /**
