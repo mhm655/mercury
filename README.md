@@ -14,8 +14,8 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M1 complete** — core value types and market conventions. 139 tests green across unit,
-property-based and architecture suites; CI builds on every push.
+**M2 complete** — five instrument types on a capability-based model. 216 tests green
+across unit, property-based and architecture suites; CI builds on every push.
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
 model, architecture, the design problems that drive it, justified pattern choices,
@@ -25,8 +25,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | Milestone | Status |
 |---|---|
 | M1 — Core types, market conventions | ✅ complete |
-| M2 — Instruments | next |
-| M3 — Order book + first JMH benchmarks | planned |
+| M2 — Instruments (stock, bond, FX forward, option, swap) | ✅ complete |
+| M3 — Order book + first JMH benchmarks | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 

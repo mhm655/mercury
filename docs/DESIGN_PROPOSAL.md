@@ -211,8 +211,15 @@ by *composed capability interfaces* rather than by intermediate abstract classes
 unrelated logic and force is-a relationships that do not hold.
 
 `CashflowGenerating.cashflows(LocalDate from)` is the seam that lets one discounting
-engine price bonds, FX forwards and swap legs — **the single biggest duplication kill in
-the project.** Without it we would write present-value logic three times.
+engine price bonds, FX forwards and **fixed** swap legs — the single biggest duplication
+kill in the project. Without it we would write present-value logic three times.
+
+> **Corrected at M2.** An earlier draft said this seam covered swap legs generally. It
+> does not. A *floating* leg's coupons depend on forward rates projected from a curve, so
+> they are not contractually determined and the leg cannot honestly implement an interface
+> that promises known amounts. `InterestRateSwap` therefore does not implement it either;
+> its fixed leg does, and the floating leg exposes its terms for a pricer to project at M6.
+> See [ADR 0004](adr/0004-capability-interfaces-and-the-cashflow-boundary.md).
 
 **Instruments carry no pricing logic.** See §5.1 for why.
 
@@ -750,8 +757,9 @@ adding it.
 
 - **Phase 0** — JDK 21 (Corretto 21.0.12) and Maven 3.9.16 installed; 3-module Maven
   build; GitHub Actions CI green on every push.
-- **M1** — core value types, typed ids, market conventions. 139 tests: unit,
-  property-based (jqwik) and architecture (ArchUnit). ADRs 0001–0003 written.
+- **M1** — core value types, typed ids, market conventions. ADRs 0001–0003.
+- **M2** — five instruments on a capability-interface model, plus a polymorphism suite that
+  tests the architecture rather than any one instrument. ADR 0004. **216 tests green.**
 
 ### Settled
 
