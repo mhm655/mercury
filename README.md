@@ -14,8 +14,8 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M3 complete** — order book with price-time priority, benchmarked. 266 tests green
-across unit, property-based and architecture suites; CI builds on every push.
+**M3 complete**, plus a pre-M4 audit that found and fixed three real defects. 276 tests
+green across unit, property-based and architecture suites; CI builds on every push.
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
 model, architecture, the design problems that drive it, justified pattern choices,
@@ -27,7 +27,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M1 — Core types, market conventions | ✅ complete |
 | M2 — Instruments (stock, bond, FX forward, option, swap) | ✅ complete |
 | M3 — Order book + first JMH benchmarks | ✅ complete |
-| M4 — Market data, events, composable shocks | next |
+| M4 — **Vertical slice**: price a portfolio end-to-end | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -56,31 +56,45 @@ Order book, 50,000 resting orders, against a linear-scan baseline
 Top of book measures 2.42 / 2.45 / 2.43 ns at 1,000 / 10,000 / 50,000 orders — flat to
 within noise, which is direct evidence the cached-best-level invariant holds.
 
-## What this project is trying to demonstrate
+## Built so far
 
-- **Open-closed instrument dispatch.** Adding a new instrument type requires one new
-  class, one new pricer, and one registration line. No `instanceof` chains, and no
-  Visitor (which would break open-closed on the instrument axis). This is the
-  Expression Problem, and the tradeoff is documented rather than hidden.
-- **One mechanism, three features.** Immutable market-data snapshots plus composable
-  shocks power stress testing, bump-and-revalue Greeks, and Monte Carlo simulation —
-  so every Greek works for every instrument with a pricer, at zero per-instrument cost.
-  Including an honest account of where that approach is numerically delicate.
-- **An order book with real data structures.** Price-time priority via `TreeMap` of
+- **An order book with real data structures.** Price-time priority via a `TreeMap` of
   price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
   [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
   execute at the *resting* order's price — the rule most often got wrong.
-- **Curve construction that actually works.** Bootstrapping a discount curve from quoted
-  market instruments by iterative root-finding, validated by repricing its own inputs
-  to par — because pricing a swap without a real curve is not pricing a swap.
-- **Domain conventions done properly.** Day counts, business-day rolling, holiday
-  calendars, schedule generation. Unglamorous, and the clearest tell of whether a
-  financial project is real.
-- **Concurrency chosen per component, not applied uniformly.** Single-writer matching
-  engine (serialize commands, don't lock the book); embarrassingly-parallel Monte Carlo
-  over immutable snapshots with reproducible per-task RNG splitting.
-- **Honest measurement.** Benchmarks are real, hardware is stated, and sub-linear
-  scaling is explained rather than papered over.
+- **Domain conventions done properly.** Day counts, business-day rolling, composable
+  holiday calendars, schedule generation rolled backwards from maturity. Unglamorous, and
+  the clearest tell of whether a financial project is real.
+- **Exact money, approximate models, one boundary between them.** `BigDecimal` for ledger
+  facts, `double` for model output, and a single named crossing point
+  ([ADR 0001](docs/adr/0001-bigdecimal-for-ledger-double-for-models.md)).
+- **Capability-based instruments.** Five instrument types that opt into what they can
+  actually do; a stock implements no capability at all
+  ([ADR 0004](docs/adr/0004-capability-interfaces-and-the-cashflow-boundary.md)).
+- **Architecture enforced by tests.** ArchUnit rules fail the build on a layering
+  violation or a stray clock read, rather than the README asserting neither happens.
+
+## Planned, not yet built
+
+Listed separately on purpose — a README that describes intentions in the present tense is
+just a claim.
+
+- **Open-closed pricing dispatch** (M6). A type-keyed model registry so a new instrument
+  needs one class, one pricer and one registration line, with no `instanceof` chain and no
+  Visitor. This is the Expression Problem; the tradeoff is written up in
+  [the design proposal](docs/DESIGN_PROPOSAL.md#51-polymorphic-pricing-without-instanceof--the-expression-problem).
+- **One mechanism, three features** (M4–M12). Immutable market snapshots plus composable
+  shocks, intended to power stress testing, bump-and-revalue Greeks and Monte Carlo from a
+  single abstraction — including an honest account of where numerical Greeks are delicate.
+- **Curve construction** (M5b). Bootstrapping a discount curve from quoted instruments by
+  iterative root-finding, validated by repricing its own inputs to par.
+- **Concurrency chosen per component** (M13). Single-writer matching engine;
+  embarrassingly-parallel Monte Carlo over immutable snapshots with reproducible per-task
+  RNG splitting.
+
+Deliberate omissions and deferred fixes are listed in
+**[KNOWN_GAPS.md](docs/KNOWN_GAPS.md)**, so their absence reads as a decision rather than an
+oversight.
 
 ## Planned architecture
 

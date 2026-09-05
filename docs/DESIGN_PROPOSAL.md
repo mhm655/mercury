@@ -693,25 +693,85 @@ scaffolding.
 
 | # | Milestone | Delivers |
 |---|---|---|
-| M1 | Core types & market conventions | `Money`, typed ids, `Quantity`, `Currency`, `Tenor`, day count, business-day conventions, `HolidayCalendar`, `ScheduleGenerator`, `SimulationClock` |
-| M2 | Instruments | 5 instruments, capability interfaces, builders, `InstrumentFactory` |
-| **M3** | **Order book** | **CLOB, price-time priority, partial fills, O(1) cancel + first JMH benchmarks** |
-| M4 | Market data & events | Immutable snapshot, `MarketShock` composite, `EventBus` (sync) |
-| M5 | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test |
-| M6 | Pricing engine | Registry, DCF template, Black-Scholes, all 5 pricers, reference-value tests |
-| M7 | Portfolio | `Position`, `CashAccount`, valuation service, realized/unrealized P&L, exposure |
-| M8 | Trade lifecycle & execution | State machine, audit trail, both execution venues, pre-trade pipeline |
+| M1 | Core types & market conventions | `Money`, typed ids, `Quantity`, `Currency`, `Tenor`, day count, business-day conventions, `HolidayCalendar`, `ScheduleGenerator`, `SimulationClock` — ✅ **done** |
+| M2 | Instruments | 5 instruments on capability interfaces — ✅ **done** |
+| M3 | Order book | CLOB, price-time priority, O(1) cancel, JMH benchmarks — ✅ **done** |
+| **M4** | **Vertical slice: value a portfolio** | Minimal `MarketDataSnapshot`, `MarketShock`, `PricingModel` registry, **two** pricers (stock + Black-Scholes), minimal `Position`/`Portfolio`, market value, **Delta by bump-and-revalue**, and a CLI that prints it. **First runnable end-to-end capability.** |
+| M5 | Broaden pricing | DCF template, bond and FX-forward pricers, flat discounting; reference-value tests against published figures |
+| M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — *off the critical path* |
+| M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments |
+| M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure |
+| M8 | Trade lifecycle & execution | State machine, audit trail, both venues, `Counterparty`; closes gaps G-1 and G-2 |
 | M9 | Risk limits | `RiskLimit` composite, pro-forma projection, breach events, rejection |
-| M10 | Risk engine | Bump-and-revalue Greeks, analytic Greeks, **Gamma validation (§5.3.1)**, DV01, exposure, historical VaR |
+| M10 | Risk engine | Remaining Greeks, analytic vs numerical cross-validation, **Gamma validation (§5.3.1)**, DV01, historical VaR |
 | M11 | Scenarios / stress | Named scenarios (Market Crash, Rate Shock, Currency Crisis), impact report |
 | M12 | Monte Carlo, single-threaded | GBM paths, VaR + Expected Shortfall, convergence tests |
 | M13 | Concurrency | Parallel MC, async bus, single-writer books, **scaling benchmarks 1→12 workers** |
-| M14 | Harness, terminal UI, golden master | End-to-end demo runnable in one command + **§7.2 determinism test** |
-| M15 | Extensibility proof & documentation | **§7.1 sixth-instrument commit**, README, ARCHITECTURE.md, diagrams, benchmark results, ADRs |
+| M14 | Harness, terminal UI, full golden master | End-to-end demo in one command + **§7.2 determinism test** |
+| M15 | Extensibility proof & documentation | **§7.1 sixth-instrument commit**, README, ARCHITECTURE.md, diagrams |
 
 **M15 is not optional polish** — for this project's actual goal it is one of the
 highest-value milestones. Short ADRs should be written *as we go* rather than
 reconstructing rationale at the end; ADRs in a repo are a strong seniority signal.
+
+### 10.1b M4 is restructured as a vertical slice
+
+**The problem with the original plan.** M4 (market data) → M5 (curves) → M6 (pricing) →
+M7 (portfolio) had to *all* land before the project could demonstrate anything. Four
+consecutive milestones of invisible work is the worst possible shape for a project whose
+principal risk is stopping partway (§A2.9), and it was a planning error rather than a
+discovery.
+
+**The change.** M4 becomes a thin slice cutting through every layer, deep enough to be real
+and narrow enough to finish quickly:
+
+```
+Stock + EuropeanOption            (already exist)
+        │
+        ▼
+MarketDataSnapshot                spot + volatility + a flat rate. No curves yet.
+        │
+        ▼
+PricingService  →  PricingModel   the type-keyed registry: the Expression Problem answer
+        │                          proved on two implementations rather than argued
+        ▼
+Portfolio → PortfolioValuation     positions and market value. No cash, no realised P&L.
+        │
+        ▼
+Delta by MarketShock + revalue     one Greek, proving the shock mechanism end-to-end
+        │
+        ▼
+CLI: "value this portfolio"        something a reviewer can run
+```
+
+**What it deliberately leaves out:** curves, bonds, swaps, cash accounts, P&L, the event
+bus, the remaining Greeks. Each arrives in a later milestone against a pipeline that already
+works.
+
+**Why this is better than the original order:**
+
+- It produces a **demonstrable capability** — "price a portfolio and compute its delta" —
+  four milestones earlier.
+- It **de-risks everything after it.** The moment pricing works end to end, the shock
+  mechanism, the risk engine and Monte Carlo become incremental rather than speculative. The
+  §5.3 claim that one mechanism powers three features is currently unproven; M4 proves it in
+  miniature, while it is still cheap to be wrong.
+- It **validates the registry design early.** Two pricers is the minimum that can show the
+  Expression Problem answer works. If the design is wrong, the second pricer reveals it.
+- It **puts curve bootstrapping off the critical path.** Bootstrapping is the hardest
+  numerical work in the project and it was blocking *all* pricing. It becomes M5b, valuable
+  and independently schedulable, rather than a gate.
+
+**It also fixes the testing gap the audit exposed.** The pre-M4 audit found a defect
+(`Bond.maturityDate()` disagreeing with its own cashflows) that no unit test could have
+caught, because both components were individually correct. Everything so far is unit-tested
+and nothing is integration-tested, and the golden master was scheduled for M14 — far too late
+to protect M4–M13, which is exactly when cross-component bugs appear.
+
+M4 therefore ships a **miniature golden-master test**: fixed seed, fixed clock, a small
+portfolio valued end to end, with the output committed. It grows with each milestone instead
+of arriving at the end, giving every subsequent milestone a regression net from the day it
+starts.
 
 ### 10.2 Phase 2 — Spring Boot: build it thin
 
@@ -766,7 +826,10 @@ adding it.
   tests the architecture rather than any one instrument. ADR 0004.
 - **M3** — order book with price-time priority, O(1) cancellation and O(1) top of book,
   eight property tests over randomised order sequences, and JMH benchmarks against a
-  linear-scan baseline. ADR 0005, [BENCHMARKS.md](BENCHMARKS.md). **266 tests green.**
+  linear-scan baseline. ADR 0005, [BENCHMARKS.md](BENCHMARKS.md).
+- **Pre-M4 audit** — three real defects found and fixed, two gaps deferred with reasons, and
+  the M4–M7 sequence restructured as a vertical slice (§10.1b) in response to what the audit
+  showed about integration testing. [KNOWN_GAPS.md](KNOWN_GAPS.md). **276 tests green.**
 
 ### Settled
 
