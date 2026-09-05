@@ -153,6 +153,25 @@ class FxForwardTest {
         }
 
         @Test
+        @DisplayName("rejects a notional that rounds away to nothing")
+        void rejectsNotionalThatRoundsToZero() {
+            // Rejecting a literal zero is not enough. 0.001 USD against JPY, which has no
+            // minor units, produced a live instrument whose legs both settled zero: the
+            // validation looked at the raw BigDecimal rather than the Money that results.
+            assertThatThrownBy(() -> FxForward.buy(
+                    "TINY", CurrencyPair.parse("USD/JPY"), "0.001", "157.25", SETTLEMENT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("would settle nothing");
+        }
+
+        @Test
+        @DisplayName("a notional large enough to survive rounding is accepted")
+        void acceptsViableNotional() {
+            assertThat(FxForward.buy("OK", CurrencyPair.parse("USD/JPY"), "1", "157.25", SETTLEMENT)
+                    .quoteAmount()).isEqualTo(Money.of("-157", Currency.JPY));
+        }
+
+        @Test
         @DisplayName("rejects a non-positive forward rate")
         void rejectsNonPositiveRate() {
             assertThatThrownBy(() -> FxForward.buy("X", EURUSD, "1000", "0", SETTLEMENT))

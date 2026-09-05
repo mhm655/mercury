@@ -18,6 +18,14 @@ import com.mercury.core.id.OrderId;
  * the front. That single difference is the reason this class exists instead of a
  * collection.
  *
+ * <h2>Time priority is structural, not stored</h2>
+ * There is deliberately no sequence number here. A node's priority is its <em>position</em>
+ * in the level's queue: new orders are appended to the tail and matching always takes the
+ * head, so arrival order is the list order. An earlier version carried a sequence field that
+ * was written on every insert and never read - it documented itself as establishing time
+ * priority while establishing nothing. Storing an ordering that the structure already
+ * guarantees invites the two to drift apart.
+ *
  * <h2>Mutable, deliberately</h2>
  * This is the mutable execution state that {@link Order} deliberately does not carry.
  * {@code remainingQuantity} decreases as the order fills. The node is owned entirely by one
@@ -31,9 +39,6 @@ final class OrderNode {
     /** The order exactly as submitted; never mutated. */
     private final Order order;
 
-    /** Book-assigned arrival sequence. Establishes time priority within a price level. */
-    private final long sequence;
-
     private long remainingQuantity;
 
     /** Intrusive list links. Null at the ends of the level's queue. */
@@ -43,9 +48,8 @@ final class OrderNode {
     /** The level holding this node, so removal can tell the level it has emptied. */
     PriceLevel level;
 
-    OrderNode(Order order, long sequence) {
+    OrderNode(Order order) {
         this.order = order;
-        this.sequence = sequence;
         this.remainingQuantity = order.quantity();
     }
 
@@ -55,10 +59,6 @@ final class OrderNode {
 
     OrderId orderId() {
         return order.id();
-    }
-
-    long sequence() {
-        return sequence;
     }
 
     long remainingQuantity() {
@@ -102,6 +102,6 @@ final class OrderNode {
 
     @Override
     public String toString() {
-        return "%s seq=%d remaining=%d".formatted(orderId(), sequence, remainingQuantity);
+        return "%s remaining=%d".formatted(orderId(), remainingQuantity);
     }
 }

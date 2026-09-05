@@ -59,6 +59,19 @@ public record FxForward(
             throw new IllegalArgumentException(
                     "FX forward rate must be positive, but was " + forwardRate.toPlainString());
         }
+        // Rejecting a zero notional is not enough: a notional small enough to round away at
+        // the currency's scale produces a live instrument whose legs are both zero. Validate
+        // the amounts that actually settle, not the raw figures they are derived from.
+        Money base = Money.of(baseNotional, currencyPair.base());
+        Money quote = Money.of(baseNotional.multiply(forwardRate), currencyPair.quote());
+        if (base.isZero() || quote.isZero()) {
+            throw new IllegalArgumentException(
+                    "FX forward notional " + baseNotional.toPlainString() + " "
+                            + currencyPair.base().code() + " at " + forwardRate.toPlainString()
+                            + " rounds to " + base + " / " + quote
+                            + " at these currencies' minor units, so the trade would settle "
+                            + "nothing. Increase the notional.");
+        }
     }
 
     /** Buys {@code baseNotional} of the base currency. */

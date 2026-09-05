@@ -42,13 +42,29 @@ class LayeringRulesTest {
         // The single most important rule in the project. Reproducibility, testability and
         // pure valuation all depend on time entering through SimulationClock and nowhere
         // else - see docs/DESIGN_PROPOSAL.md section A2.4.
+        // Coverage matters as much as the rule. An earlier version checked only LocalDate,
+        // LocalDateTime, Instant and System - leaving ZonedDateTime.now(), LocalTime.now(),
+        // new Date() and Calendar.getInstance() as open doors, while the documentation
+        // claimed no production class reads a clock. A partially enforced rule is worse than
+        // an absent one, because it is believed.
         noClasses()
                 .that().resideOutsideOfPackage("com.mercury.core.time..")
                 .should().callMethod(java.time.LocalDate.class, "now")
                 .orShould().callMethod(java.time.LocalDateTime.class, "now")
+                .orShould().callMethod(java.time.LocalTime.class, "now")
+                .orShould().callMethod(java.time.ZonedDateTime.class, "now")
+                .orShould().callMethod(java.time.OffsetDateTime.class, "now")
+                .orShould().callMethod(java.time.OffsetTime.class, "now")
                 .orShould().callMethod(java.time.Instant.class, "now")
+                .orShould().callMethod(java.time.Year.class, "now")
+                .orShould().callMethod(java.time.YearMonth.class, "now")
+                .orShould().callMethod(java.time.MonthDay.class, "now")
+                .orShould().callMethod(java.time.Clock.class, "systemUTC")
+                .orShould().callMethod(java.time.Clock.class, "systemDefaultZone")
                 .orShould().callMethod(System.class, "currentTimeMillis")
                 .orShould().callMethod(System.class, "nanoTime")
+                .orShould().callMethod(java.util.Calendar.class, "getInstance")
+                .orShould().callConstructor(java.util.Date.class)
                 .because("time must enter the engine through SimulationClock, so that a run "
                         + "is reproducible and valuation is a pure function of its inputs")
                 .check(engineClasses);

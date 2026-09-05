@@ -41,7 +41,15 @@ the node itself, not in a wrapping collection.
 | Sweep k levels | O(k log P + f) | one TreeMap removal per emptied level |
 
 Price priority comes from the `TreeMap` ordering levels; time priority comes from each
-level's FIFO queue. Each half of the rule lives in exactly one place.
+level's FIFO queue — a node's priority is its *position*, not a stored number. Each half of
+the rule lives in exactly one place.
+
+> **Corrected after the pre-M4 audit.** An earlier version of this ADR and of `OrderBook`'s
+> javadoc said time priority came from a book-assigned sequence number. It did not. The field
+> existed, was written on every insert, and was never read; ordering was structural all along.
+> The field is gone and the remaining counter identifies fills only. Recorded rather than
+> quietly edited, because a comment asserting something the code does not do is the kind of
+> thing that makes a reviewer distrust every other comment.
 
 ## Why intrusive linking rather than `ArrayDeque`
 

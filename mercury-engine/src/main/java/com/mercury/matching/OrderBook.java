@@ -83,8 +83,16 @@ public final class OrderBook {
     private PriceLevel bestBid;
     private PriceLevel bestAsk;
 
-    /** Monotonic counter giving both arrival order and fill identity. Never a clock. */
-    private long sequence;
+    /**
+     * Monotonic counter identifying fills, so executions can be ordered deterministically
+     * without consulting a clock - two fills can easily share a millisecond, and wall time
+     * would break replay.
+     *
+     * <p>It does <em>not</em> establish time priority among resting orders. That is
+     * structural: orders append to their level's tail and match from its head, so queue
+     * position is arrival order. See {@code OrderNode}.
+     */
+    private long fillSequence;
 
     public OrderBook(InstrumentId instrumentId) {
         this.instrumentId = Objects.requireNonNull(instrumentId, "instrumentId");
@@ -161,7 +169,7 @@ public final class OrderBook {
                 // Executes at the RESTING order's price, never the aggressor's: the resting
                 // order named its price first and is entitled to it, and the aggressor takes
                 // the price improvement. See Fill's documentation.
-                fills.add(new Fill(++sequence, instrumentId, resting.orderId(), order.id(),
+                fills.add(new Fill(++fillSequence, instrumentId, resting.orderId(), order.id(),
                         order.side(), level.price(), fillQuantity));
 
                 resting.reduceBy(fillQuantity);
@@ -191,7 +199,7 @@ public final class OrderBook {
         // the append inside PriceLevel is the O(1) part.
         PriceLevel level = side.computeIfAbsent(price, PriceLevel::new);
 
-        OrderNode node = new OrderNode(order, ++sequence);
+        OrderNode node = new OrderNode(order);
         long alreadyFilled = order.quantity() - remaining;
         if (alreadyFilled > 0) {
             // Only when the order partially filled before resting. reduceBy rejects zero,

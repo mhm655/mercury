@@ -44,7 +44,10 @@ public final class Bond implements FinancialInstrument, CashflowGenerating, Matu
     private final Frequency couponFrequency;
     private final DayCountConvention dayCount;
     private final LocalDate issueDate;
-    private final LocalDate maturityDate;
+
+    /** The unadjusted date in the bond's terms. Not necessarily when it actually pays. */
+    private final LocalDate contractualMaturityDate;
+
     private final Schedule schedule;
 
     private Bond(Builder builder) {
@@ -55,7 +58,7 @@ public final class Bond implements FinancialInstrument, CashflowGenerating, Matu
         this.couponFrequency = builder.couponFrequency;
         this.dayCount = builder.dayCount;
         this.issueDate = builder.issueDate;
-        this.maturityDate = builder.maturityDate;
+        this.contractualMaturityDate = builder.maturityDate;
         this.schedule = ScheduleGenerator.generate(
                 builder.issueDate, builder.maturityDate, builder.couponFrequency,
                 builder.businessDayConvention, builder.calendar);
@@ -91,12 +94,30 @@ public final class Bond implements FinancialInstrument, CashflowGenerating, Matu
     public String description() {
         return "%s %s%% %s".formatted(
                 name, couponRate.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString(),
-                maturityDate);
+                contractualMaturityDate);
     }
 
+    /**
+     * The date the final payment actually settles - the schedule's last payment date,
+     * adjusted for business days.
+     *
+     * <p>Deliberately not {@link #contractualMaturityDate()}. A bond maturing on a Saturday
+     * pays on the following Monday, and reporting the Saturday here would let a caller treat
+     * the bond as matured while its principal was still outstanding. See {@link Maturing}.
+     */
     @Override
     public LocalDate maturityDate() {
-        return maturityDate;
+        return schedule.last().paymentDate();
+    }
+
+    /**
+     * The unadjusted maturity in the bond's terms, before business-day rolling.
+     *
+     * <p>This is what a term sheet states. {@link #maturityDate()} is when money moves; the
+     * two differ whenever the contractual date is not a business day.
+     */
+    public LocalDate contractualMaturityDate() {
+        return contractualMaturityDate;
     }
 
     // ------------------------------------------------------------- cashflows

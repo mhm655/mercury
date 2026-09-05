@@ -117,9 +117,10 @@ public final class InterestRateSwap implements FinancialInstrument, Maturing {
         return TradabilityProfile.OVER_THE_COUNTER;
     }
 
+    /** The final payment date of the fixed leg; both legs mature together by construction. */
     @Override
     public LocalDate maturityDate() {
-        return fixedLeg.schedule().maturityDate();
+        return fixedLeg.schedule().last().paymentDate();
     }
 
     @Override
