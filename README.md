@@ -14,7 +14,7 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M2 complete** — five instrument types on a capability-based model. 216 tests green
+**M3 complete** — order book with price-time priority, benchmarked. 266 tests green
 across unit, property-based and architecture suites; CI builds on every push.
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
@@ -26,7 +26,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 |---|---|
 | M1 — Core types, market conventions | ✅ complete |
 | M2 — Instruments (stock, bond, FX forward, option, swap) | ✅ complete |
-| M3 — Order book + first JMH benchmarks | next |
+| M3 — Order book + first JMH benchmarks | ✅ complete |
+| M4 — Market data, events, composable shocks | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -36,13 +37,24 @@ Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 so this repo is organised around *verifiable* claims rather than a technology list.
 Three artifacts, each checkable in about a minute:
 
-| Artifact | What it proves |
-|---|---|
-| Benchmark tables | Real JMH numbers on stated hardware — order-book throughput and Monte Carlo scaling, including where scaling stops being linear and why |
-| Extensibility-proof commit | A sixth instrument added in a single diff that modifies **zero existing files** — the open-closed claim, demonstrated rather than asserted |
-| Golden-master test | The entire simulation is byte-for-byte reproducible from a fixed seed and clock |
+| Artifact | Status | What it proves |
+|---|---|---|
+| **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
+| Extensibility-proof commit | planned (M15) | A sixth instrument added in a single diff that modifies **zero existing files** — the open-closed claim, demonstrated rather than asserted |
+| Golden-master test | planned (M14) | The entire simulation is byte-for-byte reproducible from a fixed seed and clock |
 
-These are planned deliverables, not yet built. They will be linked here as they land.
+### Measured so far
+
+Order book, 50,000 resting orders, against a linear-scan baseline
+([full results and caveats](docs/BENCHMARKS.md)):
+
+| Operation | This book | Naive `ArrayList` | |
+|---|---:|---:|---:|
+| Read top of book | **2.43 ns** | 268,237 ns | 110,000× |
+| Cancel from mid-book | **64.2 ns** | 133,571 ns | 2,080× |
+
+Top of book measures 2.42 / 2.45 / 2.43 ns at 1,000 / 10,000 / 50,000 orders — flat to
+within noise, which is direct evidence the cached-best-level invariant holds.
 
 ## What this project is trying to demonstrate
 
@@ -55,8 +67,9 @@ These are planned deliverables, not yet built. They will be linked here as they 
   so every Greek works for every instrument with a pricer, at zero per-instrument cost.
   Including an honest account of where that approach is numerically delicate.
 - **An order book with real data structures.** Price-time priority via `TreeMap` of
-  price levels over intrusive linked lists: O(1) cancellation, O(1) best bid/ask,
-  benchmarked with JMH at realistic order counts.
+  price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
+  [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
+  execute at the *resting* order's price — the rule most often got wrong.
 - **Curve construction that actually works.** Bootstrapping a discount curve from quoted
   market instruments by iterative root-finding, validated by repricing its own inputs
   to par — because pricing a swap without a real curve is not pricing a swap.

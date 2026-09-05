@@ -763,7 +763,10 @@ adding it.
   build; GitHub Actions CI green on every push.
 - **M1** — core value types, typed ids, market conventions. ADRs 0001–0003.
 - **M2** — five instruments on a capability-interface model, plus a polymorphism suite that
-  tests the architecture rather than any one instrument. ADR 0004. **216 tests green.**
+  tests the architecture rather than any one instrument. ADR 0004.
+- **M3** — order book with price-time priority, O(1) cancellation and O(1) top of book,
+  eight property tests over randomised order sequences, and JMH benchmarks against a
+  linear-scan baseline. ADR 0005, [BENCHMARKS.md](BENCHMARKS.md). **266 tests green.**
 
 ### Settled
 
@@ -774,6 +777,7 @@ dashboard (§10.4); Spring Boot retained but thin (§10.2).
 ### Open
 
 1. Any milestone reordering beyond the M3 change in §10.1.
-2. Whether `Quantity` should gain a primitive fast path at M3, or whether the order book
-   holds `long` internally and converts at its boundary — see §3.3's note. Deferred until
-   the benchmark shows whether it matters.
+2. ~~Whether `Quantity` should gain a primitive fast path at M3.~~ **Resolved at M3:** the
+   book holds `long`, and the argument turned out to be domain rather than performance —
+   only exchange-traded instruments reach a CLOB and those trade in whole units. See
+   [ADR 0005](adr/0005-order-book-data-structures.md).
