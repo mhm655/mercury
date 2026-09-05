@@ -1,7 +1,11 @@
 # MERCURY — Design Proposal (Pre-Implementation)
 
-**Status:** Awaiting approval. No production code written yet.
+**Status:** Approved and under construction. M1–M2 delivered; see §11 for progress.
 **Target:** Java 21+, framework-independent core, incremental delivery.
+
+This is a living document. Where implementation has proved part of it wrong, the
+correction is marked inline rather than silently edited away — the reasoning that changed
+is usually more interesting than the conclusion.
 
 This document covers: requirement analysis, ambiguities, domain model, architecture,
 key abstractions, justified patterns, anti-patterns to avoid, and a roadmap.
