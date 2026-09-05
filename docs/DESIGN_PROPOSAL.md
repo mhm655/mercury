@@ -744,13 +744,24 @@ adding it.
 
 ---
 
-## 11. Open items
+## 11. Progress and open items
 
-1. **Phase 0 environment** — JDK 21 + Maven installation, in progress.
-2. Any milestone you want reordered beyond the M3 change in §10.1.
-3. Whether Phase 2 (Spring Boot) matters enough to you personally to keep on the roadmap
-   at all, given §10.2.
+### Delivered
 
-**Settled:** OTC vs CLOB split (§A2.1); `BigDecimal`/`double` split (§A2.2); transition
-table over the classic State pattern (§6); 3-module build (§4.2); order book at M3
-(§10.1); no web dashboard (§10.4).
+- **Phase 0** — JDK 21 (Corretto 21.0.12) and Maven 3.9.16 installed; 3-module Maven
+  build; GitHub Actions CI green on every push.
+- **M1** — core value types, typed ids, market conventions. 139 tests: unit,
+  property-based (jqwik) and architecture (ArchUnit). ADRs 0001–0003 written.
+
+### Settled
+
+OTC vs CLOB split (§A2.1); `BigDecimal`/`double` split (§A2.2); transition table over the
+classic State pattern (§6); 3-module build (§4.2); order book at M3 (§10.1); no web
+dashboard (§10.4); Spring Boot retained but thin (§10.2).
+
+### Open
+
+1. Any milestone reordering beyond the M3 change in §10.1.
+2. Whether `Quantity` should gain a primitive fast path at M3, or whether the order book
+   holds `long` internally and converts at its boundary — see §3.3's note. Deferred until
+   the benchmark shows whether it matters.

@@ -14,11 +14,21 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**Design phase.** The architecture is specified but implementation has not begun.
+**M1 complete** — core value types and market conventions. 139 tests green across unit,
+property-based and architecture suites; CI builds on every push.
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
 model, architecture, the design problems that drive it, justified pattern choices,
-anti-patterns being avoided, and the delivery roadmap.
+anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
+[ADRs](docs/adr) as they are made, not reconstructed afterwards.
+
+| Milestone | Status |
+|---|---|
+| M1 — Core types, market conventions | ✅ complete |
+| M2 — Instruments | next |
+| M3 — Order book + first JMH benchmarks | planned |
+
+Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
 ## Evidence, not claims
 
@@ -91,8 +101,18 @@ There is deliberately **no web dashboard** on the roadmap; the reasoning is in
 
 ## Building
 
-Requires JDK 21+ and Maven 3.9+. Build instructions will be added with the first
-implementation milestone.
+Requires JDK 21+ and Maven 3.9+.
+
+```bash
+mvn verify
+```
+
+That compiles all three modules and runs the full suite: unit tests, jqwik property
+tests, and the ArchUnit layering rules. A layering violation fails the build — that is
+the point of enforcing architecture in tests rather than asserting it in a README.
+
+Developed and benchmarked against Amazon Corretto 21.0.12 on Windows; CI runs Temurin 21
+on Ubuntu.
 
 ## License
 
