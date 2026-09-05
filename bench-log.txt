@@ -1,0 +1,556 @@
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel
+# Parameters: (bookSize = 1000)
+
+# Run progress: 0.00% complete, ETA 00:02:56
+# Fork: 1 of 1
+# Warmup Iteration   1: 26.126 ns/op
+# Warmup Iteration   2: 26.796 ns/op
+# Warmup Iteration   3: 26.792 ns/op
+Iteration   1: 27.033 ns/op
+Iteration   2: 28.094 ns/op
+Iteration   3: 27.112 ns/op
+Iteration   4: 26.536 ns/op
+Iteration   5: 26.647 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel":
+  27.084 ±(99.9%) 2.369 ns/op [Average]
+  (min, avg, max) = (26.536, 27.084, 28.094), stdev = 0.615
+  CI (99.9%): [24.715, 29.454] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel
+# Parameters: (bookSize = 10000)
+
+# Run progress: 4.55% complete, ETA 00:02:55
+# Fork: 1 of 1
+# Warmup Iteration   1: 58.938 ns/op
+# Warmup Iteration   2: 45.175 ns/op
+# Warmup Iteration   3: 39.438 ns/op
+Iteration   1: 49.853 ns/op
+Iteration   2: 56.698 ns/op
+Iteration   3: 37.057 ns/op
+Iteration   4: 40.182 ns/op
+Iteration   5: 44.238 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel":
+  45.606 ±(99.9%) 30.163 ns/op [Average]
+  (min, avg, max) = (37.057, 45.606, 56.698), stdev = 7.833
+  CI (99.9%): [15.442, 75.769] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel
+# Parameters: (bookSize = 50000)
+
+# Run progress: 9.09% complete, ETA 00:02:47
+# Fork: 1 of 1
+# Warmup Iteration   1: 143.420 ns/op
+# Warmup Iteration   2: 100.580 ns/op
+# Warmup Iteration   3: 67.875 ns/op
+Iteration   1: 61.375 ns/op
+Iteration   2: 58.475 ns/op
+Iteration   3: 68.985 ns/op
+Iteration   4: 64.800 ns/op
+Iteration   5: 67.465 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.indexedCancel":
+  64.220 ±(99.9%) 16.638 ns/op [Average]
+  (min, avg, max) = (58.475, 64.220, 68.985), stdev = 4.321
+  CI (99.9%): [47.582, 80.858] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel
+# Parameters: (bookSize = 1000)
+
+# Run progress: 13.64% complete, ETA 00:02:39
+# Fork: 1 of 1
+# Warmup Iteration   1: 1009.944 ns/op
+# Warmup Iteration   2: 1002.661 ns/op
+# Warmup Iteration   3: 1006.726 ns/op
+Iteration   1: 994.049 ns/op
+Iteration   2: 1057.734 ns/op
+Iteration   3: 1058.719 ns/op
+Iteration   4: 1056.807 ns/op
+Iteration   5: 1058.870 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel":
+  1045.236 ±(99.9%) 110.230 ns/op [Average]
+  (min, avg, max) = (994.049, 1045.236, 1058.870), stdev = 28.626
+  CI (99.9%): [935.006, 1155.466] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel
+# Parameters: (bookSize = 10000)
+
+# Run progress: 18.18% complete, ETA 00:02:30
+# Fork: 1 of 1
+# Warmup Iteration   1: 27124.143 ns/op
+# Warmup Iteration   2: 25445.921 ns/op
+# Warmup Iteration   3: 24888.227 ns/op
+Iteration   1: 25687.608 ns/op
+Iteration   2: 25813.104 ns/op
+Iteration   3: 26150.496 ns/op
+Iteration   4: 26366.924 ns/op
+Iteration   5: 26185.676 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel":
+  26040.762 ±(99.9%) 1082.245 ns/op [Average]
+  (min, avg, max) = (25687.608, 26040.762, 26366.924), stdev = 281.056
+  CI (99.9%): [24958.517, 27123.006] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel
+# Parameters: (bookSize = 50000)
+
+# Run progress: 22.73% complete, ETA 00:02:22
+# Fork: 1 of 1
+# Warmup Iteration   1: 182782.140 ns/op
+# Warmup Iteration   2: 127597.800 ns/op
+# Warmup Iteration   3: 125997.547 ns/op
+Iteration   1: 123738.693 ns/op
+Iteration   2: 121794.800 ns/op
+Iteration   3: 132603.280 ns/op
+Iteration   4: 131923.829 ns/op
+Iteration   5: 157793.767 ns/op
+
+
+Result "com.mercury.benchmarks.CancellationScalingBenchmark.naiveCancel":
+  133570.874 ±(99.9%) 55325.634 ns/op [Average]
+  (min, avg, max) = (121794.800, 133570.874, 157793.767), stdev = 14367.891
+  CI (99.9%): [78245.240, 188896.508] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.DestructiveOrderBookBenchmark.cancelOrders
+
+# Run progress: 27.27% complete, ETA 00:02:15
+# Fork: 1 of 1
+# Warmup Iteration   1: 58.995 ns/op
+# Warmup Iteration   2: 54.877 ns/op
+# Warmup Iteration   3: 53.822 ns/op
+Iteration   1: 52.256 ns/op
+Iteration   2: 57.413 ns/op
+Iteration   3: 58.596 ns/op
+Iteration   4: 59.483 ns/op
+Iteration   5: 56.936 ns/op
+
+
+Result "com.mercury.benchmarks.DestructiveOrderBookBenchmark.cancelOrders":
+  56.937 ±(99.9%) 10.783 ns/op [Average]
+  (min, avg, max) = (52.256, 56.937, 59.483), stdev = 2.800
+  CI (99.9%): [46.153, 67.720] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.DestructiveOrderBookBenchmark.matchSweep
+
+# Run progress: 36.36% complete, ETA 00:01:57
+# Fork: 1 of 1
+# Warmup Iteration   1: 182.679 ns/op
+# Warmup Iteration   2: 163.664 ns/op
+# Warmup Iteration   3: 166.669 ns/op
+Iteration   1: 166.348 ns/op
+Iteration   2: 163.329 ns/op
+Iteration   3: 164.570 ns/op
+Iteration   4: 164.416 ns/op
+Iteration   5: 160.966 ns/op
+
+
+Result "com.mercury.benchmarks.DestructiveOrderBookBenchmark.matchSweep":
+  163.926 ±(99.9%) 7.614 ns/op [Average]
+  (min, avg, max) = (160.966, 163.926, 166.348), stdev = 1.977
+  CI (99.9%): [156.312, 171.539] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.OrderBookBenchmark.depthTenLevels
+
+# Run progress: 45.45% complete, ETA 00:01:40
+# Fork: 1 of 1
+# Warmup Iteration   1: 111.500 ns/op
+# Warmup Iteration   2: 109.888 ns/op
+# Warmup Iteration   3: 105.211 ns/op
+Iteration   1: 104.244 ns/op
+Iteration   2: 103.999 ns/op
+Iteration   3: 105.256 ns/op
+Iteration   4: 105.237 ns/op
+Iteration   5: 104.060 ns/op
+
+
+Result "com.mercury.benchmarks.OrderBookBenchmark.depthTenLevels":
+  104.559 ±(99.9%) 2.441 ns/op [Average]
+  (min, avg, max) = (103.999, 104.559, 105.256), stdev = 0.634
+  CI (99.9%): [102.118, 107.000] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.OrderBookBenchmark.insertOrders
+
+# Run progress: 54.55% complete, ETA 00:01:23
+# Fork: 1 of 1
+# Warmup Iteration   1: 307.339 ns/op
+# Warmup Iteration   2: 296.111 ns/op
+# Warmup Iteration   3: 302.382 ns/op
+Iteration   1: 296.552 ns/op
+Iteration   2: 308.021 ns/op
+Iteration   3: 298.802 ns/op
+Iteration   4: 290.432 ns/op
+Iteration   5: 298.538 ns/op
+
+
+Result "com.mercury.benchmarks.OrderBookBenchmark.insertOrders":
+  298.469 ±(99.9%) 24.325 ns/op [Average]
+  (min, avg, max) = (290.432, 298.469, 308.021), stdev = 6.317
+  CI (99.9%): [274.144, 322.794] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.OrderBookBenchmark.topOfBook
+
+# Run progress: 63.64% complete, ETA 00:01:06
+# Fork: 1 of 1
+# Warmup Iteration   1: 2.635 ns/op
+# Warmup Iteration   2: 2.478 ns/op
+# Warmup Iteration   3: 2.712 ns/op
+Iteration   1: 2.689 ns/op
+Iteration   2: 2.686 ns/op
+Iteration   3: 2.681 ns/op
+Iteration   4: 2.718 ns/op
+Iteration   5: 2.744 ns/op
+
+
+Result "com.mercury.benchmarks.OrderBookBenchmark.topOfBook":
+  2.703 ±(99.9%) 0.104 ns/op [Average]
+  (min, avg, max) = (2.681, 2.703, 2.744), stdev = 0.027
+  CI (99.9%): [2.600, 2.807] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid
+# Parameters: (bookSize = 1000)
+
+# Run progress: 72.73% complete, ETA 00:00:50
+# Fork: 1 of 1
+# Warmup Iteration   1: 2.704 ns/op
+# Warmup Iteration   2: 2.236 ns/op
+# Warmup Iteration   3: 2.415 ns/op
+Iteration   1: 2.437 ns/op
+Iteration   2: 2.413 ns/op
+Iteration   3: 2.413 ns/op
+Iteration   4: 2.422 ns/op
+Iteration   5: 2.413 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid":
+  2.420 ±(99.9%) 0.041 ns/op [Average]
+  (min, avg, max) = (2.413, 2.420, 2.437), stdev = 0.011
+  CI (99.9%): [2.379, 2.460] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid
+# Parameters: (bookSize = 10000)
+
+# Run progress: 77.27% complete, ETA 00:00:41
+# Fork: 1 of 1
+# Warmup Iteration   1: 2.472 ns/op
+# Warmup Iteration   2: 2.231 ns/op
+# Warmup Iteration   3: 2.430 ns/op
+Iteration   1: 2.442 ns/op
+Iteration   2: 2.436 ns/op
+Iteration   3: 2.431 ns/op
+Iteration   4: 2.457 ns/op
+Iteration   5: 2.502 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid":
+  2.453 ±(99.9%) 0.111 ns/op [Average]
+  (min, avg, max) = (2.431, 2.453, 2.502), stdev = 0.029
+  CI (99.9%): [2.343, 2.564] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid
+# Parameters: (bookSize = 50000)
+
+# Run progress: 81.82% complete, ETA 00:00:33
+# Fork: 1 of 1
+# Warmup Iteration   1: 2.604 ns/op
+# Warmup Iteration   2: 2.224 ns/op
+# Warmup Iteration   3: 2.428 ns/op
+Iteration   1: 2.418 ns/op
+Iteration   2: 2.422 ns/op
+Iteration   3: 2.422 ns/op
+Iteration   4: 2.418 ns/op
+Iteration   5: 2.490 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.indexedBestBid":
+  2.434 ±(99.9%) 0.121 ns/op [Average]
+  (min, avg, max) = (2.418, 2.434, 2.490), stdev = 0.032
+  CI (99.9%): [2.312, 2.555] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid
+# Parameters: (bookSize = 1000)
+
+# Run progress: 86.36% complete, ETA 00:00:25
+# Fork: 1 of 1
+# Warmup Iteration   1: 2909.680 ns/op
+# Warmup Iteration   2: 2838.894 ns/op
+# Warmup Iteration   3: 2853.868 ns/op
+Iteration   1: 2885.271 ns/op
+Iteration   2: 2845.071 ns/op
+Iteration   3: 2897.706 ns/op
+Iteration   4: 2850.379 ns/op
+Iteration   5: 2915.850 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid":
+  2878.855 ±(99.9%) 117.388 ns/op [Average]
+  (min, avg, max) = (2845.071, 2878.855, 2915.850), stdev = 30.485
+  CI (99.9%): [2761.468, 2996.243] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid
+# Parameters: (bookSize = 10000)
+
+# Run progress: 90.91% complete, ETA 00:00:16
+# Fork: 1 of 1
+# Warmup Iteration   1: 39854.250 ns/op
+# Warmup Iteration   2: 41628.682 ns/op
+# Warmup Iteration   3: 41729.680 ns/op
+Iteration   1: 41855.587 ns/op
+Iteration   2: 38596.743 ns/op
+Iteration   3: 38211.169 ns/op
+Iteration   4: 37251.271 ns/op
+Iteration   5: 39856.108 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid":
+  39154.176 ±(99.9%) 6837.300 ns/op [Average]
+  (min, avg, max) = (37251.271, 39154.176, 41855.587), stdev = 1775.625
+  CI (99.9%): [32316.876, 45991.475] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.12.1, OpenJDK 64-Bit Server VM, 21.0.12.1+9-LTS
+# VM invoker: C:\Users\user\tools\jdk-21\bin\java.exe
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid
+# Parameters: (bookSize = 50000)
+
+# Run progress: 95.45% complete, ETA 00:00:08
+# Fork: 1 of 1
+# Warmup Iteration   1: 284722.749 ns/op
+# Warmup Iteration   2: 264646.533 ns/op
+# Warmup Iteration   3: 260729.535 ns/op
+Iteration   1: 264049.461 ns/op
+Iteration   2: 271162.547 ns/op
+Iteration   3: 276949.344 ns/op
+Iteration   4: 261975.143 ns/op
+Iteration   5: 267046.571 ns/op
+
+
+Result "com.mercury.benchmarks.TopOfBookScalingBenchmark.naiveBestBid":
+  268236.613 ±(99.9%) 22993.473 ns/op [Average]
+  (min, avg, max) = (261975.143, 268236.613, 276949.344), stdev = 5971.332
+  CI (99.9%): [245243.140, 291230.087] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:03:03
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                                   (bookSize)  Mode  Cnt       Score       Error  Units
+CancellationScalingBenchmark.indexedCancel        1000  avgt    5      27.084 ±     2.369  ns/op
+CancellationScalingBenchmark.indexedCancel       10000  avgt    5      45.606 ±    30.163  ns/op
+CancellationScalingBenchmark.indexedCancel       50000  avgt    5      64.220 ±    16.638  ns/op
+CancellationScalingBenchmark.naiveCancel          1000  avgt    5    1045.236 ±   110.230  ns/op
+CancellationScalingBenchmark.naiveCancel         10000  avgt    5   26040.762 ±  1082.245  ns/op
+CancellationScalingBenchmark.naiveCancel         50000  avgt    5  133570.874 ± 55325.634  ns/op
+DestructiveOrderBookBenchmark.cancelOrders         N/A  avgt    5      56.937 ±    10.783  ns/op
+DestructiveOrderBookBenchmark.matchSweep           N/A  avgt    5     163.926 ±     7.614  ns/op
+OrderBookBenchmark.depthTenLevels                  N/A  avgt    5     104.559 ±     2.441  ns/op
+OrderBookBenchmark.insertOrders                    N/A  avgt    5     298.469 ±    24.325  ns/op
+OrderBookBenchmark.topOfBook                       N/A  avgt    5       2.703 ±     0.104  ns/op
+TopOfBookScalingBenchmark.indexedBestBid          1000  avgt    5       2.420 ±     0.041  ns/op
+TopOfBookScalingBenchmark.indexedBestBid         10000  avgt    5       2.453 ±     0.111  ns/op
+TopOfBookScalingBenchmark.indexedBestBid         50000  avgt    5       2.434 ±     0.121  ns/op
+TopOfBookScalingBenchmark.naiveBestBid            1000  avgt    5    2878.855 ±   117.388  ns/op
+TopOfBookScalingBenchmark.naiveBestBid           10000  avgt    5   39154.176 ±  6837.300  ns/op
+TopOfBookScalingBenchmark.naiveBestBid           50000  avgt    5  268236.613 ± 22993.473  ns/op
+
+Benchmark result is saved to bench-results.json

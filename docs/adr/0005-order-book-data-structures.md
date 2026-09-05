@@ -57,8 +57,14 @@ case, this single difference is the reason `OrderNode` exists instead of a colle
 
 **`ArrayList` per side, scanned linearly.** O(n) for cancellation and for finding the best
 price. Correct, and what most first attempts look like. Kept as `NaiveOrderBook` in the
-benchmark module so the comparison is measured rather than asserted — see
-`docs/BENCHMARKS.md`.
+benchmark module so the comparison is measured rather than asserted.
+
+> **Measured** ([BENCHMARKS.md](../BENCHMARKS.md)): at 50,000 orders the indexed book is
+> 2,080× faster to cancel and 110,000× faster to read top of book. I predicted the array
+> would *win* at small sizes on cache friendliness; it did not, losing 39× at even 1,000
+> orders. Cache friendliness is worth a constant factor of 5–10×, and cancelling from the
+> middle of a 1,000-element array does ~1,000 memory operations against a hash lookup and
+> four pointer writes. The crossover is below the range this harness can measure.
 
 **One `PriorityQueue` per side.** O(log n) insert and O(log n) to pop the best. Rejected on
 three counts, the last of which is fatal: removal of an arbitrary element is O(n); there is
