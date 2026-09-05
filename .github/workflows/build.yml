@@ -1,0 +1,36 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # Compiles all three modules and runs the full suite: unit tests, jqwik
+      # property tests and the ArchUnit layering rules. The architecture rules failing
+      # the build is the point - a layering violation should break CI, not sit in a
+      # README as an unenforced claim.
+      - name: Build and test
+        run: mvn --batch-mode --no-transfer-progress verify
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          if-no-files-found: ignore
