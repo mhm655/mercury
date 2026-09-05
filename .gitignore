@@ -36,3 +36,8 @@ desktop.ini
 logs/
 hs_err_pid*
 replay_pid*
+
+# Benchmark run artifacts (raw JMH results are committed under docs/benchmarks/)
+bench-log.txt
+bench-*.json
+dependency-reduced-pom.xml
