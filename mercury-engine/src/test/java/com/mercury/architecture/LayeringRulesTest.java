@@ -1,7 +1,11 @@
 package com.mercury.architecture;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
 
+import com.mercury.core.money.Money;
+import com.mercury.core.money.Price;
+import com.mercury.core.money.Quantity;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -66,14 +70,18 @@ class LayeringRulesTest {
     }
 
     @Test
-    @DisplayName("money is never represented as a floating point primitive field")
-    void noFloatingPointMoneyFields() {
-        noClasses()
-                .that().resideInAPackage("com.mercury.core.money..")
-                .should().haveFieldsThat().haveRawType(double.class)
-                .andShould().haveFieldsThat().haveRawType(float.class)
-                .because("ledger amounts are exact decimals; only model outputs are doubles, "
-                        + "and those live outside the money package")
+    @DisplayName("ledger value types never hold a floating point field")
+    void ledgerTypesAreExact() {
+        // Scoped to the three exact-decimal types rather than the whole money package,
+        // because BasisPoints also lives there and is deliberately a double: it is a model
+        // quantity feeding discount factors and Greeks, not a ledger fact. See ADR 0001.
+        noFields()
+                .that().areDeclaredInClassesThat().belongToAnyOf(
+                        Money.class, Price.class, Quantity.class)
+                .should().haveRawType(double.class)
+                .orShould().haveRawType(float.class)
+                .because("ledger amounts must be exact; binary floating point cannot represent "
+                        + "0.10, so cash arithmetic in double does not reconcile")
                 .check(engineClasses);
     }
 
