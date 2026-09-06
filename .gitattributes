@@ -1,0 +1,2 @@
+# The golden-master report is compared byte for byte; never convert its line endings.
+mercury-app/src/test/resources/golden/*.txt text eol=lf

@@ -22,11 +22,15 @@ import java.util.Objects;
  *
  * <h2>Where the numeric boundary sits</h2>
  * Models return {@code double} per unit; positions are exact quantities; the answer is
- * {@link Money}. The crossing happens once per line, in {@link #valuePosition} - the unit
- * value converts to {@code Money} and is multiplied by the quantity, so each line rounds
- * exactly once and the total is an exact sum of exactly-rounded lines. Rounding per line
- * rather than at the end is what makes a total reconcile against the detail printed beneath
- * it (ADR 0001).
+ * {@link Money}. The product is formed in the model domain and crosses into {@code Money}
+ * once per line, so each line rounds exactly once and the total is an exact sum of
+ * exactly-rounded lines - which is what makes a headline total reconcile against the detail
+ * printed beneath it.
+ *
+ * <p>The order matters and was got wrong first time here: rounding the per-unit value to
+ * cents and <em>then</em> multiplying by the holding scales the rounding error by the
+ * quantity, and quantises the line so badly that any sensitivity derived from it collapses.
+ * Round once, and round last (ADR 0001).
  *
  * <h2>Single currency, at M4</h2>
  * Every position must be in the portfolio's reporting currency. Converting is not hard, but
@@ -84,7 +88,16 @@ public final class PortfolioValuationService {
         }
 
         ValuationResult unitValue = pricingService.price(instrument, market, asOf);
-        Money marketValue = position.quantity().times(unitValue.toMoney());
+
+        // Multiply THEN round. Rounding the per-unit value to cents first and multiplying by
+        // the holding magnifies the rounding error by the quantity: a unit value of 24.4987
+        // becomes 24.50, and across 100 contracts that is 0.13 of error in the line. It also
+        // quantises the line, which silently destroys any sensitivity computed from it - a
+        // numerical delta came out as exactly 50.0 because a 0.0122 move per contract could
+        // only round to 0.01 or 0.02. Market value is a model output multiplied by an exact
+        // quantity, so the whole product crosses into Money once (ADR 0001).
+        double modelValue = unitValue.value() * position.quantity().value().doubleValue();
+        Money marketValue = Money.fromModelValue(modelValue, instrument.currency());
 
         return new PortfolioValuation.PositionValuation(
                 instrument, position.quantity(), unitValue, marketValue);

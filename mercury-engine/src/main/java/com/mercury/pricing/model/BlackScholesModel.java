@@ -47,6 +47,13 @@ import java.util.Objects;
  * value - the discounted intrinsic payoff - rather than producing NaN. Zero volatility means
  * the forward is known with certainty, so the option is worth its discounted intrinsic value.
  *
+ * <h2>Per contract, not per share</h2>
+ * {@link #price} returns the textbook per-share value so it can be checked against published
+ * examples directly. The {@link #price(EuropeanOption, MarketDataSnapshot, java.time.LocalDate)}
+ * entry point multiplies by the option's contract multiplier, because a
+ * {@code ValuationResult} is the value of one unit of the instrument and a listed contract is
+ * a hundred shares.
+ *
  * <p>Stateless, pure and thread-safe.
  */
 public final class BlackScholesModel implements PricingModel<EuropeanOption> {
@@ -75,8 +82,17 @@ public final class BlackScholesModel implements PricingModel<EuropeanOption> {
         double rate = market.discountRate(option.currency());
         double years = option.yearsToExpiry(asOf);
 
-        double value = price(option.optionType(), spot, strike, years, rate, volatility);
-        return new ValuationResult(value, option.currency(), NAME);
+        double perShare = price(option.optionType(), spot, strike, years, rate, volatility);
+
+        // Scale to one CONTRACT. A ValuationResult is the value of one unit of the instrument,
+        // and a listed equity option contract covers 100 shares - so a position of 5 is five
+        // contracts, not five options on one share. Omitting this understated every option leg
+        // by the multiplier, and it showed up as an option position contributing 117 to a
+        // portfolio where it should have contributed 11,710. Applying it here rather than in
+        // the portfolio keeps the multiplier where the contract terms live: the valuation
+        // layer stays a uniform quantity-times-unit-value and knows nothing about contracts.
+        double perContract = perShare * option.contractMultiplier();
+        return new ValuationResult(perContract, option.currency(), NAME);
     }
 
     /**

@@ -1,0 +1,22 @@
+MERCURY - portfolio valuation
+------------------------------------------------------------------------------
+Portfolio      : US-EQUITY-BOOK
+Valuation date : 2024-06-28
+Currency       : USD
+
+POSITIONS
+  INSTRUMENT         QUANTITY     UNIT VALUE     MARKET VALUE  MODEL
+  --------------------------------------------------------------------------
+  AAPL                   1000       195.5000        195500.00  spot
+  MSFT                    250       412.2500        103062.50  spot
+  AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
+  AAPL-P-180                8      1068.7014          8549.61  black-scholes
+  --------------------------------------------------------------------------
+  TOTAL                                             295401.86
+
+DELTA  (portfolio value change per unit move in spot)
+  AAPL                   486.8511
+  MSFT                   250.0000
+
+STRESS  (equities -30%, volatility +50%)
+  P&L impact                                        -52860.25

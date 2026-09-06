@@ -73,6 +73,26 @@ public record PortfolioValuation(
         return lines.isEmpty();
     }
 
+    /**
+     * The total before rounding to currency minor units, in the model domain.
+     *
+     * <p>Exists for risk, and the distinction matters. {@link #totalValue()} is a ledger fact
+     * rounded to the cent, which is right for reporting and wrong as the input to a numerical
+     * derivative: a delta divides the difference of two valuations by a very small number, so
+     * cent-level quantisation in the numerator is amplified enormously in the result.
+     *
+     * <p>Sensitivities are therefore computed from this, keeping the whole calculation on the
+     * {@code double} side of the numeric split until the answer is reported. That is ADR 0001
+     * applied rather than restated: exact decimals for what settles, doubles for what is
+     * modelled.
+     */
+    public double modelTotal() {
+        return lines.stream()
+                .mapToDouble(line -> line.unitValue().value()
+                        * line.quantity().value().doubleValue())
+                .sum();
+    }
+
     @Override
     public String toString() {
         return "PortfolioValuation(" + portfolioId + " on " + valuationDate

@@ -228,8 +228,32 @@ class BlackScholesModelTest {
             assertThat(result.currency()).isEqualTo(Currency.USD);
             assertThat(result.model()).isEqualTo(BlackScholesModel.NAME);
             assertThat(result.value()).isGreaterThan(0.0);
-            // An at-the-money one-year call at 25% vol is worth roughly a tenth of spot.
-            assertThat(result.value()).isBetween(15.0, 30.0);
+            // An at-the-money one-year call at 25% vol is worth roughly a tenth of spot per
+            // share, and a contract covers 100 shares.
+            assertThat(result.value()).isBetween(1_500.0, 3_000.0);
+        }
+
+        @Test
+        @DisplayName("the result is per contract, scaled by the contract multiplier")
+        void scalesByContractMultiplier() {
+            // A ValuationResult is the value of one unit of the instrument, and a listed
+            // option contract is 100 shares. Omitting this understated every option position
+            // by the multiplier - caught by the demo report showing an option leg contributing
+            // 117 where it should have contributed 11,710.
+            MarketDataSnapshot market = MarketDataSnapshot.builder()
+                    .spot(AAPL, 200.0).volatility(AAPL, 0.25).discountRate(Currency.USD, 0.04)
+                    .build();
+            EuropeanOption standard = EuropeanOption.call(
+                    "STD", AAPL, Price.of("200"), VALUATION.plusYears(1), Currency.USD);
+            EuropeanOption single = new EuropeanOption(
+                    InstrumentId.of("SINGLE"), AAPL, OptionType.CALL, Price.of("200"),
+                    VALUATION.plusYears(1), 1, Currency.USD);
+
+            double contractValue = new BlackScholesModel().price(standard, market, VALUATION).value();
+            double shareValue = new BlackScholesModel().price(single, market, VALUATION).value();
+
+            assertThat(standard.contractMultiplier()).isEqualTo(100);
+            assertThat(contractValue).isCloseTo(shareValue * 100.0, within(1e-9));
         }
 
         @Test

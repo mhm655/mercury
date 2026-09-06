@@ -71,7 +71,8 @@ class PricingServiceTest {
             assertThat(results.get(0).value()).isCloseTo(200.0, within(1e-9));
             assertThat(results.get(0).model()).isEqualTo(SpotPriceModel.NAME);
             assertThat(results.get(1).model()).isEqualTo(BlackScholesModel.NAME);
-            assertThat(results.get(1).value()).isBetween(15.0, 30.0);
+            // Per contract: an option contract covers 100 shares.
+            assertThat(results.get(1).value()).isBetween(1_500.0, 3_000.0);
         }
 
         @Test
@@ -121,8 +122,10 @@ class PricingServiceTest {
             @Override
             public ValuationResult price(EuropeanOption option, MarketDataSnapshot market,
                                          LocalDate asOf) {
+                // Also per contract, so the two models are directly comparable.
                 return new ValuationResult(
-                        option.intrinsicValue(market.spot(option.underlyingId())),
+                        option.intrinsicValue(market.spot(option.underlyingId()))
+                                * option.contractMultiplier(),
                         option.currency(), NAME);
             }
         }
@@ -146,7 +149,8 @@ class PricingServiceTest {
                     option, IntrinsicValueModel.NAME, market(), VALUATION).value();
 
             // Time value is positive, so Black-Scholes must exceed intrinsic on a live option.
-            assertThat(intrinsic).isCloseTo(50.0, within(1e-9));
+            // Intrinsic is (200 - 150) x 100 shares per contract.
+            assertThat(intrinsic).isCloseTo(5_000.0, within(1e-9));
             assertThat(blackScholes).isGreaterThan(intrinsic);
             assertThat(both.modelsFor(EuropeanOption.class))
                     .containsExactlyInAnyOrder(BlackScholesModel.NAME, IntrinsicValueModel.NAME);
