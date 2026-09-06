@@ -14,7 +14,33 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M3 complete**, plus two pre-M4 audits. CI green on every push.
+**M4 complete** — the engine values a portfolio and computes its risk, end to end. CI green
+on every push.
+
+```bash
+mvn -q -DskipTests package
+java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.Main
+```
+
+```
+POSITIONS
+  INSTRUMENT         QUANTITY     UNIT VALUE     MARKET VALUE  MODEL
+  AAPL                   1000       195.5000        195500.00  spot
+  MSFT                    250       412.2500        103062.50  spot
+  AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
+  AAPL-P-180                8      1068.7014          8549.61  black-scholes
+  TOTAL                                             295401.86
+
+DELTA  (portfolio value change per unit move in spot)
+  AAPL                   486.8511
+  MSFT                   250.0000
+
+STRESS  (equities -30%, volatility +50%)
+  P&L impact                                        -52860.25
+```
+
+The covered call and protective put cut AAPL delta from 1000 to 487 — the hedge, visible in
+the numbers.
 
 The audits found four real defects and one weak test suite — including a bond that reported
 itself matured while still owing its principal, and property tests that looked thorough while
@@ -36,7 +62,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M1 — Core types, market conventions | ✅ complete |
 | M2 — Instruments (stock, bond, FX forward, option, swap) | ✅ complete |
 | M3 — Order book + first JMH benchmarks | ✅ complete |
-| M4 — **Vertical slice**: price a portfolio end-to-end | next |
+| M4 — Vertical slice: value a portfolio end-to-end | ✅ complete |
+| M5 — Broaden pricing: bonds and FX forwards | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -50,7 +77,7 @@ Three artifacts, each checkable in about a minute:
 |---|---|---|
 | **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
 | Extensibility-proof commit | planned (M15) | A sixth instrument added in a single diff that modifies **zero existing files** — the open-closed claim, demonstrated rather than asserted |
-| Golden-master test | planned (M14) | The entire simulation is byte-for-byte reproducible from a fixed seed and clock |
+| **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
 
 ### Measured so far
 
@@ -81,20 +108,22 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   actually do; a stock implements no capability at all
   ([ADR 0004](docs/adr/0004-capability-interfaces-and-the-cashflow-boundary.md)).
 - **Architecture enforced by tests.** ArchUnit rules fail the build on a layering
-  violation or a stray clock read, rather than the README asserting neither happens.
+  violation, a stray clock read, or a public method nobody calls — rather than the README
+  asserting none of that happens.
+- **Open-closed pricing dispatch.** A type-keyed registry: a new instrument costs one class,
+  one model and one registration line. `PricingServiceTest` proves it by adding a sixth
+  instrument type inline and pricing it alongside the rest, with nothing existing modified.
+- **One mechanism, three features — the first two working.** Immutable snapshots plus
+  composable shocks already drive both stress scenarios and bump-and-revalue delta; Monte
+  Carlo reuses the same abstraction at M12.
 
 ## Planned, not yet built
 
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **Open-closed pricing dispatch** (M6). A type-keyed model registry so a new instrument
-  needs one class, one pricer and one registration line, with no `instanceof` chain and no
-  Visitor. This is the Expression Problem; the tradeoff is written up in
-  [the design proposal](docs/DESIGN_PROPOSAL.md#51-polymorphic-pricing-without-instanceof--the-expression-problem).
-- **One mechanism, three features** (M4–M12). Immutable market snapshots plus composable
-  shocks, intended to power stress testing, bump-and-revalue Greeks and Monte Carlo from a
-  single abstraction — including an honest account of where numerical Greeks are delicate.
+- **Bond and FX-forward pricing** (M5). Discounted cashflows against a flat curve, checked
+  against hand-computed reference values.
 - **Curve construction** (M5b). Bootstrapping a discount curve from quoted instruments by
   iterative root-finding, validated by repricing its own inputs to par.
 - **Concurrency chosen per component** (M13). Single-writer matching engine;
