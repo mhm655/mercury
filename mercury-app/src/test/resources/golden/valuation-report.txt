@@ -11,12 +11,14 @@ POSITIONS
   MSFT                    250       412.2500        103062.50  spot
   AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
   AAPL-P-180                8      1068.7014          8549.61  black-scholes
+  CORP-5Y                 250       998.9954        249748.84  discounted-cashflow
+  FWD-EURUSD                1     -1675.6770         -1675.68  discounted-cashflow
   --------------------------------------------------------------------------
-  TOTAL                                             295401.86
+  TOTAL                                             543475.02
 
 DELTA  (portfolio value change per unit move in spot)
   AAPL                   486.8511
   MSFT                   250.0000
 
-STRESS  (equities -30%, volatility +50%)
-  P&L impact                                        -52860.25
+STRESS  (equities -30%, volatility +50%, FX -10%)
+  P&L impact                                       -104800.97

@@ -105,11 +105,12 @@ public final class ValuationReport {
         // The same shock mechanism the deltas above use, applied at scenario scale rather than
         // as an infinitesimal bump - which is the point of DESIGN_PROPOSAL.md section 5.3.
         MarketShock crash = MarketShock.scaleAllSpots(0.70)
-                .and(MarketShock.scaleAllVolatilities(1.50));
+                .and(MarketShock.scaleAllVolatilities(1.50))
+                .and(MarketShock.scaleAllFxRates(0.90));
 
         Money impact = sensitivities.valueChangeUnder(portfolio, crash, market, asOf);
 
-        line(out, "STRESS  (equities -30%%, volatility +50%%)");
+        line(out, "STRESS  (equities -30%%, volatility +50%%, FX -10%%)");
         line(out, "  %-42s %16s", "P&L impact", impact.amount().toPlainString());
     }
 

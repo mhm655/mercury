@@ -3,9 +3,15 @@ package com.mercury.app;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.PortfolioId;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
+import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
+import com.mercury.core.time.Frequency;
+import com.mercury.core.time.HolidayCalendar;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.instrument.Bond;
 import com.mercury.instrument.EuropeanOption;
+import com.mercury.instrument.FxForward;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -14,6 +20,7 @@ import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuationService;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
+import com.mercury.pricing.model.DiscountedCashflowModel;
 import com.mercury.pricing.model.SpotPriceModel;
 import com.mercury.risk.SensitivityCalculator;
 import java.time.LocalDate;
@@ -41,11 +48,16 @@ public final class DemoScenario {
     public static final InstrumentId MSFT = InstrumentId.of("MSFT");
     public static final InstrumentId AAPL_CALL = InstrumentId.of("AAPL-C-200");
     public static final InstrumentId AAPL_PUT = InstrumentId.of("AAPL-P-180");
+    public static final InstrumentId CORP_BOND = InstrumentId.of("CORP-5Y");
+    public static final InstrumentId EUR_FORWARD = InstrumentId.of("FWD-EURUSD");
 
     /** Fixed, so the scenario never depends on when it is run. */
     public static final LocalDate VALUATION_DATE = LocalDate.of(2024, 6, 28);
 
     private static final LocalDate EXPIRY = LocalDate.of(2025, 6, 20);
+    private static final LocalDate BOND_MATURITY = LocalDate.of(2029, 6, 15);
+    private static final LocalDate FORWARD_SETTLEMENT = LocalDate.of(2025, 6, 27);
+    private static final CurrencyPair EURUSD = CurrencyPair.parse("EUR/USD");
 
     private DemoScenario() {
     }
@@ -60,7 +72,24 @@ public final class DemoScenario {
                 Stock.of("AAPL", Currency.USD),
                 Stock.of("MSFT", Currency.USD),
                 EuropeanOption.call("AAPL-C-200", AAPL, Price.of("200"), EXPIRY, Currency.USD),
-                EuropeanOption.put("AAPL-P-180", AAPL, Price.of("180"), EXPIRY, Currency.USD));
+                EuropeanOption.put("AAPL-P-180", AAPL, Price.of("180"), EXPIRY, Currency.USD),
+                corporateBond(),
+                // Quoted EUR/USD, so it values in USD and belongs in a USD book.
+                FxForward.buy("FWD-EURUSD", EURUSD, "500000", "1.09", FORWARD_SETTLEMENT));
+    }
+
+    /** A five-year 4.5% semi-annual bond, quoted per 1,000 of face. */
+    private static Bond corporateBond() {
+        return Bond.builder()
+                .id("CORP-5Y")
+                .name("Acme 4.5%")
+                .faceValue(Money.of("1000", Currency.USD))
+                .couponRate("0.045")
+                .couponFrequency(Frequency.SEMI_ANNUAL)
+                .calendar(HolidayCalendar.weekendsOnly())
+                .issueDate(LocalDate.of(2024, 6, 15))
+                .maturityDate(BOND_MATURITY)
+                .build();
     }
 
     /** A market with everything the pricers need, and nothing they do not. */
@@ -70,6 +99,8 @@ public final class DemoScenario {
                 .spot(MSFT, 412.25)
                 .volatility(AAPL, 0.28)
                 .discountRate(Currency.USD, 0.045)
+                .discountRate(Currency.EUR, 0.032)
+                .fxRate(EURUSD, 1.0725)
                 .build();
     }
 
@@ -83,14 +114,24 @@ public final class DemoScenario {
                 .position(MSFT, 250)
                 .position(AAPL_CALL, -5)
                 .position(AAPL_PUT, 8)
+                .position(CORP_BOND, 250)
+                .position(EUR_FORWARD, 1)
                 .build();
     }
 
-    /** Both models registered; adding a third instrument would add one more line here. */
+    /**
+     * Every model the demo needs.
+     *
+     * <p>Four instrument types, three models - the discounted-cashflow model is registered
+     * twice, once per cashflow-bearing instrument. Adding a fifth type would add exactly one
+     * line here and change nothing else.
+     */
     public static PricingService pricingService() {
         return PricingService.builder()
                 .register(new SpotPriceModel())
                 .register(new BlackScholesModel())
+                .register(new DiscountedCashflowModel<>(Bond.class))
+                .register(new DiscountedCashflowModel<>(FxForward.class))
                 .build();
     }
 

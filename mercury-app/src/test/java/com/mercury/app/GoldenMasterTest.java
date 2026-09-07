@@ -76,6 +76,17 @@ class GoldenMasterTest {
     }
 
     @Test
+    @DisplayName("every pricing model in the engine is exercised")
+    void coversEveryModel() {
+        // A golden master is only as good as the ground it covers. The demo deliberately holds
+        // one instrument of each priced kind, so a change to any model moves a number here.
+        assertThat(runScenario())
+                .contains("spot")
+                .contains("black-scholes")
+                .contains("discounted-cashflow");
+    }
+
+    @Test
     @DisplayName("the headline total reconciles against the printed lines")
     void totalReconcilesAgainstDetail() {
         // A report whose total does not equal its own rows is worse than no report. The
@@ -85,7 +96,7 @@ class GoldenMasterTest {
 
         assertThat(runScenario())
                 .contains(valuation.totalValue().amount().toPlainString());
-        assertThat(valuation.lines()).hasSize(4);
+        assertThat(valuation.lines()).hasSize(6);
     }
 
     private static PortfolioValuation valueDemoPortfolio() {

@@ -547,9 +547,26 @@ Each entry states the *problem*, not just the pattern name.
 | **Observer** | `EventBus` | Pricing, portfolio, risk and alerting must react to market events without knowing about each other |
 | **Command** | `SubmitOrder`, `CancelOrder`, `BookTrade` | Gives an audit log, replay capability, and a natural async queue boundary for the single-writer matching engine — three real benefits, not one |
 | **Builder** | `InterestRateSwap`, `Scenario`, `Bond` | Genuinely many-parameter, many-optional construction. *Not* used for `Stock`, which has three fields |
-| **Template Method** | discounted-cashflow pricing base | Bond / FX forward / swap share the DCF skeleton and differ only in cashflow projection |
+| ~~**Template Method**~~ | ~~discounted-cashflow pricing base~~ | **Not used — see correction below.** Bond and FX forward turned out to differ in *nothing* the discounting cares about, so there was no varying step to override |
 | **Adapter** | market data feeds | Isolates external formats from the domain (matters in Phase 2) |
 | **State machine** | trade lifecycle | See below — with a caveat |
+
+> **Corrected at M5.** Template Method was listed above as justified for the
+> discounted-cashflow base, with per-instrument subclasses overriding a cashflow-projection
+> step. Implementing it showed there is no such step: `Bond` and `FxForward` both expose
+> `cashflows(LocalDate)` and differ in nothing the discounting uses, so a base class with two
+> subclasses containing only a type token and a name would have been pure ceremony.
+>
+> It is instead a single generic model, `DiscountedCashflowModel<T extends FinancialInstrument
+> & CashflowGenerating>`, registered once per instrument type. The intersection bound expresses
+> the requirement exactly — the compiler will not allow it to be registered for an instrument
+> that cannot produce cashflows.
+>
+> The floating swap leg is the case that genuinely *would* need a varying step, because its
+> coupons must be projected from a curve before they can be discounted. If M6 confirms that, a
+> shared skeleton may be worth extracting then. **A pattern is cheap to add once a second case
+> proves it is needed, and expensive to remove once it is load-bearing** — which is the whole
+> argument for not reaching for one in advance.
 
 **Deliberately rejected, and the README will say why:**
 
@@ -829,7 +846,16 @@ adding it.
   linear-scan baseline. ADR 0005, [BENCHMARKS.md](BENCHMARKS.md).
 - **Pre-M4 audit** — three real defects found and fixed, two gaps deferred with reasons, and
   the M4–M7 sequence restructured as a vertical slice (§10.1b) in response to what the audit
-  showed about integration testing. [KNOWN_GAPS.md](KNOWN_GAPS.md). **276 tests green.**
+  showed about integration testing. [KNOWN_GAPS.md](KNOWN_GAPS.md).
+- **Second pre-M4 audit** — no correctness bugs; four quality findings, the largest being that
+  the order-book property tests reached a book of only fourteen orders. Generator rewritten and
+  guarded; an orphaned-API build check added so dead code cannot recur.
+- **M4** — vertical slice: immutable market data with composable shocks, the type-keyed pricing
+  registry, portfolio valuation, delta by revaluation, a runnable CLI, and a golden-master test.
+  Found and fixed an unapplied contract multiplier and two numeric-boundary bugs.
+- **M5** — discounted-cashflow pricing for bonds and FX forwards; FX rates in market data.
+  Template Method dropped after implementation showed it had no varying step (§6).
+  **397 tests green.**
 
 ### Settled
 
