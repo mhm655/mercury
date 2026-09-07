@@ -34,7 +34,12 @@ public record ValuationResult(double value, Currency currency, ModelName model) 
         if (!Double.isFinite(value)) {
             throw new IllegalArgumentException(
                     "Model " + model + " produced a non-finite value (" + value
-                            + "). This indicates a broken calculation, not an extreme market.");
+                            + "). Market observations are validated where they enter a "
+                            + "snapshot, shocked ones included, so the inputs were finite and "
+                            + "in range: look at the model, not the market. That claim was not "
+                            + "true when this message was first written - a shocked negative "
+                            + "spot reached Black-Scholes and surfaced here as a NaN, blaming "
+                            + "the model for bad data.");
         }
     }
 

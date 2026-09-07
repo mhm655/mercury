@@ -1,5 +1,6 @@
 package com.mercury.marketdata;
 
+import com.mercury.core.MercuryException;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
@@ -22,6 +23,20 @@ import java.util.Objects;
  * <p>The distinction is worth stating because "seal everything" and "seal nothing" are both
  * wrong. Seal what you own and enumerate; leave open what others extend.
  *
+ * <h2>Each key owns what its values may be</h2>
+ * A spot price is positive, a volatility is not negative, a rate may be either. Those rules
+ * live here, on {@link #requireValidValue}, rather than on the snapshot's builder - because
+ * the builder is not the only way a snapshot comes into existence. It was, at M5, the only
+ * place that checked: {@code MarketDataSnapshot.withShock} produced new snapshots without
+ * consulting it, so a shock could build a market the builder would have refused. A spot
+ * scaled to -195.50 then failed four layers down inside the cumulative normal with the
+ * message "N(x) is undefined for NaN", naming neither the instrument nor the shock.
+ *
+ * <p>Putting the rule on the key rather than on a construction path is what makes it
+ * unavoidable: every route into a snapshot goes through a key, so there is no second place to
+ * forget. It also removes the oddity of a builder that knew the rules for types it did not
+ * own.
+ *
  * <h2>Values are doubles</h2>
  * Everything a snapshot holds is model input - a price feeding Black-Scholes, a rate feeding
  * a discount factor. Per ADR 0001 those live on the {@code double} side of the numeric split.
@@ -33,6 +48,17 @@ public sealed interface MarketDataKey
 
     /** Short label for diagnostics and report output. */
     String describe();
+
+    /**
+     * Rejects a value this kind of observation cannot take.
+     *
+     * <p>Called on every path that puts a value into a snapshot - the builder and
+     * {@code withShock} alike - so a scenario cannot manufacture a market that could not have
+     * been quoted.
+     *
+     * @throws InvalidMarketDataException if {@code value} is not legal for this key
+     */
+    void requireValidValue(double value);
 
     /**
      * The current traded price of an instrument, per unit.
@@ -49,6 +75,18 @@ public sealed interface MarketDataKey
         @Override
         public String describe() {
             return "spot:" + instrumentId;
+        }
+
+        /** Strictly positive: nothing trades at or below zero, and Black-Scholes takes a log. */
+        @Override
+        public void requireValidValue(double value) {
+            requireFinite(this, value);
+            if (value <= 0) {
+                throw new InvalidMarketDataException(this, value, "be positive",
+                        "Model a total wipeout as a small positive fraction of spot rather "
+                                + "than zero; a price of exactly zero puts log(S/K) at "
+                                + "negative infinity.");
+            }
         }
     }
 
@@ -69,6 +107,17 @@ public sealed interface MarketDataKey
         public String describe() {
             return "vol:" + instrumentId;
         }
+
+        /** Zero is legal - a deterministic underlying - but negative volatility is not. */
+        @Override
+        public void requireValidValue(double value) {
+            requireFinite(this, value);
+            if (value < 0) {
+                throw new InvalidMarketDataException(this, value, "not be negative",
+                        "Black-Scholes takes the square root of variance, so a negative "
+                                + "volatility yields NaN rather than an extreme price.");
+            }
+        }
     }
 
     /**
@@ -88,6 +137,16 @@ public sealed interface MarketDataKey
         @Override
         public String describe() {
             return "rate:" + currency.code();
+        }
+
+        /**
+         * Any finite value. Negative rates are unusual but real - EUR and JPY policy rates
+         * have been below zero - and rejecting them would encode a market condition as a
+         * validation rule.
+         */
+        @Override
+        public void requireValidValue(double value) {
+            requireFinite(this, value);
         }
     }
 
@@ -110,6 +169,18 @@ public sealed interface MarketDataKey
         public String describe() {
             return "fx:" + pair;
         }
+
+        /** Strictly positive: the reciprocal is taken on read, and 1/0 is not a rate. */
+        @Override
+        public void requireValidValue(double value) {
+            requireFinite(this, value);
+            if (value <= 0) {
+                throw new InvalidMarketDataException(this, value, "be positive",
+                        "The opposite direction is derived by inversion, so a zero or "
+                                + "negative rate would make one side of the pair infinite "
+                                + "or backwards.");
+            }
+        }
     }
 
     // ------------------------------------------------------------- factories
@@ -128,5 +199,38 @@ public sealed interface MarketDataKey
 
     static FxRate fxRate(CurrencyPair pair) {
         return new FxRate(pair);
+    }
+
+    /** No observation of any kind may be NaN or infinite. */
+    private static void requireFinite(MarketDataKey key, double value) {
+        if (!Double.isFinite(value)) {
+            throw new InvalidMarketDataException(key, value, "be finite",
+                    "A non-finite observation is a broken calculation upstream, not an "
+                            + "extreme market.");
+        }
+    }
+
+    /**
+     * Raised when a value is not legal for the key it is stored under.
+     *
+     * <p>Names the key, the offending value and the rule, because the failure this replaced
+     * named none of them: it surfaced as a NaN deep inside a pricer, with nothing to say
+     * which observation had gone wrong or how.
+     */
+    final class InvalidMarketDataException extends MercuryException {
+
+        private final transient MarketDataKey key;
+
+        InvalidMarketDataException(MarketDataKey key, double value, String rule, String why) {
+            super(key.describe() + " must " + rule + ", but was " + value + ". " + why
+                    + " Market data invariants are enforced wherever a snapshot is built, "
+                    + "including after a shock, so a scenario cannot produce a market that "
+                    + "could not have been quoted in the first place.");
+            this.key = key;
+        }
+
+        public MarketDataKey key() {
+            return key;
+        }
     }
 }

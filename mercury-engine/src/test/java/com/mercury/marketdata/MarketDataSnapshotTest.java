@@ -88,7 +88,8 @@ class MarketDataSnapshotTest {
         @DisplayName("rejects a non-positive spot price")
         void rejectsNonPositiveSpot() {
             assertThatThrownBy(() -> MarketDataSnapshot.builder().spot(AAPL, 0.0))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(MarketDataKey.InvalidMarketDataException.class)
+                    .hasMessageContaining("spot:AAPL")
                     .hasMessageContaining("must be positive");
         }
 
@@ -96,7 +97,7 @@ class MarketDataSnapshotTest {
         @DisplayName("rejects negative volatility")
         void rejectsNegativeVolatility() {
             assertThatThrownBy(() -> MarketDataSnapshot.builder().volatility(AAPL, -0.1))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(MarketDataKey.InvalidMarketDataException.class);
         }
 
         @Test
@@ -104,8 +105,58 @@ class MarketDataSnapshotTest {
         void rejectsNonFinite() {
             assertThatThrownBy(() -> MarketDataSnapshot.builder()
                     .with(MarketDataKey.spot(AAPL), Double.NaN))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(MarketDataKey.InvalidMarketDataException.class)
                     .hasMessageContaining("finite");
+        }
+
+        @Test
+        @DisplayName("a shock cannot build a market the builder would refuse")
+        void shocksObeyTheSameRules() {
+            // The hole this closes. withShock was the only route into a snapshot that did not
+            // consult the key's rules, so a scenario could impose a spot the builder rejected.
+            // The failure surfaced four layers down as "N(x) is undefined for NaN", naming
+            // neither the instrument nor the shock that caused it.
+            MarketDataSnapshot base = market();
+
+            assertThatThrownBy(() -> base.withShock((key, value) -> -1.0))
+                    .isInstanceOf(MarketDataKey.InvalidMarketDataException.class);
+        }
+
+        @Test
+        @DisplayName("the rule that rejects a value is the same one on both paths")
+        void oneRulePerKeyNotPerPath() {
+            // Asserting the mechanism, not just the outcome: both messages come from the key,
+            // so they cannot drift apart the way a builder-side copy of the rule could.
+            String fromBuilder = catchMessage(() -> MarketDataSnapshot.builder().spot(AAPL, -1.0));
+            String fromShock = catchMessage(
+                    () -> market().withShock(MarketShock.scaleSpot(AAPL, 1.0).and(negate())));
+
+            assertThat(fromBuilder).contains("spot:AAPL must be positive");
+            assertThat(fromShock).contains("spot:AAPL must be positive");
+        }
+
+        /** A shock with no factory, because no legitimate scenario negates a price. */
+        private static MarketShock negate() {
+            return new MarketShock() {
+                @Override
+                public double shockFor(MarketDataKey key, double currentValue) {
+                    return -currentValue;
+                }
+
+                @Override
+                public boolean appliesTo(MarketDataKey key) {
+                    return MarketDataKey.spot(AAPL).equals(key);
+                }
+            };
+        }
+
+        private static String catchMessage(Runnable action) {
+            try {
+                action.run();
+                throw new AssertionError("expected the value to be rejected");
+            } catch (MarketDataKey.InvalidMarketDataException e) {
+                return e.getMessage();
+            }
         }
 
         @Test

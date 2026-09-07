@@ -3,6 +3,7 @@ package com.mercury.marketdata;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.DoubleUnaryOperator;
@@ -131,7 +132,7 @@ public interface MarketShock {
      */
     static MarketShock scaleSpot(InstrumentId instrumentId, double factor) {
         Objects.requireNonNull(instrumentId, "instrumentId");
-        requireFinite(factor, "factor");
+        requirePositive(factor, "factor");
         MarketDataKey target = MarketDataKey.spot(instrumentId);
         return leaf(target::equals, value -> value * factor,
                 "spot:" + instrumentId + " x" + factor);
@@ -139,7 +140,7 @@ public interface MarketShock {
 
     /** Multiplies every spot price by {@code factor} - an index-wide move. */
     static MarketShock scaleAllSpots(double factor) {
-        requireFinite(factor, "factor");
+        requirePositive(factor, "factor");
         return leaf(key -> key instanceof MarketDataKey.SpotPrice, value -> value * factor,
                 "all spots x" + factor);
     }
@@ -175,6 +176,42 @@ public interface MarketShock {
     }
 
     /**
+     * Multiplies one currency pair's exchange rate by {@code factor}.
+     *
+     * <p><b>Matches whichever direction the snapshot stores.</b> A snapshot holds EUR/USD or
+     * USD/EUR, never both, and a caller asking to move EUR/USD should not have to know which.
+     * If the stored key is the inverse, the reciprocal factor is applied to it - so the pair
+     * moves as asked either way, and the two directions stay exact reciprocals.
+     *
+     * <p>Matching only the exact key would have been three lines shorter and quietly wrong:
+     * shocking a pair the snapshot happens to store the other way round would have matched
+     * nothing and reported a sensitivity of zero for a currency the book was fully exposed
+     * to. A silent zero is the worst answer a risk number can give.
+     */
+    static MarketShock scaleFxRate(CurrencyPair pair, double factor) {
+        Objects.requireNonNull(pair, "pair");
+        requirePositive(factor, "factor");
+        MarketDataKey direct = MarketDataKey.fxRate(pair);
+        MarketDataKey inverse = MarketDataKey.fxRate(pair.inverse());
+        return new MarketShock() {
+            @Override
+            public double shockFor(MarketDataKey key, double currentValue) {
+                return key.equals(direct) ? currentValue * factor : currentValue / factor;
+            }
+
+            @Override
+            public boolean appliesTo(MarketDataKey key) {
+                return key.equals(direct) || key.equals(inverse);
+            }
+
+            @Override
+            public String toString() {
+                return "fx:" + pair + " x" + factor;
+            }
+        };
+    }
+
+    /**
      * Multiplies every FX rate by {@code factor}.
      *
      * <p>Applied to the stored direction only, which is what keeps a shocked market
@@ -182,7 +219,7 @@ public interface MarketShock {
      * inverse is derived on read rather than stored.
      */
     static MarketShock scaleAllFxRates(double factor) {
-        requireFinite(factor, "factor");
+        requirePositive(factor, "factor");
         return leaf(key -> key instanceof MarketDataKey.FxRate, value -> value * factor,
                 "all fx x" + factor);
     }
@@ -218,6 +255,23 @@ public interface MarketShock {
     private static void requireFinite(double value, String name) {
         if (!Double.isFinite(value)) {
             throw new IllegalArgumentException(name + " must be finite, but was " + value);
+        }
+    }
+
+    /**
+     * Multiplicative factors on prices, volatilities and rates are positive by nature.
+     *
+     * <p>{@link MarketDataKey} rejects the resulting value too, so this is a second line
+     * rather than the only one - but it fails at the point the mistake was made, naming the
+     * factor, instead of later naming an observation the caller never typed.
+     */
+    private static void requirePositive(double value, String name) {
+        requireFinite(value, name);
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    name + " must be positive, but was " + value
+                            + ". A scale factor multiplies a quantity that is itself positive; "
+                            + "an additive move is a bump, not a scale.");
         }
     }
 }

@@ -95,6 +95,12 @@ public final class MarketDataSnapshot {
      *       would imply a round-trip profit that exists only in the data.</li>
      * </ol>
      *
+     * <p><b>No triangulation.</b> GBP to USD is not derived from GBP/EUR and EUR/USD; only
+     * the pair itself and its inverse are consulted. Cross rates through a vehicle currency
+     * need a stated base currency and a rule for which crosses are legal, and inferring one
+     * silently would let a portfolio value against a rate nobody quoted. Listed in
+     * {@code KNOWN_GAPS.md}.
+     *
      * @throws MissingMarketDataException if neither direction is present
      */
     public double fxRate(Currency from, Currency to) {
@@ -136,12 +142,23 @@ public final class MarketDataSnapshot {
      *
      * <p>This snapshot is left untouched, so the unshocked base case remains available for
      * the comparison every one of those features has to make.
+     *
+     * <p>The result is validated exactly as a built snapshot is. Before that check existed,
+     * this method was a hole in the type's invariants: the builder refused a non-positive
+     * spot while a shock could impose one, and the resulting NaN surfaced deep inside a
+     * pricer with nothing to say which observation was at fault. A shocked market is still a
+     * market, so it obeys the same rules.
+     *
+     * @throws MarketDataKey.InvalidMarketDataException if the shock produces an illegal value
      */
     public MarketDataSnapshot withShock(MarketShock shock) {
         Objects.requireNonNull(shock, "shock");
         Map<MarketDataKey, Double> shocked = new LinkedHashMap<>(values.size());
-        values.forEach((key, value) ->
-                shocked.put(key, shock.appliesTo(key) ? shock.shockFor(key, value) : value));
+        values.forEach((key, value) -> {
+            double result = shock.appliesTo(key) ? shock.shockFor(key, value) : value;
+            key.requireValidValue(result);
+            shocked.put(key, result);
+        });
         return new MarketDataSnapshot(Map.copyOf(shocked));
     }
 
@@ -168,40 +185,36 @@ public final class MarketDataSnapshot {
         private Builder() {
         }
 
+        /**
+         * The one place values enter a snapshot under construction, and therefore the one
+         * place that has to validate.
+         *
+         * <p>The rule itself belongs to the key, not to this builder. That is not tidiness:
+         * a builder holding the rules for every kind of market data is a second copy of them,
+         * and the copy is what {@code withShock} was able to walk around.
+         *
+         * @throws MarketDataKey.InvalidMarketDataException if the value is illegal for the key
+         */
         public Builder with(MarketDataKey key, double value) {
             Objects.requireNonNull(key, "key");
-            if (!Double.isFinite(value)) {
-                throw new IllegalArgumentException(
-                        "Market data must be finite, but " + key.describe() + " was " + value);
-            }
+            key.requireValidValue(value);
             values.put(key, value);
             return this;
         }
 
+        /** Positive, in the instrument's own currency. */
         public Builder spot(InstrumentId instrumentId, double price) {
-            if (price <= 0) {
-                throw new IllegalArgumentException(
-                        "Spot price for " + instrumentId + " must be positive, but was " + price);
-            }
             return with(MarketDataKey.spot(instrumentId), price);
         }
 
         /** Volatility as a decimal: {@code 0.25} is 25%. */
         public Builder volatility(InstrumentId instrumentId, double annualisedVolatility) {
-            if (annualisedVolatility < 0) {
-                throw new IllegalArgumentException(
-                        "Volatility for " + instrumentId + " must not be negative, but was "
-                                + annualisedVolatility);
-            }
             return with(MarketDataKey.volatility(instrumentId), annualisedVolatility);
         }
 
         /**
-         * Continuously-compounded rate as a decimal: {@code 0.05} is 5%.
-         *
-         * <p>Negative rates are permitted. They are unusual but real - EUR and JPY policy
-         * rates have been below zero - and rejecting them would encode a market condition as
-         * a validation rule.
+         * Continuously-compounded rate as a decimal: {@code 0.05} is 5%. Negative rates are
+         * permitted; see {@link MarketDataKey.DiscountRate}.
          */
         public Builder discountRate(Currency currency, double rate) {
             return with(MarketDataKey.discountRate(currency), rate);
@@ -210,10 +223,6 @@ public final class MarketDataSnapshot {
         /** Units of the pair's quote currency per one unit of its base currency. */
         public Builder fxRate(CurrencyPair pair, double rate) {
             Objects.requireNonNull(pair, "pair");
-            if (rate <= 0) {
-                throw new IllegalArgumentException(
-                        "FX rate for " + pair + " must be positive, but was " + rate);
-            }
             return with(MarketDataKey.fxRate(pair), rate);
         }
 

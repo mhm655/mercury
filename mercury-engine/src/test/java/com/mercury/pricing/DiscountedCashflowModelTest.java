@@ -265,7 +265,8 @@ class DiscountedCashflowModelTest {
         @DisplayName("a non-positive rate is rejected")
         void rejectsNonPositiveRate() {
             assertThatThrownBy(() -> MarketDataSnapshot.builder().fxRate(EURUSD, 0.0))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(
+                            com.mercury.marketdata.MarketDataKey.InvalidMarketDataException.class)
                     .hasMessageContaining("must be positive");
         }
     }
