@@ -14,8 +14,8 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M4 complete** — the engine values a portfolio and computes its risk, end to end. CI green
-on every push.
+**M5 complete** — the engine values a mixed portfolio of equities, options, a bond and an FX
+forward, and computes its risk. CI green on every push.
 
 ```bash
 mvn -q -DskipTests package
@@ -29,18 +29,23 @@ POSITIONS
   MSFT                    250       412.2500        103062.50  spot
   AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
   AAPL-P-180                8      1068.7014          8549.61  black-scholes
-  TOTAL                                             295401.86
+  CORP-5Y                 250       998.9954        249748.84  discounted-cashflow
+  FWD-EURUSD                1     -1675.6770         -1675.68  discounted-cashflow
+  TOTAL                                             543475.02
 
 DELTA  (portfolio value change per unit move in spot)
   AAPL                   486.8511
   MSFT                   250.0000
 
-STRESS  (equities -30%, volatility +50%)
-  P&L impact                                        -52860.25
+STRESS  (equities -30%, volatility +50%, FX -10%)
+  P&L impact                                       -104800.97
 ```
 
-The covered call and protective put cut AAPL delta from 1000 to 487 — the hedge, visible in
-the numbers.
+Four instrument types, three models, no `instanceof` anywhere in the dispatch. The covered
+call and protective put cut AAPL delta from 1000 to 487 — the hedge, visible in the numbers.
+The bond prices just below par because continuous discounting at 4.5% slightly exceeds a
+semi-annual 4.5% coupon, and the forward is negative because its 1.09 strike is worse than
+the 1.0865 fair rate implied by covered interest parity.
 
 The audits found four real defects and one weak test suite — including a bond that reported
 itself matured while still owing its principal, and property tests that looked thorough while
@@ -63,7 +68,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M2 — Instruments (stock, bond, FX forward, option, swap) | ✅ complete |
 | M3 — Order book + first JMH benchmarks | ✅ complete |
 | M4 — Vertical slice: value a portfolio end-to-end | ✅ complete |
-| M5 — Broaden pricing: bonds and FX forwards | next |
+| M5 — Discounted cashflows: bonds and FX forwards | ✅ complete |
+| M5b — Curve construction (bootstrapping) | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -113,6 +119,10 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 - **Open-closed pricing dispatch.** A type-keyed registry: a new instrument costs one class,
   one model and one registration line. `PricingServiceTest` proves it by adding a sixth
   instrument type inline and pricing it alongside the rest, with nothing existing modified.
+- **Restraint, recorded.** The design proposal listed Template Method as justified for the
+  discounted-cashflow base. Implementing it showed there was no varying step to override, so
+  it was dropped and [the entry struck through](docs/DESIGN_PROPOSAL.md#6-design-patterns--used-and-deliberately-not-used)
+  rather than quietly deleted. A build check also fails on any public method nobody calls.
 - **One mechanism, three features — the first two working.** Immutable snapshots plus
   composable shocks already drive both stress scenarios and bump-and-revalue delta; Monte
   Carlo reuses the same abstraction at M12.
@@ -122,8 +132,6 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **Bond and FX-forward pricing** (M5). Discounted cashflows against a flat curve, checked
-  against hand-computed reference values.
 - **Curve construction** (M5b). Bootstrapping a discount curve from quoted instruments by
   iterative root-finding, validated by repricing its own inputs to par.
 - **Concurrency chosen per component** (M13). Single-writer matching engine;
