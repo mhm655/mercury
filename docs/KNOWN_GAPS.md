@@ -64,8 +64,82 @@ decision.
 | Curves | Dual-curve / OIS discounting | Single-curve is the pre-2008 convention. Real desks discount OIS; we do not, and say so. |
 | Order types | Fill-or-kill, good-till-date, stop, iceberg | Each adds a branch in the matching loop and no new insight. Limit, market and IOC cover price-time priority, resting, partial fills and cancellation. |
 | Order book | Tick-indexed price array | O(1) for everything and what a real exchange uses, but it assumes a bounded tick grid the simulation does not fix. See ADR 0005. |
+| FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
+
+---
+
+## Fixed during the M5 audit
+
+### C-1 · `withShock` could build a market the builder would refuse · fixed
+
+`MarketDataSnapshot.Builder` rejected a non-positive spot price. `withShock` — the only other
+way to create a snapshot — validated nothing, so a shock could impose one anyway:
+
+```
+builder rejects spot 0.0:  Spot price for AAPL must be positive, but was 0.0
+withShock produced:        spot(AAPL) = -195.5
+```
+
+The negative spot then reached Black-Scholes and failed four layers down with
+`N(x) is undefined for NaN`, naming neither the instrument, nor the observation, nor the
+shock. Worse, `ValuationResult` blamed the model — its message read *"This indicates a broken
+calculation, not an extreme market"* — when the market data was the thing at fault.
+
+**How it was found.** Not by a test. By asking what else could reach a snapshot, after
+noticing that the validation lived on the builder rather than on the data.
+
+**The fix.** The rule moved onto `MarketDataKey`: each sealed case now says what values it
+can legally take, and both the builder and `withShock` ask the key. The invariant ends up on
+the type that owns it, the builder stops knowing rules for data it does not own, and there is
+no third construction path left to forget — `MarketDataSnapshotTest.oneRulePerKeyNotPerPath`
+asserts both routes reject through the same rule.
+
+### C-2 · The engine measured risk it did not report · fixed
+
+M5 added a bond and an FX forward to the demo portfolio. The risk section still showed equity
+delta and nothing else, while the book carried:
+
+| Risk factor | Exposure | Reported before |
+|---|---:|---|
+| USD rates, per bp | −69.92 | no |
+| EUR rates, per bp | −51.80 | no |
+| EUR/USD, per unit | 484,295.75 | no |
+
+The exposure was real and the stress line moved with it, which is what made it easy to miss:
+nothing was wrong, something was merely absent. An engine that computes risk it does not
+print is indistinguishable, to a reader, from one that cannot compute it.
+
+**The fix.** `dv01` and `fxDelta` on `SensitivityCalculator`, both built on the existing
+shock-and-revalue mechanism — three short methods, no new machinery, which is the argument
+for `MarketShock` making its own case. `MarketShock.scaleFxRate` was added alongside them:
+the shock family had a single-key form for spot, volatility and rates but only
+`scaleAllFxRates` for FX, so one currency could not be moved on its own.
+
+Worth noting what fell out for free: the USD DV01 of −69.92 includes the options' rho. The
+bond contributes −112, the forward's USD leg +52, and the two option legs −10 between them.
+There is no rho formula anywhere in the codebase.
+
+### C-3 · A bond's dirty price was printed as though it were clean · fixed
+
+The report showed `998.9954` under the same **UNIT VALUE** heading as a share price and an
+option premium. For a bond that number is the present value of everything still owed — the
+*dirty* price — and bond markets quote clean. `Bond.accruedInterest` had existed since M2,
+with four tests and no production caller.
+
+**The fix.** An `AccruingInterest` capability interface, and an accrued-interest block in the
+report:
+
+```
+ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
+  INSTRUMENT                CLEAN        ACCRUED          DIRTY
+  CORP-5Y                997.6254         1.3700       998.9954
+```
+
+The renderer filters on the capability rather than testing `instanceof Bond`, which would
+have been the first branch of the chain this design exists to avoid. One implementor today;
+the swap fixed leg is the second at M6.
 
 ---
 

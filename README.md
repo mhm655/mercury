@@ -14,8 +14,9 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M5 complete** — the engine values a mixed portfolio of equities, options, a bond and an FX
-forward, and computes its risk. CI green on every push.
+**M5 complete and audited** — the engine values a mixed portfolio of equities, options, a
+bond and an FX forward, and reports its equity, interest-rate and currency risk. CI green on
+every push.
 
 ```bash
 mvn -q -DskipTests package
@@ -25,32 +26,54 @@ java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.
 ```
 POSITIONS
   INSTRUMENT         QUANTITY     UNIT VALUE     MARKET VALUE  MODEL
+  --------------------------------------------------------------------------
   AAPL                   1000       195.5000        195500.00  spot
   MSFT                    250       412.2500        103062.50  spot
   AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
   AAPL-P-180                8      1068.7014          8549.61  black-scholes
   CORP-5Y                 250       998.9954        249748.84  discounted-cashflow
   FWD-EURUSD                1     -1675.6770         -1675.68  discounted-cashflow
+  --------------------------------------------------------------------------
   TOTAL                                             543475.02
 
-DELTA  (portfolio value change per unit move in spot)
-  AAPL                   486.8511
-  MSFT                   250.0000
+ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
+  INSTRUMENT                CLEAN        ACCRUED          DIRTY
+  CORP-5Y                997.6254         1.3700       998.9954
+
+RISK
+  DELTA  (value change per unit rise in spot)
+    AAPL                     486.8511
+    MSFT                     250.0000
+  FX DELTA  (value change per unit rise in the rate)
+    EUR/USD               484295.7480
+  DV01  (value change per +1bp on the discount rate)
+    USD                      -69.9245
+    EUR                      -51.7984
 
 STRESS  (equities -30%, volatility +50%, FX -10%)
   P&L impact                                       -104800.97
 ```
 
-Four instrument types, three models, no `instanceof` anywhere in the dispatch. The covered
-call and protective put cut AAPL delta from 1000 to 487 — the hedge, visible in the numbers.
-The bond prices just below par because continuous discounting at 4.5% slightly exceeds a
-semi-annual 4.5% coupon, and the forward is negative because its 1.09 strike is worse than
-the 1.0865 fair rate implied by covered interest parity.
+Four instrument types, three models, three kinds of risk, and no `instanceof` anywhere in the
+dispatch. Every number is explainable, which is the check that the pieces agree with each
+other: the covered call and protective put cut AAPL delta from 1000 to 487; the bond prices
+just below par because continuous discounting at 4.5% slightly exceeds a semi-annual 4.5%
+coupon; the forward is negative because its 1.09 strike is worse than the 1.0865 fair rate
+implied by covered interest parity; and its FX delta of 484,296 is exactly the euro notional
+discounted on the euro curve.
 
-The audits found four real defects and one weak test suite — including a bond that reported
-itself matured while still owing its principal, and property tests that looked thorough while
-only ever building a book of fourteen orders. Both are written up in
-[KNOWN_GAPS.md](docs/KNOWN_GAPS.md), along with what was deliberately left undone.
+The most interesting figure is the USD DV01. It is the bond's −112, the forward's USD leg at
++52, **and −10 of option rho** — picked up with no rho formula anywhere in the codebase,
+because sensitivities are computed by shocking the market and revaluing rather than by
+per-instrument formulas.
+
+Three audits have found five real defects and one weak test suite: a bond that reported itself
+matured while still owing its principal, a market-data shock that could build a market the
+builder would have refused, property tests that looked thorough while only ever building a
+book of fourteen orders. The most instructive one was not a defect at all — the engine had
+been measuring interest-rate and currency risk since M5 and printing none of it. All are
+written up in [KNOWN_GAPS.md](docs/KNOWN_GAPS.md), along with what was deliberately left
+undone.
 
 *(This section used to lead with a test count. It was removed on purpose: the audit showed
 the number was uninformative — the eight property tests it was flattering covered almost none
@@ -69,6 +92,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M3 — Order book + first JMH benchmarks | ✅ complete |
 | M4 — Vertical slice: value a portfolio end-to-end | ✅ complete |
 | M5 — Discounted cashflows: bonds and FX forwards | ✅ complete |
+| M5 audit — invariants on market data, DV01 / FX delta, clean vs dirty | ✅ complete |
 | M5b — Curve construction (bootstrapping) | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
@@ -124,8 +148,14 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   it was dropped and [the entry struck through](docs/DESIGN_PROPOSAL.md#6-design-patterns--used-and-deliberately-not-used)
   rather than quietly deleted. A build check also fails on any public method nobody calls.
 - **One mechanism, three features — the first two working.** Immutable snapshots plus
-  composable shocks already drive both stress scenarios and bump-and-revalue delta; Monte
-  Carlo reuses the same abstraction at M12.
+  composable shocks already drive both stress scenarios and bump-and-revalue risk; Monte
+  Carlo reuses the same abstraction at M12. Equity delta, DV01 and FX delta are the same two
+  lines with a different shock, which is why adding rate and currency risk cost three short
+  methods rather than a risk module.
+- **Invariants on the type that owns them.** Each `MarketDataKey` case states what values it
+  can take, so the builder and `withShock` cannot disagree about what a legal market is. They
+  did: a shock could impose a negative spot price that the builder rejected, and it surfaced
+  four layers down as a NaN blaming the pricing model for bad data.
 
 ## Planned, not yet built
 

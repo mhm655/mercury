@@ -411,6 +411,22 @@ That single mechanism powers three headline features with no additional machiner
    `ConvertibleBond` and it has Delta, Gamma, Vega and DV01 for free.
 3. **Monte Carlo** — each simulated path is just another shocked snapshot.
 
+> **Confirmed at the M5 audit, with numbers.** Delta, DV01 and FX delta are now three short
+> methods on `SensitivityCalculator`, all of them the same two lines — shock, revalue,
+> difference — with only the shock differing. Adding rate and currency risk to a portfolio
+> that had only equity risk cost no new machinery at all.
+>
+> The clearest evidence that the claim above is not just a claim: the demo book's USD DV01 of
+> −69.92 per basis point already **includes the two option legs' rho** (−10 of the total),
+> alongside the bond's −112 and the FX forward's USD leg at +52. There is no rho formula in
+> the codebase. Nothing was written to make options interest-rate-sensitive; they are, and the
+> bump found it.
+>
+> The audit also found the other half of this, which the design document did not anticipate:
+> the engine measured all of that risk from M5 onward and **printed none of it**. Being able
+> to compute a risk number is not the same as reporting one, and the second failure is much
+> harder to see than the first. Recorded as C-2 in `KNOWN_GAPS.md`.
+
 Where a closed form exists, a pricer may optionally implement `AnalyticGreeks`
 (Black-Scholes has exact Delta/Gamma/Vega). The risk engine prefers analytic when
 available and falls back to numerical otherwise — and a test asserts the two agree within
@@ -714,7 +730,7 @@ scaffolding.
 | M2 | Instruments | 5 instruments on capability interfaces — ✅ **done** |
 | M3 | Order book | CLOB, price-time priority, O(1) cancel, JMH benchmarks — ✅ **done** |
 | **M4** | **Vertical slice: value a portfolio** | Minimal `MarketDataSnapshot`, `MarketShock`, `PricingModel` registry, **two** pricers (stock + Black-Scholes), minimal `Position`/`Portfolio`, market value, **Delta by bump-and-revalue**, and a CLI that prints it. **First runnable end-to-end capability.** |
-| M5 | Broaden pricing | DCF template, bond and FX-forward pricers, flat discounting; reference-value tests against published figures |
+| M5 | Broaden pricing | Generic DCF model (not a template — see §6), bond and FX-forward pricers, flat discounting; reference-value tests against published figures — ✅ **done**, audited, with DV01, FX delta and clean/dirty reporting added in response |
 | M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — *off the critical path* |
 | M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments |
 | M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure |

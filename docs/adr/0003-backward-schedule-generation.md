@@ -47,6 +47,20 @@ one. If adjustments chained, a single weekend early in a thirty-year swap would 
 subsequent date, and the schedule would wander away from the intended day of the month.
 Asserted in `adjustmentDoesNotAccumulate`.
 
+**Accrual periods are adjusted, not only payment dates.** A period's accrual start and end
+are the rolled business days, so a bond whose term sheet says it is issued on Saturday
+15 June 2024 begins accruing on Monday the 17th. The alternative convention — unadjusted
+accrual periods with adjusted payment dates — is equally real and used by many bond markets,
+and the two give *different coupons*: the demo bond's accrued interest on 28 June 2024 is
+11/360 of a year under the adjusted convention and 13/360 under the unadjusted one, a
+difference of 0.25 per 1,000 of face.
+
+Adjusted was chosen because it keeps one meaning for a period: the days interest is earned
+are the days between the dates the period actually spans. It is recorded here because it is
+invisible in the code — `ScheduleGenerator` simply rolls all three dates — and a convention
+that changes a cashflow's size should never be inferable only by reading the generator. A
+future instrument needing unadjusted accrual takes a flag on the generator, not a redesign.
+
 ## Consequences
 
 **Good.** Coupon dates line up with maturity, principal and final coupon settle together,
