@@ -7,9 +7,15 @@ import static org.assertj.core.api.Assertions.within;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.PortfolioId;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
+import com.mercury.core.time.DayCountConvention;
+import com.mercury.core.time.Frequency;
+import com.mercury.core.time.HolidayCalendar;
+import com.mercury.instrument.Bond;
 import com.mercury.instrument.EuropeanOption;
+import com.mercury.instrument.FxForward;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
@@ -18,6 +24,7 @@ import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuationService;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
+import com.mercury.pricing.model.DiscountedCashflowModel;
 import com.mercury.pricing.model.NormalDistribution;
 import com.mercury.pricing.model.SpotPriceModel;
 import java.time.LocalDate;
@@ -276,6 +283,161 @@ class SensitivityCalculatorTest {
                     portfolio, MarketShock.scaleAllVolatilities(1.50), market(), VALUATION);
 
             assertThat(change.isPositive()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("rate and FX sensitivities")
+    class RatesAndFx {
+
+        // 2024 is a leap year, so a calendar year from the valuation date is 366 days. The
+        // year fraction is therefore computed rather than assumed to be 1.0 - hard-coding it
+        // would make these reference values quietly wrong by a quarter of a percent.
+        private static final LocalDate MATURITY = LocalDate.of(2025, 1, 15);
+        private static final double YEARS =
+                DayCountConvention.ACT_365F.yearFraction(VALUATION, MATURITY);
+        private static final CurrencyPair EURUSD = CurrencyPair.parse("EUR/USD");
+
+        private static final Bond ZERO_COUPON = Bond.builder()
+                .id("ZCB")
+                .faceValue(Money.of("1000000", Currency.USD))
+                .couponRate("0")
+                .couponFrequency(Frequency.ANNUAL)
+                .calendar(HolidayCalendar.alwaysOpen())
+                .issueDate(VALUATION)
+                .maturityDate(MATURITY)
+                .build();
+
+        private static final FxForward FORWARD =
+                FxForward.buy("FWD", EURUSD, "1000000", "1.08", MATURITY);
+
+        /** A second forward on the same pair, struck somewhere else entirely. */
+        private static final FxForward OFF_MARKET_FORWARD =
+                FxForward.buy("FWD-OFF", EURUSD, "1000000", "1.50", MATURITY);
+
+        private static SensitivityCalculator rateCalculator() {
+            return new SensitivityCalculator(new PortfolioValuationService(
+                    PricingService.builder()
+                            .register(new SpotPriceModel())
+                            .register(new DiscountedCashflowModel<>(Bond.class))
+                            .register(new DiscountedCashflowModel<>(FxForward.class))
+                            .build(),
+                    InstrumentCatalog.of(AAPL_STOCK, ZERO_COUPON, FORWARD, OFF_MARKET_FORWARD)));
+        }
+
+        /** USD 5%, EUR 3%, EUR/USD 1.10. */
+        private static MarketDataSnapshot rateMarket() {
+            return MarketDataSnapshot.builder()
+                    .spot(AAPL, 200.0)
+                    .discountRate(Currency.USD, 0.05)
+                    .discountRate(Currency.EUR, 0.03)
+                    .fxRate(EURUSD, 1.10)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("a zero-coupon bond's DV01 is minus its maturity times its value")
+        void zeroCouponDv01() {
+            // PV = F e^-rT, so dPV/dr = -T x PV, and one basis point of that is -T x PV x 1e-4.
+            // Known in closed form, which is the point: the numerical machinery is checked
+            // against arithmetic that owes it nothing.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(ZERO_COUPON.id(), 1).build();
+
+            double presentValue = 1_000_000.0 * Math.exp(-0.05 * YEARS);
+            double expected = -YEARS * presentValue * 1e-4;
+
+            assertThat(rateCalculator().dv01(portfolio, Currency.USD, rateMarket(), VALUATION))
+                    .isCloseTo(expected, within(1e-6));
+        }
+
+        @Test
+        @DisplayName("an equity book has no interest-rate sensitivity")
+        void equityHasNoDv01() {
+            // The negative control. A risk number that is non-zero for everything is not
+            // measuring anything.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(AAPL, 1_000).build();
+
+            assertThat(rateCalculator().dv01(portfolio, Currency.USD, rateMarket(), VALUATION))
+                    .isCloseTo(0.0, within(1e-9));
+        }
+
+        @Test
+        @DisplayName("an unknown currency fails rather than reporting no risk")
+        void unknownCurrencyFails() {
+            // Without the read-first guard this returns exactly 0.0, because neither shocked
+            // market differs from the base - a missing curve would look like a hedged book.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(ZERO_COUPON.id(), 1).build();
+
+            assertThatThrownBy(() -> rateCalculator()
+                    .dv01(portfolio, Currency.JPY, rateMarket(), VALUATION))
+                    .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class);
+        }
+
+        @Test
+        @DisplayName("an FX forward's delta is its discounted base notional")
+        void forwardFxDelta() {
+            // Value in USD = N e^-r_eur T x S - K e^-r_usd T, and only the first term contains
+            // S. So d/dS is N e^-r_eur T: the euro amount the book is exposed to, discounted.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(FORWARD.id(), 1).build();
+
+            double expected = 1_000_000.0 * Math.exp(-0.03 * YEARS);
+
+            assertThat(rateCalculator().fxDelta(portfolio, EURUSD, rateMarket(), VALUATION))
+                    .isCloseTo(expected, within(0.01));
+        }
+
+        @Test
+        @DisplayName("FX delta does not depend on the rate the forward was struck at")
+        void fxDeltaIgnoresTheStrike() {
+            // Falls out of the algebra above - the strike sits in a term with no S in it - and
+            // is worth asserting because it is the kind of independence a numerical method can
+            // lose without any test noticing.
+            SensitivityCalculator calculator = rateCalculator();
+            MarketDataSnapshot market = rateMarket();
+
+            double atMarket = calculator.fxDelta(Portfolio.builder(BOOK, Currency.USD)
+                    .position(FORWARD.id(), 1).build(), EURUSD, market, VALUATION);
+            double offMarket = calculator.fxDelta(Portfolio.builder(BOOK, Currency.USD)
+                    .position(OFF_MARKET_FORWARD.id(), 1).build(), EURUSD, market, VALUATION);
+
+            assertThat(offMarket).isCloseTo(atMarket, within(0.01));
+        }
+
+        @Test
+        @DisplayName("FX delta is the same whichever direction the snapshot stores")
+        void fxDeltaIsDirectionAgnostic() {
+            // A snapshot holds EUR/USD or USD/EUR, never both. Matching only the exact key
+            // would have made this case report a delta of exactly zero for a book fully
+            // exposed to the euro, which is the worst answer a risk number can give.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(FORWARD.id(), 1).build();
+
+            MarketDataSnapshot inverted = MarketDataSnapshot.builder()
+                    .spot(AAPL, 200.0)
+                    .discountRate(Currency.USD, 0.05)
+                    .discountRate(Currency.EUR, 0.03)
+                    .fxRate(EURUSD.inverse(), 1.0 / 1.10)
+                    .build();
+
+            SensitivityCalculator calculator = rateCalculator();
+
+            assertThat(calculator.fxDelta(portfolio, EURUSD, inverted, VALUATION))
+                    .isCloseTo(calculator.fxDelta(portfolio, EURUSD, rateMarket(), VALUATION),
+                            within(0.01));
+        }
+
+        @Test
+        @DisplayName("a domestic book has no FX delta")
+        void domesticBookHasNoFxDelta() {
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(AAPL, 1_000).build();
+
+            assertThat(rateCalculator().fxDelta(portfolio, EURUSD, rateMarket(), VALUATION))
+                    .isCloseTo(0.0, within(1e-9));
         }
     }
 }

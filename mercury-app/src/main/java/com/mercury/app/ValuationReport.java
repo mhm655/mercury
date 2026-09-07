@@ -1,7 +1,10 @@
 package com.mercury.app;
 
 import com.mercury.core.id.InstrumentId;
+import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
+import com.mercury.instrument.AccruingInterest;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
 import com.mercury.portfolio.Portfolio;
@@ -33,6 +36,17 @@ import java.util.Objects;
  *       produced in CI. {@code %n} is the easy one to miss - it looks like a formatting detail
  *       rather than a platform dependency.</li>
  * </ul>
+ *
+ * <h2>Reporting the risk the book actually carries</h2>
+ * The RISK section shows spot delta, FX delta and DV01 because after M5 the demo portfolio
+ * held a bond and an FX forward, and a report showing equity delta alone described about a
+ * third of it. The exposure was already in the engine - the stress line moved with it - so
+ * the gap was in what was printed, which is the harder kind to notice.
+ *
+ * <p>The same applies to the accrued-interest block. A bond's unit value here is its full
+ * present value, which is the dirty price, and bond markets quote clean. Printing 998.9954
+ * under the same heading as a share price, with nothing to say the two are different kinds of
+ * number, invites exactly the wrong reading.
  */
 public final class ValuationReport {
 
@@ -45,7 +59,7 @@ public final class ValuationReport {
     /** The whole report: positions, total, deltas, and a stress scenario. */
     public static String render(Portfolio portfolio, PortfolioValuation valuation,
                                 MarketDataSnapshot market, SensitivityCalculator sensitivities,
-                                List<InstrumentId> riskFactors, LocalDate asOf) {
+                                RiskFactors riskFactors, LocalDate asOf) {
         Objects.requireNonNull(portfolio, "portfolio");
         Objects.requireNonNull(valuation, "valuation");
         Objects.requireNonNull(market, "market");
@@ -56,6 +70,7 @@ public final class ValuationReport {
         StringBuilder out = new StringBuilder(2048);
         header(out, portfolio, asOf);
         positions(out, valuation);
+        accruals(out, valuation, asOf);
         risk(out, portfolio, market, sensitivities, riskFactors, asOf);
         stress(out, portfolio, market, sensitivities, asOf);
         return out.toString();
@@ -89,13 +104,68 @@ public final class ValuationReport {
         line(out, "");
     }
 
+    /**
+     * Clean, accrued and dirty for every position that accrues interest.
+     *
+     * <p>The filter asks for a capability rather than a type. An {@code instanceof Bond} here
+     * would work today and would be the first branch of the chain this design exists to avoid.
+     * {@link AccruingInterest} is the same question asked so that a second accruing instrument
+     * needs no change to this method.
+     *
+     * <p>Clean is derived as dirty minus the <em>settled</em> accrued figure - the rounded
+     * {@link Money} amount, not the unrounded fraction behind it - so that the three printed
+     * columns add up exactly. A report whose own row does not reconcile is worse than one
+     * column fewer, and accrued interest really does change hands in whole cents.
+     */
+    private static void accruals(StringBuilder out, PortfolioValuation valuation, LocalDate asOf) {
+        List<PortfolioValuation.PositionValuation> accruing = valuation.lines().stream()
+                .filter(position -> position.instrument() instanceof AccruingInterest)
+                .toList();
+        if (accruing.isEmpty()) {
+            return;
+        }
+
+        line(out, "ACCRUED INTEREST  (unit values above are dirty: clean + accrued)");
+        line(out, "  %-16s %14s %14s %14s", "INSTRUMENT", "CLEAN", "ACCRUED", "DIRTY");
+        for (PortfolioValuation.PositionValuation position : accruing) {
+            AccruingInterest accruer = (AccruingInterest) position.instrument();
+            double accrued = accruer.accruedInterest(asOf).amount().doubleValue();
+            double dirty = position.unitValue().value();
+            line(out, "  %-16s %14.4f %14.4f %14.4f",
+                    position.instrument().id(), dirty - accrued, accrued, dirty);
+        }
+        line(out, "");
+    }
+
+    /**
+     * Every risk factor the report was asked for, each measured the same way: shock, revalue,
+     * difference. Three kinds of risk, one mechanism, no per-instrument code.
+     */
     private static void risk(StringBuilder out, Portfolio portfolio, MarketDataSnapshot market,
-                             SensitivityCalculator sensitivities, List<InstrumentId> riskFactors,
+                             SensitivityCalculator sensitivities, RiskFactors riskFactors,
                              LocalDate asOf) {
-        line(out, "DELTA  (portfolio value change per unit move in spot)");
-        for (InstrumentId factor : riskFactors) {
-            line(out, "  %-16s %14.4f",
+        line(out, "RISK");
+
+        line(out, "  DELTA  (value change per unit rise in spot)");
+        for (InstrumentId factor : riskFactors.spots()) {
+            line(out, "    %-16s %16.4f",
                     factor, sensitivities.delta(portfolio, factor, market, asOf));
+        }
+
+        if (!riskFactors.fxPairs().isEmpty()) {
+            line(out, "  FX DELTA  (value change per unit rise in the rate)");
+            for (CurrencyPair pair : riskFactors.fxPairs()) {
+                line(out, "    %-16s %16.4f",
+                        pair, sensitivities.fxDelta(portfolio, pair, market, asOf));
+            }
+        }
+
+        if (!riskFactors.rateCurrencies().isEmpty()) {
+            line(out, "  DV01  (value change per +1bp on the discount rate)");
+            for (Currency currency : riskFactors.rateCurrencies()) {
+                line(out, "    %-16s %16.4f",
+                        currency.code(), sensitivities.dv01(portfolio, currency, market, asOf));
+            }
         }
         line(out, "");
     }

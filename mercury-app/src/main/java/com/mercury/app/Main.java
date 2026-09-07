@@ -2,7 +2,6 @@ package com.mercury.app;
 
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuation;
-import java.util.List;
 
 /**
  * Runs the demo scenario and prints the report.
@@ -31,7 +30,7 @@ public final class Main {
                 valuation,
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),
-                List.of(DemoScenario.AAPL, DemoScenario.MSFT),
+                DemoScenario.riskFactors(),
                 DemoScenario.VALUATION_DATE);
 
         // print, not println: the report already ends with a newline, and println would append

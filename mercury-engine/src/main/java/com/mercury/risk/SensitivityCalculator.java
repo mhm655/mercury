@@ -1,6 +1,9 @@
 package com.mercury.risk;
 
 import com.mercury.core.id.InstrumentId;
+import com.mercury.core.money.BasisPoints;
+import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
@@ -44,6 +47,18 @@ import java.util.Objects;
  * default {@value #DEFAULT_RELATIVE_BUMP} sits in the flat region between those failures for
  * double-precision pricing. Second-order Greeks are far more delicate again - see
  * {@code DESIGN_PROPOSAL.md} section 5.3.1, which is why gamma is deliberately not here yet.
+ *
+ * <h2>Three risk factors, one mechanism</h2>
+ * Spot, rates and FX are computed by the same two lines - shock, revalue, difference - with
+ * only the shock differing. That is the whole argument for {@link MarketShock} as an
+ * abstraction, and it is why adding rate and FX sensitivities after M5 cost three short
+ * methods rather than a risk module.
+ *
+ * <p>They were added because the M5 audit found the demo portfolio carrying roughly 250,000
+ * of bond and 519,000 of euro exposure while the risk report showed equity delta and nothing
+ * else. The exposure was real, the stress number moved with it, and no line of output named
+ * it. An engine that computes risk it does not report is indistinguishable, to a reader, from
+ * one that cannot compute it.
  *
  * <p>Stateless and thread-safe.
  */
@@ -105,8 +120,78 @@ public final class SensitivityCalculator {
     }
 
     /**
+     * How much the portfolio's value changes for a one-basis-point rise in {@code currency}'s
+     * discount rate - the standard interest-rate sensitivity.
+     *
+     * <p>Signed from the holder's perspective, so a long bond gives a negative number: rates
+     * up, price down. Reported in the portfolio's reporting currency per basis point.
+     *
+     * <p>Estimated by a central difference over plus and minus one basis point, halved. A
+     * one-sided bump would be the more literal reading of "value change per 1bp", but costs
+     * an O(e) error where this costs O(e^2) for the same two revaluations.
+     *
+     * @throws com.mercury.marketdata.MarketDataSnapshot.MissingMarketDataException
+     *         if the market holds no discount rate for {@code currency}
+     */
+    public double dv01(Portfolio portfolio, Currency currency,
+                       MarketDataSnapshot market, LocalDate asOf) {
+        Objects.requireNonNull(portfolio, "portfolio");
+        Objects.requireNonNull(currency, "currency");
+        Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(asOf, "asOf");
+
+        // Read first, for the same reason delta does: an unknown currency must fail rather
+        // than return zero because neither shocked market differed from the base.
+        market.discountRate(currency);
+
+        double up = changeUnder(portfolio, MarketShock.bumpRate(currency, BasisPoints.ONE),
+                market, asOf);
+        double down = changeUnder(portfolio,
+                MarketShock.bumpRate(currency, BasisPoints.ONE.negated()), market, asOf);
+
+        return (up - down) / 2.0;
+    }
+
+    /**
+     * How much the portfolio's value changes for a one-unit rise in {@code pair}'s exchange
+     * rate - the FX analogue of {@link #delta}.
+     *
+     * <p>Per unit of the rate, not per percent, so that it means the same kind of thing as
+     * equity delta: just as a delta of 1,000 is a thousand shares, an EUR/USD delta of 484,296
+     * is the net euro amount the book is exposed to. Multiply by the rate move to get a P&amp;L.
+     *
+     * <p>Works whichever direction the snapshot stores the pair, because
+     * {@link MarketShock#scaleFxRate} handles that.
+     *
+     * @throws com.mercury.marketdata.MarketDataSnapshot.MissingMarketDataException
+     *         if the market holds neither direction of {@code pair}
+     */
+    public double fxDelta(Portfolio portfolio, CurrencyPair pair,
+                          MarketDataSnapshot market, LocalDate asOf) {
+        Objects.requireNonNull(portfolio, "portfolio");
+        Objects.requireNonNull(pair, "pair");
+        Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(asOf, "asOf");
+
+        double rate = market.fxRate(pair.base(), pair.quote());
+
+        double up = changeUnder(portfolio,
+                MarketShock.scaleFxRate(pair, 1.0 + relativeBump), market, asOf);
+        double down = changeUnder(portfolio,
+                MarketShock.scaleFxRate(pair, 1.0 - relativeBump), market, asOf);
+
+        return (up - down) / (2.0 * relativeBump * rate);
+    }
+
+    /**
      * The change in portfolio value under an arbitrary shock - the building block of stress
      * testing, exposed here because it is exactly what a scenario needs at M11.
+     *
+     * <p>Returns {@link Money} rather than a raw double because a scenario result is a P&amp;L
+     * figure someone reports, not a derivative someone divides by a bump. The sensitivities
+     * above deliberately do the opposite and stay in the model domain - rounding a numerator
+     * to the cent before dividing it by 0.0001 is what once produced a delta of exactly 50.0
+     * against an analytic 61.23.
      */
     public Money valueChangeUnder(Portfolio portfolio, MarketShock shock,
                                   MarketDataSnapshot market, LocalDate asOf) {
@@ -120,5 +205,14 @@ public final class SensitivityCalculator {
                            InstrumentId underlyingId, double factor, LocalDate asOf) {
         MarketDataSnapshot shocked = market.withShock(MarketShock.scaleSpot(underlyingId, factor));
         return valuationService.value(portfolio, shocked, asOf).modelTotal();
+    }
+
+    /** Unrounded value change under a shock. The model-domain twin of {@link #valueChangeUnder}. */
+    private double changeUnder(Portfolio portfolio, MarketShock shock,
+                               MarketDataSnapshot market, LocalDate asOf) {
+        double base = valuationService.value(portfolio, market, asOf).modelTotal();
+        double shocked = valuationService.value(portfolio, market.withShock(shock), asOf)
+                .modelTotal();
+        return shocked - base;
     }
 }

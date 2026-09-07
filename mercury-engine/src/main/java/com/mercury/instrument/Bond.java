@@ -35,7 +35,8 @@ import java.util.Objects;
  *
  * <p>Immutable and thread-safe. The schedule is generated once at construction.
  */
-public final class Bond implements FinancialInstrument, CashflowGenerating, Maturing {
+public final class Bond
+        implements FinancialInstrument, CashflowGenerating, Maturing, AccruingInterest {
 
     private final InstrumentId id;
     private final String name;
@@ -161,7 +162,12 @@ public final class Bond implements FinancialInstrument, CashflowGenerating, Matu
      *
      * <p>Bond prices are quoted "clean", excluding this; the buyer pays the clean price plus
      * accrued. Returns zero outside the bond's life.
+     *
+     * <p>The accrual runs from the period's <em>adjusted</em> start date. See ADR 0003: this
+     * bond accrues from the business day the period actually begins, not from the unadjusted
+     * date on the term sheet, and the two conventions give different coupons.
      */
+    @Override
     public Money accruedInterest(LocalDate valuationDate) {
         Objects.requireNonNull(valuationDate, "valuationDate");
         for (SchedulePeriod period : schedule.periods()) {

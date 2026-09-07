@@ -16,9 +16,19 @@ POSITIONS
   --------------------------------------------------------------------------
   TOTAL                                             543475.02
 
-DELTA  (portfolio value change per unit move in spot)
-  AAPL                   486.8511
-  MSFT                   250.0000
+ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
+  INSTRUMENT                CLEAN        ACCRUED          DIRTY
+  CORP-5Y                997.6254         1.3700       998.9954
+
+RISK
+  DELTA  (value change per unit rise in spot)
+    AAPL                     486.8511
+    MSFT                     250.0000
+  FX DELTA  (value change per unit rise in the rate)
+    EUR/USD               484295.7480
+  DV01  (value change per +1bp on the discount rate)
+    USD                      -69.9245
+    EUR                      -51.7984
 
 STRESS  (equities -30%, volatility +50%, FX -10%)
   P&L impact                                       -104800.97

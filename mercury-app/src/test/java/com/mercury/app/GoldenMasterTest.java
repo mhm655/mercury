@@ -1,6 +1,7 @@
 package com.mercury.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.offset;
 
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuation;
@@ -99,6 +100,53 @@ class GoldenMasterTest {
         assertThat(valuation.lines()).hasSize(6);
     }
 
+    @Test
+    @DisplayName("every kind of risk the book carries is reported, not only equity delta")
+    void reportsEveryRiskFactor() {
+        // The M5 audit found the demo holding a bond and an FX forward while the report showed
+        // spot delta alone - roughly 250,000 of rate exposure and 519,000 of euro exposure with
+        // no line of output naming either. The engine could measure both the whole time, which
+        // is what made it easy to miss. This test fails if a risk factor stops being reported.
+        String report = runScenario();
+
+        assertThat(report)
+                .contains("DELTA")
+                .contains("FX DELTA")
+                .contains("DV01")
+                .contains("EUR/USD")
+                .contains("USD")
+                .contains("EUR");
+    }
+
+    @Test
+    @DisplayName("the accrued-interest row adds up")
+    void accruedRowReconciles() {
+        // clean + accrued = dirty, on the printed figures rather than on the objects behind
+        // them - a rounding choice made one way in the model and another in the renderer would
+        // leave a row that does not add up, which is exactly what a reader checks first.
+        String[] cells = runScenario().lines()
+                .filter(line -> line.contains("CORP-5Y"))
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("no accrual row for CORP-5Y"))
+                .trim()
+                .split("\\s+");
+
+        double clean = Double.parseDouble(cells[1]);
+        double accrued = Double.parseDouble(cells[2]);
+        double dirty = Double.parseDouble(cells[3]);
+
+        assertThat(clean + accrued).isEqualTo(dirty, offset(1e-9));
+        assertThat(accrued).isGreaterThan(0.0);
+    }
+
+    @Test
+    @DisplayName("a bond's unit value is its dirty price, and the report says so")
+    void namesTheDirtyPrice() {
+        // Printing a bond's full present value under the same "UNIT VALUE" heading as a share
+        // price invites the reader to compare two numbers that mean different things.
+        assertThat(runScenario()).contains("dirty");
+    }
+
     private static PortfolioValuation valueDemoPortfolio() {
         return DemoScenario.valuationService().value(
                 DemoScenario.portfolio(), DemoScenario.market(), DemoScenario.VALUATION_DATE);
@@ -111,7 +159,7 @@ class GoldenMasterTest {
                 valueDemoPortfolio(),
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),
-                List.of(DemoScenario.AAPL, DemoScenario.MSFT),
+                DemoScenario.riskFactors(),
                 DemoScenario.VALUATION_DATE);
     }
 

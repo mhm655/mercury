@@ -143,4 +143,19 @@ public final class DemoScenario {
     public static SensitivityCalculator sensitivityCalculator() {
         return new SensitivityCalculator(valuationService());
     }
+
+    /**
+     * What the report measures risk against: the two equity underlyings, the euro exposure the
+     * forward creates, and both discount curves the book discounts on.
+     *
+     * <p>Listed rather than derived - see {@link RiskFactors}. Before M5 this was the two
+     * equities alone, which described the portfolio accurately at the time and stopped doing so
+     * the moment a bond and an FX forward were added to it.
+     */
+    public static RiskFactors riskFactors() {
+        return new RiskFactors(
+                List.of(AAPL, MSFT),
+                List.of(EURUSD),
+                List.of(Currency.USD, Currency.EUR));
+    }
 }
