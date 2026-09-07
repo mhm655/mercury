@@ -3,6 +3,7 @@ package com.mercury.marketdata;
 import com.mercury.core.MercuryException;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -77,6 +78,41 @@ public final class MarketDataSnapshot {
 
     public double discountRate(Currency currency) {
         return get(MarketDataKey.discountRate(currency));
+    }
+
+    /**
+     * Units of {@code to} per one unit of {@code from}.
+     *
+     * <p>Resolves in three steps, and the order matters:
+     *
+     * <ol>
+     *   <li>A currency against itself is 1, without consulting the snapshot. Requiring a
+     *       USD/USD entry would be noise, and {@link CurrencyPair} rejects such a pair
+     *       anyway.</li>
+     *   <li>A directly quoted pair is used as stored.</li>
+     *   <li>Otherwise the inverse pair is inverted. Storing only one direction means the two
+     *       can never drift apart - a snapshot holding EUR/USD at 1.10 and USD/EUR at 0.92
+     *       would imply a round-trip profit that exists only in the data.</li>
+     * </ol>
+     *
+     * @throws MissingMarketDataException if neither direction is present
+     */
+    public double fxRate(Currency from, Currency to) {
+        Objects.requireNonNull(from, "from");
+        Objects.requireNonNull(to, "to");
+        if (from == to) {
+            return 1.0;
+        }
+        MarketDataKey direct = MarketDataKey.fxRate(CurrencyPair.of(from, to));
+        if (values.containsKey(direct)) {
+            return values.get(direct);
+        }
+        MarketDataKey inverse = MarketDataKey.fxRate(CurrencyPair.of(to, from));
+        Double inverseRate = values.get(inverse);
+        if (inverseRate == null) {
+            throw new MissingMarketDataException(direct, values.keySet());
+        }
+        return 1.0 / inverseRate;
     }
 
     public boolean contains(MarketDataKey key) {
@@ -169,6 +205,16 @@ public final class MarketDataSnapshot {
          */
         public Builder discountRate(Currency currency, double rate) {
             return with(MarketDataKey.discountRate(currency), rate);
+        }
+
+        /** Units of the pair's quote currency per one unit of its base currency. */
+        public Builder fxRate(CurrencyPair pair, double rate) {
+            Objects.requireNonNull(pair, "pair");
+            if (rate <= 0) {
+                throw new IllegalArgumentException(
+                        "FX rate for " + pair + " must be positive, but was " + rate);
+            }
+            return with(MarketDataKey.fxRate(pair), rate);
         }
 
         public MarketDataSnapshot build() {

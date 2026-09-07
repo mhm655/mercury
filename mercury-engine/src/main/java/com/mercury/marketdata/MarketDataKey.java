@@ -2,6 +2,7 @@ package com.mercury.marketdata;
 
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import java.util.Objects;
 
 /**
@@ -27,7 +28,8 @@ import java.util.Objects;
  * They become {@link com.mercury.core.money.Money} only at the valuation boundary.
  */
 public sealed interface MarketDataKey
-        permits MarketDataKey.SpotPrice, MarketDataKey.Volatility, MarketDataKey.DiscountRate {
+        permits MarketDataKey.SpotPrice, MarketDataKey.Volatility,
+                MarketDataKey.DiscountRate, MarketDataKey.FxRate {
 
     /** Short label for diagnostics and report output. */
     String describe();
@@ -89,6 +91,27 @@ public sealed interface MarketDataKey
         }
     }
 
+    /**
+     * The spot exchange rate for a currency pair: units of {@code quote} per one unit of
+     * {@code base}, following the convention {@link CurrencyPair} encodes.
+     *
+     * <p>Only one direction is stored. EUR/USD at 1.10 fully determines USD/EUR at 1/1.10, so
+     * holding both would create a second place for them to disagree - and a snapshot whose
+     * EUR/USD and USD/EUR were not exact reciprocals would offer a risk-free arbitrage that
+     * exists only in the data. {@code MarketDataSnapshot.fxRate} inverts on read instead.
+     */
+    record FxRate(CurrencyPair pair) implements MarketDataKey {
+
+        public FxRate {
+            Objects.requireNonNull(pair, "pair");
+        }
+
+        @Override
+        public String describe() {
+            return "fx:" + pair;
+        }
+    }
+
     // ------------------------------------------------------------- factories
 
     static SpotPrice spot(InstrumentId instrumentId) {
@@ -101,5 +124,9 @@ public sealed interface MarketDataKey
 
     static DiscountRate discountRate(Currency currency) {
         return new DiscountRate(currency);
+    }
+
+    static FxRate fxRate(CurrencyPair pair) {
+        return new FxRate(pair);
     }
 }

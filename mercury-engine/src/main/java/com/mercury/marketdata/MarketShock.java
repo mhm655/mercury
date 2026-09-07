@@ -174,6 +174,19 @@ public interface MarketShock {
                 "rate:" + currency.code() + " " + amount);
     }
 
+    /**
+     * Multiplies every FX rate by {@code factor}.
+     *
+     * <p>Applied to the stored direction only, which is what keeps a shocked market
+     * arbitrage-free: shocking EUR/USD up automatically shocks USD/EUR down, because the
+     * inverse is derived on read rather than stored.
+     */
+    static MarketShock scaleAllFxRates(double factor) {
+        requireFinite(factor, "factor");
+        return leaf(key -> key instanceof MarketDataKey.FxRate, value -> value * factor,
+                "all fx x" + factor);
+    }
+
     /** Shifts every discount rate - a parallel shift across currencies. */
     static MarketShock bumpAllRates(BasisPoints amount) {
         Objects.requireNonNull(amount, "amount");
