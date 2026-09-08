@@ -14,9 +14,9 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M5 complete and audited** — the engine values a mixed portfolio of equities, options, a
-bond and an FX forward, and reports its equity, interest-rate and currency risk. CI green on
-every push.
+**M5b complete** — the engine values a mixed portfolio of equities, options, a bond and an FX
+forward against **discount curves bootstrapped from market quotes**, and reports its equity,
+interest-rate and currency risk. CI green on every push.
 
 ```bash
 mvn -q -DskipTests package
@@ -29,41 +29,53 @@ POSITIONS
   --------------------------------------------------------------------------
   AAPL                   1000       195.5000        195500.00  spot
   MSFT                    250       412.2500        103062.50  spot
-  AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
-  AAPL-P-180                8      1068.7014          8549.61  black-scholes
-  CORP-5Y                 250       998.9954        249748.84  discounted-cashflow
-  FWD-EURUSD                1     -1675.6770         -1675.68  discounted-cashflow
+  AAPL-C-200               -5      2382.5395        -11912.70  black-scholes
+  AAPL-P-180                8      1040.3824          8323.06  black-scholes
+  CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
+  FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
   --------------------------------------------------------------------------
-  TOTAL                                             543475.02
+  TOTAL                                             548475.45
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
-  CORP-5Y                997.6254         1.3700       998.9954
+  CORP-5Y               1010.9455         1.3700      1012.3155
+
+DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
+  CURRENCY          1Y        2Y        5Y       10Y
+  USD          4.9461%   4.5372%   4.1839%   4.2481%
+  EUR          3.2409%   3.0223%   2.9856%   2.9735%
 
 RISK
   DELTA  (value change per unit rise in spot)
-    AAPL                     486.8511
+    AAPL                     487.9941
     MSFT                     250.0000
   FX DELTA  (value change per unit rise in the rate)
-    EUR/USD               484295.7480
+    EUR/USD               484092.3573
   DV01  (value change per +1bp on the discount rate)
-    USD                      -69.9245
-    EUR                      -51.7984
+    USD                      -71.7505
+    EUR                      -51.7767
 
 STRESS  (equities -30%, volatility +50%, FX -10%)
-  P&L impact                                       -104800.97
+  P&L impact                                       -104888.50
 ```
 
 Four instrument types, three models, three kinds of risk, and no `instanceof` anywhere in the
-dispatch. Every number is explainable, which is the check that the pieces agree with each
-other: the covered call and protective put cut AAPL delta from 1000 to 487; the bond prices
-just below par because continuous discounting at 4.5% slightly exceeds a semi-annual 4.5%
-coupon; the forward is negative because its 1.09 strike is worse than the 1.0865 fair rate
-implied by covered interest parity; and its FX delta of 484,296 is exactly the euro notional
-discounted on the euro curve.
+dispatch. **Nothing in the demo states a five-year zero rate** — it states deposit and swap
+quotes, and the bootstrapper finds the curve that reprices all of them at once.
 
-The most interesting figure is the USD DV01. It is the bond's −112, the forward's USD leg at
-+52, **and −10 of option rho** — picked up with no rho formula anywhere in the codebase,
+Every number is explainable, which is the check that the pieces agree with each other. The
+covered call and protective put cut AAPL delta from 1000 to 488. The bond prices above par
+because five-year discounting at 4.18% is below its 4.5% coupon. The FX delta of 484,092 is
+exactly the euro notional discounted on the euro curve.
+
+The forward is the one worth reading twice. Under the flat 4.5% and 3.2% rates this scenario
+used before curves, the fair forward rate was 1.0865 and a contract struck at 1.09 was worth
+**−1,675.68**. On the real curves the one-year rate differential is 1.71% rather than 1.30%,
+which puts the fair rate at 1.0910 — so the same contract is now worth **+423.72**. A sign
+flip out of a curve shape, which is exactly the kind of thing a flat rate hides.
+
+The most interesting figure is the USD DV01. It is the bond's contribution, the forward's USD
+leg, **and about −10 of option rho** — picked up with no rho formula anywhere in the codebase,
 because sensitivities are computed by shocking the market and revaluing rather than by
 per-instrument formulas.
 
@@ -93,7 +105,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M4 — Vertical slice: value a portfolio end-to-end | ✅ complete |
 | M5 — Discounted cashflows: bonds and FX forwards | ✅ complete |
 | M5 audit — invariants on market data, DV01 / FX delta, clean vs dirty | ✅ complete |
-| M5b — Curve construction (bootstrapping) | next |
+| M5b — Curve construction (bootstrapping) | ✅ complete |
+| M6 — Swap pricing: floating-leg projection off a curve | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -156,14 +169,19 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   can take, so the builder and `withShock` cannot disagree about what a legal market is. They
   did: a shock could impose a negative spot price that the builder rejected, and it surfaced
   four layers down as a NaN blaming the pricing model for bad data.
+- **Curves fitted, not typed in.** Deposits and par swaps go in; a discount curve comes out,
+  solved pillar by pillar and validated by repricing its own inputs to par. Pillars are keyed
+  by settlement date rather than tenor, which sounds like pedantry and was not — a 2Y swap
+  whose nominal maturity fell on a Sunday paid one day into the next interpolation interval
+  and came out 1.5 basis points off par ([ADR 0006](docs/adr/0006-curve-pillars-are-dates.md)).
+  A flat rate is now the one-pillar case of the same type, which is how the whole pricing stack
+  moved onto curves without a single reference value changing.
 
 ## Planned, not yet built
 
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **Curve construction** (M5b). Bootstrapping a discount curve from quoted instruments by
-  iterative root-finding, validated by repricing its own inputs to par.
 - **Concurrency chosen per component** (M13). Single-writer matching engine;
   embarrassingly-parallel Monte Carlo over immutable snapshots with reproducible per-task
   RNG splitting.

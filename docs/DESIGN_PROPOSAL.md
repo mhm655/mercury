@@ -731,7 +731,7 @@ scaffolding.
 | M3 | Order book | CLOB, price-time priority, O(1) cancel, JMH benchmarks — ✅ **done** |
 | **M4** | **Vertical slice: value a portfolio** | Minimal `MarketDataSnapshot`, `MarketShock`, `PricingModel` registry, **two** pricers (stock + Black-Scholes), minimal `Position`/`Portfolio`, market value, **Delta by bump-and-revalue**, and a CLI that prints it. **First runnable end-to-end capability.** |
 | M5 | Broaden pricing | Generic DCF model (not a template — see §6), bond and FX-forward pricers, flat discounting; reference-value tests against published figures — ✅ **done**, audited, with DV01, FX delta and clean/dirty reporting added in response |
-| M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — *off the critical path* |
+| M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — ✅ **done**. Pillars are dates rather than tenors, for a reason that cost a defect to learn (ADR 0006); the whole pricing stack moved onto curves without a single reference value changing |
 | M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments |
 | M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure |
 | M8 | Trade lifecycle & execution | State machine, audit trail, both venues, `Counterparty`; closes gaps G-1 and G-2 |
