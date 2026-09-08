@@ -32,6 +32,12 @@ import java.util.Objects;
  * quantity, and quantises the line so badly that any sensitivity derived from it collapses.
  * Round once, and round last (ADR 0001).
  *
+ * <h2>The market and the valuation date must agree</h2>
+ * A snapshot carries the day it describes, and this refuses to value a portfolio against a
+ * market from another one. That check could not exist before M5b because the snapshot had no
+ * date; it matters more now that it does, because a curve is referenced to a date and reading
+ * it from the wrong one shifts every discount factor by that many days of interest.
+ *
  * <h2>Single currency, at M4</h2>
  * Every position must be in the portfolio's reporting currency. Converting is not hard, but
  * doing it properly means FX rates in the snapshot, a stated convention for which side of the
@@ -55,11 +61,15 @@ public final class PortfolioValuationService {
      * Values every position and sums them.
      *
      * @throws CurrencyNotSupportedException if a position is not in the reporting currency
+     * @throws MarketDateMismatchException if the market describes a different day
      */
     public PortfolioValuation value(Portfolio portfolio, MarketDataSnapshot market, LocalDate asOf) {
         Objects.requireNonNull(portfolio, "portfolio");
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(asOf, "asOf");
+        if (!market.valuationDate().equals(asOf)) {
+            throw new MarketDateMismatchException(market.valuationDate(), asOf);
+        }
 
         List<PortfolioValuation.PositionValuation> lines = new ArrayList<>(portfolio.size());
         Money total = Money.zero(portfolio.reportingCurrency());
@@ -101,6 +111,23 @@ public final class PortfolioValuationService {
 
         return new PortfolioValuation.PositionValuation(
                 instrument, position.quantity(), unitValue, marketValue);
+    }
+
+    /**
+     * Raised when the market and the valuation date disagree about which day it is.
+     *
+     * <p>Only checkable since M5b, when the snapshot began carrying its own date. Before that
+     * a market built for one day and used to value a portfolio on another produced a plausible
+     * number and no complaint - and with curves it would be worse than plausible, since every
+     * discount factor would be measured from the wrong day.
+     */
+    public static final class MarketDateMismatchException extends MercuryException {
+        MarketDateMismatchException(LocalDate marketDate, LocalDate asOf) {
+            super("The market snapshot is as of " + marketDate + " but the portfolio is being "
+                    + "valued on " + asOf + ". Curves are referenced to the market date, so "
+                    + "discounting would be measured from the wrong day - a small, invisible "
+                    + "and entirely wrong answer.");
+        }
     }
 
     /** Raised when a position's currency differs from the portfolio's reporting currency. */

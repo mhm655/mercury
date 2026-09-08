@@ -9,6 +9,12 @@ import com.mercury.core.money.Price;
 import com.mercury.core.time.Frequency;
 import com.mercury.core.time.HolidayCalendar;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.core.time.Tenor;
+import com.mercury.curve.CurveBootstrapper;
+import com.mercury.curve.CurveInstrument;
+import com.mercury.curve.DepositQuote;
+import com.mercury.curve.ParSwapQuote;
+import com.mercury.curve.YieldCurve;
 import com.mercury.instrument.Bond;
 import com.mercury.instrument.EuropeanOption;
 import com.mercury.instrument.FxForward;
@@ -92,16 +98,51 @@ public final class DemoScenario {
                 .build();
     }
 
-    /** A market with everything the pricers need, and nothing they do not. */
+    /**
+     * A market with everything the pricers need, and nothing they do not.
+     *
+     * <p>Both discount curves are <b>bootstrapped from quotes</b> rather than typed in. That
+     * is the M5b capability made visible: nobody in this file states a five-year zero rate,
+     * because nobody in a market ever does. What is quoted is deposits and swap rates, and the
+     * curve is whatever term structure reprices all of them at once.
+     */
     public static MarketDataSnapshot market() {
-        return MarketDataSnapshot.builder()
+        return MarketDataSnapshot.builder(VALUATION_DATE)
                 .spot(AAPL, 195.50)
                 .spot(MSFT, 412.25)
                 .volatility(AAPL, 0.28)
-                .discountRate(Currency.USD, 0.045)
-                .discountRate(Currency.EUR, 0.032)
+                .curve(Currency.USD, usdCurve())
+                .curve(Currency.EUR, eurCurve())
                 .fxRate(EURUSD, 1.0725)
                 .build();
+    }
+
+    /**
+     * The USD market in mid-2024: inverted at the front, recovering further out.
+     *
+     * <p>Deposits out to a year, par swaps beyond it, which is how the market actually quotes
+     * the two ends of a curve. The shape matters for the demo - short rates above long ones
+     * means the option, which expires in a year, discounts at nearly 5% while the five-year
+     * bond discounts nearer 4.2%. Under the flat 4.5% this scenario used before M5b, both were
+     * wrong in opposite directions.
+     */
+    private static YieldCurve usdCurve() {
+        return CurveBootstrapper.bootstrap(VALUATION_DATE, List.<CurveInstrument>of(
+                DepositQuote.of(Tenor.months(3), 0.0533),
+                DepositQuote.of(Tenor.months(6), 0.0524),
+                DepositQuote.of(Tenor.years(1), 0.0500),
+                ParSwapQuote.of(Tenor.years(2), 0.0460),
+                ParSwapQuote.of(Tenor.years(5), 0.0425),
+                ParSwapQuote.of(Tenor.years(10), 0.0430),
+                ParSwapQuote.of(Tenor.years(30), 0.0420)));
+    }
+
+    /** The euro curve, lower and flatter, which is what makes the forward points positive. */
+    private static YieldCurve eurCurve() {
+        return CurveBootstrapper.bootstrap(VALUATION_DATE, List.<CurveInstrument>of(
+                DepositQuote.of(Tenor.months(6), 0.0365),
+                ParSwapQuote.of(Tenor.years(2), 0.0305),
+                ParSwapQuote.of(Tenor.years(10), 0.0300)));
     }
 
     /**
@@ -156,6 +197,7 @@ public final class DemoScenario {
         return new RiskFactors(
                 List.of(AAPL, MSFT),
                 List.of(EURUSD),
-                List.of(Currency.USD, Currency.EUR));
+                List.of(Currency.USD, Currency.EUR),
+                List.of(Tenor.years(1), Tenor.years(2), Tenor.years(5), Tenor.years(10)));
     }
 }

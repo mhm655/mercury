@@ -43,7 +43,7 @@ class PortfolioValuationServiceTest {
     }
 
     private static MarketDataSnapshot market() {
-        return MarketDataSnapshot.builder()
+        return MarketDataSnapshot.builder(VALUATION)
                 .spot(AAPL, 200.0)
                 .spot(MSFT, 400.0)
                 .volatility(AAPL, 0.25)
@@ -190,7 +190,7 @@ class PortfolioValuationServiceTest {
                     InstrumentCatalog.of(AAPL_STOCK, european));
             Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
                     .position(InstrumentId.of("SAP"), 100).build();
-            MarketDataSnapshot withSap = MarketDataSnapshot.builder()
+            MarketDataSnapshot withSap = MarketDataSnapshot.builder(VALUATION)
                     .spot(InstrumentId.of("SAP"), 150.0).build();
 
             assertThatThrownBy(() -> withEuro.value(portfolio, withSap, VALUATION))

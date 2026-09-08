@@ -119,6 +119,29 @@ class GoldenMasterTest {
     }
 
     @Test
+    @DisplayName("the report shows curves that were fitted, not typed in")
+    void showsBootstrappedCurves() {
+        // Nothing in DemoScenario states a five-year zero rate. It states deposit and swap
+        // quotes and lets the bootstrapper find the curve that reprices them. This asserts the
+        // shape that produces - a USD front end above its long end, which is what mid-2024
+        // looked like - so a curve accidentally rebuilt flat would fail here rather than
+        // merely look dull.
+        String report = runScenario();
+        assertThat(report).contains("DISCOUNT CURVES");
+
+        String usd = report.lines()
+                .filter(line -> line.trim().startsWith("USD"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no USD curve row"));
+        String[] cells = usd.trim().split("\\s+");
+
+        double oneYear = Double.parseDouble(cells[1].replace("%", ""));
+        double fiveYear = Double.parseDouble(cells[3].replace("%", ""));
+
+        assertThat(oneYear).isGreaterThan(fiveYear);
+    }
+
+    @Test
     @DisplayName("the accrued-interest row adds up")
     void accruedRowReconciles() {
         // clean + accrued = dirty, on the printed figures rather than on the objects behind

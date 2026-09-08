@@ -4,6 +4,7 @@ import com.mercury.core.MercuryException;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
+import java.time.LocalDate;
 import java.util.Objects;
 
 /**
@@ -44,7 +45,7 @@ import java.util.Objects;
  */
 public sealed interface MarketDataKey
         permits MarketDataKey.SpotPrice, MarketDataKey.Volatility,
-                MarketDataKey.DiscountRate, MarketDataKey.FxRate {
+                MarketDataKey.ZeroRate, MarketDataKey.FxRate {
 
     /** Short label for diagnostics and report output. */
     String describe();
@@ -121,22 +122,37 @@ public sealed interface MarketDataKey
     }
 
     /**
-     * A flat continuously-compounded risk-free rate for a currency, as a decimal.
+     * One point on a currency's discount curve: the continuously-compounded zero rate out to
+     * {@code pillarDate}, as a decimal.
      *
-     * <p>Flat, not a curve. A real discount curve arrives at M5b with bootstrapping; until
-     * then every maturity discounts at the same rate. That is exactly the assumption
-     * Black-Scholes makes in its textbook form, so it costs nothing for this milestone's
-     * pricers and would be wrong for a swap - which is why swaps are not priced yet.
+     * <h2>One key per pillar, rather than one key per curve</h2>
+     * A curve could have been a single opaque value in the snapshot. Storing it pillar by
+     * pillar instead is what keeps {@link MarketShock} the only mechanism the engine needs for
+     * scenarios, Greeks and Monte Carlo: a parallel shift is a shock matching every pillar of
+     * a currency, and a key-rate bump is a shock matching one. Neither needs code that knows
+     * what a curve is.
+     *
+     * <p>Before M5b this was a single flat {@code DiscountRate} per currency, and every
+     * maturity discounted at the same rate. A flat curve is now just a curve with one pillar -
+     * the degenerate case of the same type rather than a separate path through the engine.
+     *
+     * <h2>Keyed by date, not tenor</h2>
+     * Tenors are how a rate is quoted; dates are where the money is. A pillar fitted to a 2Y
+     * par swap belongs on the date that swap actually settles, which is a business day and not
+     * necessarily the day two years from now - see {@code CurveInstrument} for the basis-point
+     * error that distinction caused. Keying by date means a bootstrapped curve round-trips
+     * through a snapshot exactly, instead of being re-resolved onto slightly different days.
      */
-    record DiscountRate(Currency currency) implements MarketDataKey {
+    record ZeroRate(Currency currency, LocalDate pillarDate) implements MarketDataKey {
 
-        public DiscountRate {
+        public ZeroRate {
             Objects.requireNonNull(currency, "currency");
+            Objects.requireNonNull(pillarDate, "pillarDate");
         }
 
         @Override
         public String describe() {
-            return "rate:" + currency.code();
+            return "zero:" + currency.code() + "@" + pillarDate;
         }
 
         /**
@@ -193,8 +209,8 @@ public sealed interface MarketDataKey
         return new Volatility(instrumentId);
     }
 
-    static DiscountRate discountRate(Currency currency) {
-        return new DiscountRate(currency);
+    static ZeroRate zeroRate(Currency currency, LocalDate pillarDate) {
+        return new ZeroRate(currency, pillarDate);
     }
 
     static FxRate fxRate(CurrencyPair pair) {

@@ -6,7 +6,16 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
+import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
+import com.mercury.core.time.Tenor;
+import com.mercury.curve.CurveBootstrapper;
+import com.mercury.curve.DepositQuote;
+import com.mercury.curve.Interpolation;
+import com.mercury.curve.ParSwapQuote;
+import com.mercury.curve.YieldCurve;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -14,12 +23,14 @@ import org.junit.jupiter.api.Test;
 
 class MarketDataSnapshotTest {
 
+    private static final LocalDate TODAY = LocalDate.of(2024, 6, 28);
+
     private static final InstrumentId AAPL = InstrumentId.of("AAPL");
     private static final InstrumentId MSFT = InstrumentId.of("MSFT");
     private static final double TOLERANCE = 1e-12;
 
     private static MarketDataSnapshot market() {
-        return MarketDataSnapshot.builder()
+        return MarketDataSnapshot.builder(TODAY)
                 .spot(AAPL, 200.0)
                 .spot(MSFT, 400.0)
                 .volatility(AAPL, 0.25)
@@ -38,7 +49,7 @@ class MarketDataSnapshotTest {
 
             assertThat(snapshot.spot(AAPL)).isCloseTo(200.0, within(TOLERANCE));
             assertThat(snapshot.volatility(AAPL)).isCloseTo(0.25, within(TOLERANCE));
-            assertThat(snapshot.discountRate(Currency.USD)).isCloseTo(0.05, within(TOLERANCE));
+            assertThat(snapshot.yieldCurve(Currency.USD).zeroRate(1.0)).isCloseTo(0.05, within(TOLERANCE));
             assertThat(snapshot.size()).isEqualTo(4);
         }
 
@@ -64,7 +75,7 @@ class MarketDataSnapshotTest {
         @Test
         @DisplayName("an empty snapshot reports having nothing")
         void emptySnapshot() {
-            assertThatThrownBy(() -> MarketDataSnapshot.empty().spot(AAPL))
+            assertThatThrownBy(() -> MarketDataSnapshot.empty(TODAY).spot(AAPL))
                     .hasMessageContaining("holds: nothing");
         }
 
@@ -87,7 +98,7 @@ class MarketDataSnapshotTest {
         @Test
         @DisplayName("rejects a non-positive spot price")
         void rejectsNonPositiveSpot() {
-            assertThatThrownBy(() -> MarketDataSnapshot.builder().spot(AAPL, 0.0))
+            assertThatThrownBy(() -> MarketDataSnapshot.builder(TODAY).spot(AAPL, 0.0))
                     .isInstanceOf(MarketDataKey.InvalidMarketDataException.class)
                     .hasMessageContaining("spot:AAPL")
                     .hasMessageContaining("must be positive");
@@ -96,14 +107,14 @@ class MarketDataSnapshotTest {
         @Test
         @DisplayName("rejects negative volatility")
         void rejectsNegativeVolatility() {
-            assertThatThrownBy(() -> MarketDataSnapshot.builder().volatility(AAPL, -0.1))
+            assertThatThrownBy(() -> MarketDataSnapshot.builder(TODAY).volatility(AAPL, -0.1))
                     .isInstanceOf(MarketDataKey.InvalidMarketDataException.class);
         }
 
         @Test
         @DisplayName("rejects NaN and infinity")
         void rejectsNonFinite() {
-            assertThatThrownBy(() -> MarketDataSnapshot.builder()
+            assertThatThrownBy(() -> MarketDataSnapshot.builder(TODAY)
                     .with(MarketDataKey.spot(AAPL), Double.NaN))
                     .isInstanceOf(MarketDataKey.InvalidMarketDataException.class)
                     .hasMessageContaining("finite");
@@ -127,7 +138,7 @@ class MarketDataSnapshotTest {
         void oneRulePerKeyNotPerPath() {
             // Asserting the mechanism, not just the outcome: both messages come from the key,
             // so they cannot drift apart the way a builder-side copy of the rule could.
-            String fromBuilder = catchMessage(() -> MarketDataSnapshot.builder().spot(AAPL, -1.0));
+            String fromBuilder = catchMessage(() -> MarketDataSnapshot.builder(TODAY).spot(AAPL, -1.0));
             String fromShock = catchMessage(
                     () -> market().withShock(MarketShock.scaleSpot(AAPL, 1.0).and(negate())));
 
@@ -164,10 +175,10 @@ class MarketDataSnapshotTest {
         void permitsNegativeRates() {
             // EUR and JPY policy rates have been below zero. Rejecting them would encode a
             // market condition as a validation rule.
-            MarketDataSnapshot snapshot = MarketDataSnapshot.builder()
+            MarketDataSnapshot snapshot = MarketDataSnapshot.builder(TODAY)
                     .discountRate(Currency.EUR, -0.005).build();
 
-            assertThat(snapshot.discountRate(Currency.EUR)).isCloseTo(-0.005, within(TOLERANCE));
+            assertThat(snapshot.yieldCurve(Currency.EUR).zeroRate(1.0)).isCloseTo(-0.005, within(TOLERANCE));
         }
     }
 
@@ -197,7 +208,7 @@ class MarketDataSnapshotTest {
             assertThat(shocked.spot(AAPL)).isCloseTo(202.0, within(TOLERANCE));
             assertThat(shocked.spot(MSFT)).isCloseTo(400.0, within(TOLERANCE));
             assertThat(shocked.volatility(AAPL)).isCloseTo(0.25, within(TOLERANCE));
-            assertThat(shocked.discountRate(Currency.USD)).isCloseTo(0.05, within(TOLERANCE));
+            assertThat(shocked.yieldCurve(Currency.USD).zeroRate(1.0)).isCloseTo(0.05, within(TOLERANCE));
         }
 
         @Test
@@ -206,7 +217,7 @@ class MarketDataSnapshotTest {
             MarketDataSnapshot shocked =
                     market().withShock(MarketShock.bumpRate(Currency.USD, BasisPoints.of(150)));
 
-            assertThat(shocked.discountRate(Currency.USD)).isCloseTo(0.065, within(TOLERANCE));
+            assertThat(shocked.yieldCurve(Currency.USD).zeroRate(1.0)).isCloseTo(0.065, within(TOLERANCE));
         }
 
         @Test
@@ -245,7 +256,7 @@ class MarketDataSnapshotTest {
             assertThat(shocked.spot(AAPL)).isCloseTo(140.0, within(TOLERANCE));
             assertThat(shocked.spot(MSFT)).isCloseTo(280.0, within(TOLERANCE));
             assertThat(shocked.volatility(AAPL)).isCloseTo(0.375, within(TOLERANCE));
-            assertThat(shocked.discountRate(Currency.USD)).isCloseTo(0.065, within(TOLERANCE));
+            assertThat(shocked.yieldCurve(Currency.USD).zeroRate(1.0)).isCloseTo(0.065, within(TOLERANCE));
         }
 
         @Test
@@ -261,7 +272,7 @@ class MarketDataSnapshotTest {
 
             assertThat(shocked.spot(AAPL)).isCloseTo(400.0, within(TOLERANCE));
             assertThat(shocked.spot(MSFT)).isCloseTo(200.0, within(TOLERANCE));
-            assertThat(shocked.discountRate(Currency.USD)).isCloseTo(0.06, within(TOLERANCE));
+            assertThat(shocked.yieldCurve(Currency.USD).zeroRate(1.0)).isCloseTo(0.06, within(TOLERANCE));
         }
 
         @Test
@@ -287,6 +298,120 @@ class MarketDataSnapshotTest {
         void emptyCompositeIsIdentity() {
             assertThat(market().withShock(MarketShock.composite(List.of())))
                     .isEqualTo(market());
+        }
+    }
+
+    @Nested
+    @DisplayName("discount curves")
+    class Curves {
+
+        private static YieldCurve bootstrapped() {
+            return CurveBootstrapper.bootstrap(TODAY, List.of(
+                    DepositQuote.of(Tenor.months(6), 0.0525),
+                    ParSwapQuote.of(Tenor.years(2), 0.0460),
+                    ParSwapQuote.of(Tenor.years(10), 0.0430)));
+        }
+
+        @Test
+        @DisplayName("a bootstrapped curve round-trips through a snapshot unchanged")
+        void curveRoundTrips() {
+            // The reason market data is keyed by pillar date rather than by tenor. A curve
+            // fitted to instruments has its pillars on the dates those instruments settle;
+            // storing it by tenor and resolving the tenors again would land some of them on
+            // different days, and the curve read back would no longer reprice its own quotes.
+            YieldCurve original = bootstrapped();
+
+            YieldCurve readBack = MarketDataSnapshot.builder(TODAY)
+                    .curve(Currency.USD, original)
+                    .build()
+                    .yieldCurve(Currency.USD);
+
+            assertThat(readBack.pillars()).isEqualTo(original.pillars());
+            assertThat(readBack.zeroRate(7.0)).isCloseTo(original.zeroRate(7.0), within(1e-15));
+        }
+
+        @Test
+        @DisplayName("a flat rate is a one-pillar curve that discounts exactly as before")
+        void flatRateIsACurve() {
+            // The compatibility that let the whole pricing stack move onto curves without a
+            // single reference value changing: builder.discountRate is sugar for one pillar,
+            // and one pillar extrapolates flat, so the discount factor is still exp(-rt).
+            YieldCurve curve = MarketDataSnapshot.builder(TODAY)
+                    .discountRate(Currency.USD, 0.045)
+                    .build()
+                    .yieldCurve(Currency.USD);
+
+            assertThat(curve.size()).isEqualTo(1);
+            assertThat(curve.isFlat()).isTrue();
+            assertThat(curve.discountFactor(4.96))
+                    .isCloseTo(Math.exp(-0.045 * 4.96), within(1e-15));
+        }
+
+        @Test
+        @DisplayName("the snapshot chooses how its curves interpolate")
+        void interpolationIsASnapshotChoice() {
+            YieldCurve curve = bootstrapped();
+
+            YieldCurve flatForward = MarketDataSnapshot.builder(TODAY)
+                    .curveInterpolation(Interpolation.LOG_LINEAR_DISCOUNT)
+                    .curve(Currency.USD, curve)
+                    .build()
+                    .yieldCurve(Currency.USD);
+            YieldCurve linearZero = MarketDataSnapshot.builder(TODAY)
+                    .curveInterpolation(Interpolation.LINEAR_ZERO)
+                    .curve(Currency.USD, curve)
+                    .build()
+                    .yieldCurve(Currency.USD);
+
+            assertThat(linearZero.zeroRate(6.0))
+                    .isNotCloseTo(flatForward.zeroRate(6.0), within(1e-9));
+        }
+
+        @Test
+        @DisplayName("shocking a currency shifts every pillar of its curve and no other")
+        void parallelShiftIsJustAShock() {
+            // Where the design pays off. DV01 needs a parallel curve shift, and a parallel
+            // curve shift is the shock mechanism that already moved a spot price - because the
+            // curve lives in the snapshot as individual keyed pillars rather than as one
+            // opaque value that would have needed machinery of its own.
+            MarketDataSnapshot base = MarketDataSnapshot.builder(TODAY)
+                    .curve(Currency.USD, bootstrapped())
+                    .discountRate(Currency.EUR, 0.03)
+                    .build();
+
+            MarketDataSnapshot shocked = base.withShock(
+                    MarketShock.bumpRate(Currency.USD, BasisPoints.of(10)));
+
+            YieldCurve before = base.yieldCurve(Currency.USD);
+            YieldCurve after = shocked.yieldCurve(Currency.USD);
+            for (double t : new double[] {1.0, 3.0, 9.0}) {
+                assertThat(after.zeroRate(t)).isCloseTo(before.zeroRate(t) + 0.001, within(1e-12));
+            }
+            assertThat(shocked.yieldCurve(Currency.EUR).zeroRate(1.0))
+                    .isCloseTo(0.03, within(TOLERANCE));
+        }
+
+        @Test
+        @DisplayName("a currency with no pillars fails rather than discounting at zero")
+        void missingCurveThrows() {
+            MarketDataSnapshot market = MarketDataSnapshot.builder(TODAY)
+                    .discountRate(Currency.USD, 0.05)
+                    .build();
+
+            assertThatThrownBy(() -> market.yieldCurve(Currency.JPY))
+                    .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class)
+                    .hasMessageContaining("zero:JPY");
+        }
+
+        @Test
+        @DisplayName("a curve referenced on another day is refused")
+        void curveFromAnotherDay() {
+            YieldCurve yesterday = YieldCurve.flat(TODAY.minusDays(1), 0.04);
+
+            assertThatThrownBy(() -> MarketDataSnapshot.builder(TODAY)
+                    .curve(Currency.USD, yesterday))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("referenced at");
         }
     }
 }

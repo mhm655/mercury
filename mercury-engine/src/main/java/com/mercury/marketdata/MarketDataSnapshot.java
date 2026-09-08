@@ -4,6 +4,9 @@ import com.mercury.core.MercuryException;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
+import com.mercury.curve.Interpolation;
+import com.mercury.curve.YieldCurve;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -31,6 +34,17 @@ import java.util.Set;
  *       all - not a lock held briefly, none.</li>
  * </ul>
  *
+ * <h2>It has a date, because a snapshot is a moment</h2>
+ * The valuation date is part of the snapshot rather than a separate argument threaded
+ * alongside it. That was not true before M5b, and the omission only became untenable when
+ * curves arrived: a discount curve is a set of dated pillars measured from a reference date,
+ * so a market holding curve pillars but no date of its own would have had to be told, at
+ * every read, which day it was describing.
+ *
+ * <p>Holding it here also removes a class of error that had no way to be caught: a market
+ * built for one date and used to value a portfolio on another produced a plausible number and
+ * no complaint. {@code PortfolioValuationService} now checks.
+ *
  * <h2>Missing data is an error, not a zero</h2>
  * Asking for a value that is not present throws {@link MissingMarketDataException} rather
  * than defaulting. A missing spot price silently read as zero would price an option at its
@@ -39,19 +53,30 @@ import java.util.Set;
  */
 public final class MarketDataSnapshot {
 
+    private final LocalDate valuationDate;
+    private final Interpolation curveInterpolation;
     private final Map<MarketDataKey, Double> values;
 
-    private MarketDataSnapshot(Map<MarketDataKey, Double> values) {
+    private MarketDataSnapshot(LocalDate valuationDate, Interpolation curveInterpolation,
+                               Map<MarketDataKey, Double> values) {
+        this.valuationDate = valuationDate;
+        this.curveInterpolation = curveInterpolation;
         this.values = values;
     }
 
-    public static Builder builder() {
-        return new Builder();
+    public static Builder builder(LocalDate valuationDate) {
+        return new Builder(valuationDate);
     }
 
     /** An empty market. Useful only in tests asserting that missing data is rejected. */
-    public static MarketDataSnapshot empty() {
-        return new MarketDataSnapshot(Map.of());
+    public static MarketDataSnapshot empty(LocalDate valuationDate) {
+        return new MarketDataSnapshot(Objects.requireNonNull(valuationDate, "valuationDate"),
+                Interpolation.LOG_LINEAR_DISCOUNT, Map.of());
+    }
+
+    /** The moment this market describes. Every curve in it is referenced here. */
+    public LocalDate valuationDate() {
+        return valuationDate;
     }
 
     // ------------------------------------------------------------------ reads
@@ -76,8 +101,37 @@ public final class MarketDataSnapshot {
         return get(MarketDataKey.volatility(instrumentId));
     }
 
-    public double discountRate(Currency currency) {
-        return get(MarketDataKey.discountRate(currency));
+    /**
+     * The discount curve for {@code currency}, assembled from every zero-rate pillar the
+     * snapshot holds for it and referenced at {@link #valuationDate()}.
+     *
+     * <p>Rebuilt on each call rather than cached. A curve of a dozen pillars costs a handful
+     * of date arithmetic operations to assemble, valuation asks for it once per instrument,
+     * and a cache would be the first mutable state in a type whose immutability is what makes
+     * it safe to share across Monte Carlo workers without synchronisation. If a profile ever
+     * shows this mattering, the fix is to hoist the curve out of the pricing loop rather than
+     * to make the snapshot stateful.
+     *
+     * @throws MissingMarketDataException if the snapshot holds no pillar for {@code currency}
+     */
+    public YieldCurve yieldCurve(Currency currency) {
+        Objects.requireNonNull(currency, "currency");
+        YieldCurve.Builder curve = YieldCurve.builder(valuationDate)
+                .interpolation(curveInterpolation);
+        boolean any = false;
+
+        for (Map.Entry<MarketDataKey, Double> entry : values.entrySet()) {
+            if (entry.getKey() instanceof MarketDataKey.ZeroRate pillar
+                    && pillar.currency() == currency) {
+                curve.pillar(pillar.pillarDate(), entry.getValue());
+                any = true;
+            }
+        }
+        if (!any) {
+            throw new MissingMarketDataException(
+                    MarketDataKey.zeroRate(currency, valuationDate.plusYears(1)), values.keySet());
+        }
+        return curve.build();
     }
 
     /**
@@ -159,30 +213,42 @@ public final class MarketDataSnapshot {
             key.requireValidValue(result);
             shocked.put(key, result);
         });
-        return new MarketDataSnapshot(Map.copyOf(shocked));
+        return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(shocked));
     }
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof MarketDataSnapshot other && values.equals(other.values);
+        return o instanceof MarketDataSnapshot other
+                && valuationDate.equals(other.valuationDate)
+                && curveInterpolation == other.curveInterpolation
+                && values.equals(other.values);
     }
 
     @Override
     public int hashCode() {
-        return values.hashCode();
+        return Objects.hash(valuationDate, curveInterpolation, values);
     }
 
     @Override
     public String toString() {
-        return "MarketDataSnapshot(" + values.size() + " observations)";
+        return "MarketDataSnapshot(" + valuationDate + ", " + values.size() + " observations)";
     }
 
     /** Accumulates observations, then freezes them. */
     public static final class Builder {
 
+        private final LocalDate valuationDate;
         private final Map<MarketDataKey, Double> values = new HashMap<>();
+        private Interpolation curveInterpolation = Interpolation.LOG_LINEAR_DISCOUNT;
 
-        private Builder() {
+        private Builder(LocalDate valuationDate) {
+            this.valuationDate = Objects.requireNonNull(valuationDate, "valuationDate");
+        }
+
+        /** How curves assembled from this snapshot fill in the gaps between their pillars. */
+        public Builder curveInterpolation(Interpolation interpolation) {
+            this.curveInterpolation = Objects.requireNonNull(interpolation, "interpolation");
+            return this;
         }
 
         /**
@@ -213,11 +279,49 @@ public final class MarketDataSnapshot {
         }
 
         /**
-         * Continuously-compounded rate as a decimal: {@code 0.05} is 5%. Negative rates are
-         * permitted; see {@link MarketDataKey.DiscountRate}.
+         * One pillar of a currency's discount curve: the continuously-compounded zero rate out
+         * to {@code pillarDate}, as a decimal. Negative rates are permitted; see
+         * {@link MarketDataKey.ZeroRate}.
+         */
+        public Builder zeroRate(Currency currency, LocalDate pillarDate, double rate) {
+            return with(MarketDataKey.zeroRate(currency, pillarDate), rate);
+        }
+
+        /**
+         * A flat curve for {@code currency}: one rate at every horizon.
+         *
+         * <p>Kept as the convenient case rather than as a different mechanism. A single pillar
+         * extrapolates flat both ways, so this discounts at exactly {@code e^-rt} - identical
+         * to the flat rate the engine used before curves existed, which is what let the whole
+         * pricing stack move onto curves without a single reference value changing.
          */
         public Builder discountRate(Currency currency, double rate) {
-            return with(MarketDataKey.discountRate(currency), rate);
+            return zeroRate(currency, valuationDate.plusYears(1), rate);
+        }
+
+        /**
+         * Every pillar of an already-built curve, typically one fitted by
+         * {@code CurveBootstrapper}.
+         *
+         * <p>The pillars go in as individual keys rather than the curve going in whole. That is
+         * the point of keying market data by pillar: a curve stored as one opaque value would
+         * need its own shock mechanism, while a curve stored as pillars is shocked by the same
+         * {@link MarketShock} that moves a spot price.
+         *
+         * @throws IllegalArgumentException if the curve is referenced at another date
+         */
+        public Builder curve(Currency currency, YieldCurve curve) {
+            Objects.requireNonNull(currency, "currency");
+            Objects.requireNonNull(curve, "curve");
+            if (!curve.referenceDate().equals(valuationDate)) {
+                throw new IllegalArgumentException(
+                        "Curve for " + currency.code() + " is referenced at "
+                                + curve.referenceDate() + " but the snapshot is as of "
+                                + valuationDate + ". Discounting from the wrong day shifts every "
+                                + "factor on the curve by that many days of interest.");
+            }
+            curve.pillars().forEach((date, rate) -> zeroRate(currency, date, rate));
+            return this;
         }
 
         /** Units of the pair's quote currency per one unit of its base currency. */
@@ -227,7 +331,7 @@ public final class MarketDataSnapshot {
         }
 
         public MarketDataSnapshot build() {
-            return new MarketDataSnapshot(Map.copyOf(values));
+            return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(values));
         }
     }
 

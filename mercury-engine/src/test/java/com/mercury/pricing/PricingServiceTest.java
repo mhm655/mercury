@@ -42,7 +42,7 @@ class PricingServiceTest {
     }
 
     private static MarketDataSnapshot market() {
-        return MarketDataSnapshot.builder()
+        return MarketDataSnapshot.builder(VALUATION)
                 .spot(AAPL, 200.0)
                 .volatility(AAPL, 0.25)
                 .discountRate(Currency.USD, 0.04)
@@ -277,7 +277,7 @@ class PricingServiceTest {
                     .register(new CommodityModel())
                     .build();
 
-            MarketDataSnapshot withGold = MarketDataSnapshot.builder()
+            MarketDataSnapshot withGold = MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0).volatility(AAPL, 0.25)
                     .discountRate(Currency.USD, 0.04)
                     .spot(gold, 2400.0)

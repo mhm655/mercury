@@ -217,7 +217,7 @@ class BlackScholesModelTest {
         void readsFromSnapshot() {
             EuropeanOption option = EuropeanOption.call(
                     "AAPL-C-200", AAPL, Price.of("200"), VALUATION.plusYears(1), Currency.USD);
-            MarketDataSnapshot market = MarketDataSnapshot.builder()
+            MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0)
                     .volatility(AAPL, 0.25)
                     .discountRate(Currency.USD, 0.04)
@@ -240,7 +240,7 @@ class BlackScholesModelTest {
             // option contract is 100 shares. Omitting this understated every option position
             // by the multiplier - caught by the demo report showing an option leg contributing
             // 117 where it should have contributed 11,710.
-            MarketDataSnapshot market = MarketDataSnapshot.builder()
+            MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0).volatility(AAPL, 0.25).discountRate(Currency.USD, 0.04)
                     .build();
             EuropeanOption standard = EuropeanOption.call(
@@ -261,7 +261,7 @@ class BlackScholesModelTest {
         void missingVolatilityThrows() {
             EuropeanOption option = EuropeanOption.call(
                     "AAPL-C-200", AAPL, Price.of("200"), VALUATION.plusYears(1), Currency.USD);
-            MarketDataSnapshot incomplete = MarketDataSnapshot.builder()
+            MarketDataSnapshot incomplete = MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0).discountRate(Currency.USD, 0.04).build();
 
             assertThatThrownBy(() -> new BlackScholesModel().price(option, incomplete, VALUATION))
@@ -276,7 +276,7 @@ class BlackScholesModelTest {
             // id must not satisfy it.
             EuropeanOption option = EuropeanOption.call(
                     "AAPL-C-200", AAPL, Price.of("200"), VALUATION.plusYears(1), Currency.USD);
-            MarketDataSnapshot wrongKey = MarketDataSnapshot.builder()
+            MarketDataSnapshot wrongKey = MarketDataSnapshot.builder(VALUATION)
                     .spot(InstrumentId.of("AAPL-C-200"), 200.0)
                     .volatility(InstrumentId.of("AAPL-C-200"), 0.25)
                     .discountRate(Currency.USD, 0.04)

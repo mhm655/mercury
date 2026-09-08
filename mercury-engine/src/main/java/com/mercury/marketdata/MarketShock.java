@@ -166,13 +166,22 @@ public interface MarketShock {
                 value -> Math.max(0.0, value * factor), "all vols x" + factor);
     }
 
-    /** Shifts one currency's discount rate. The DV01 bump is {@code BasisPoints.ONE}. */
+    /**
+     * Shifts every pillar of one currency's discount curve - a parallel shift. The DV01 bump
+     * is {@code BasisPoints.ONE}.
+     *
+     * <p>Matching every pillar rather than one key is what keeps DV01 meaning the same thing
+     * it did when a currency had a single flat rate. A bump of one pillar is a different and
+     * also useful risk number - key-rate duration - and is a shock this family does not have
+     * yet, because nothing asks for it.
+     */
     static MarketShock bumpRate(Currency currency, BasisPoints amount) {
         Objects.requireNonNull(currency, "currency");
         Objects.requireNonNull(amount, "amount");
-        MarketDataKey target = MarketDataKey.discountRate(currency);
-        return leaf(target::equals, value -> value + amount.asDecimal(),
-                "rate:" + currency.code() + " " + amount);
+        return leaf(key -> key instanceof MarketDataKey.ZeroRate pillar
+                        && pillar.currency() == currency,
+                value -> value + amount.asDecimal(),
+                "curve:" + currency.code() + " " + amount);
     }
 
     /**
@@ -224,11 +233,11 @@ public interface MarketShock {
                 "all fx x" + factor);
     }
 
-    /** Shifts every discount rate - a parallel shift across currencies. */
+    /** Shifts every curve pillar in every currency - a parallel shift across the whole market. */
     static MarketShock bumpAllRates(BasisPoints amount) {
         Objects.requireNonNull(amount, "amount");
-        return leaf(key -> key instanceof MarketDataKey.DiscountRate,
-                value -> value + amount.asDecimal(), "all rates " + amount);
+        return leaf(key -> key instanceof MarketDataKey.ZeroRate,
+                value -> value + amount.asDecimal(), "all curves " + amount);
     }
 
     private static MarketShock leaf(Predicate<MarketDataKey> selector,

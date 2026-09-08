@@ -140,9 +140,9 @@ public final class SensitivityCalculator {
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(asOf, "asOf");
 
-        // Read first, for the same reason delta does: an unknown currency must fail rather
-        // than return zero because neither shocked market differed from the base.
-        market.discountRate(currency);
+        // Read first, for the same reason delta does: a currency with no curve must fail
+        // rather than return zero because neither shocked market differed from the base.
+        market.yieldCurve(currency);
 
         double up = changeUnder(portfolio, MarketShock.bumpRate(currency, BasisPoints.ONE),
                 market, asOf);

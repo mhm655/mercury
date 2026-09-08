@@ -9,26 +9,31 @@ POSITIONS
   --------------------------------------------------------------------------
   AAPL                   1000       195.5000        195500.00  spot
   MSFT                    250       412.2500        103062.50  spot
-  AAPL-C-200               -5      2342.0497        -11710.25  black-scholes
-  AAPL-P-180                8      1068.7014          8549.61  black-scholes
-  CORP-5Y                 250       998.9954        249748.84  discounted-cashflow
-  FWD-EURUSD                1     -1675.6770         -1675.68  discounted-cashflow
+  AAPL-C-200               -5      2382.5395        -11912.70  black-scholes
+  AAPL-P-180                8      1040.3824          8323.06  black-scholes
+  CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
+  FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
   --------------------------------------------------------------------------
-  TOTAL                                             543475.02
+  TOTAL                                             548475.45
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
-  CORP-5Y                997.6254         1.3700       998.9954
+  CORP-5Y               1010.9455         1.3700      1012.3155
+
+DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
+  CURRENCY          1Y        2Y        5Y       10Y
+  USD          4.9461%   4.5372%   4.1839%   4.2481%
+  EUR          3.2409%   3.0223%   2.9856%   2.9735%
 
 RISK
   DELTA  (value change per unit rise in spot)
-    AAPL                     486.8511
+    AAPL                     487.9941
     MSFT                     250.0000
   FX DELTA  (value change per unit rise in the rate)
-    EUR/USD               484295.7480
+    EUR/USD               484092.3573
   DV01  (value change per +1bp on the discount rate)
-    USD                      -69.9245
-    EUR                      -51.7984
+    USD                      -71.7505
+    EUR                      -51.7767
 
 STRESS  (equities -30%, volatility +50%, FX -10%)
-  P&L impact                                       -104800.97
+  P&L impact                                       -104888.50

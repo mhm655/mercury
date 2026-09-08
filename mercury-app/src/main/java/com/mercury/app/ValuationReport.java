@@ -4,7 +4,9 @@ import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
+import com.mercury.core.time.Tenor;
 import com.mercury.instrument.AccruingInterest;
+import com.mercury.curve.YieldCurve;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
 import com.mercury.portfolio.Portfolio;
@@ -71,6 +73,7 @@ public final class ValuationReport {
         header(out, portfolio, asOf);
         positions(out, valuation);
         accruals(out, valuation, asOf);
+        curves(out, market, riskFactors, asOf);
         risk(out, portfolio, market, sensitivities, riskFactors, asOf);
         stress(out, portfolio, market, sensitivities, asOf);
         return out.toString();
@@ -133,6 +136,40 @@ public final class ValuationReport {
             double dirty = position.unitValue().value();
             line(out, "  %-16s %14.4f %14.4f %14.4f",
                     position.instrument().id(), dirty - accrued, accrued, dirty);
+        }
+        line(out, "");
+    }
+
+    /**
+     * Each discount curve, sampled at a few standard horizons.
+     *
+     * <p>Sampled rather than listed pillar by pillar. The pillars sit on whatever dates the
+     * quoted instruments happen to settle, which differ between currencies and make a ragged
+     * table; asking each curve for the same four horizons is both readable and a fair
+     * demonstration of what a curve is for, since three of the four fall between pillars and
+     * are answers the interpolator had to produce.
+     */
+    private static void curves(StringBuilder out, MarketDataSnapshot market,
+                               RiskFactors riskFactors, LocalDate asOf) {
+        if (riskFactors.rateCurrencies().isEmpty() || riskFactors.curveTenors().isEmpty()) {
+            return;
+        }
+
+        StringBuilder header = new StringBuilder("  %-10s".formatted("CURRENCY"));
+        for (Tenor tenor : riskFactors.curveTenors()) {
+            header.append("%10s".formatted(tenor));
+        }
+        line(out, "DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)");
+        line(out, "%s", header);
+
+        for (Currency currency : riskFactors.rateCurrencies()) {
+            YieldCurve curve = market.yieldCurve(currency);
+            StringBuilder row = new StringBuilder("  %-10s".formatted(currency.code()));
+            for (Tenor tenor : riskFactors.curveTenors()) {
+                double years = curve.timeTo(tenor.addTo(asOf));
+                row.append("%9.4f%%".formatted(curve.zeroRate(years) * 100.0));
+            }
+            line(out, "%s", row);
         }
         line(out, "");
     }

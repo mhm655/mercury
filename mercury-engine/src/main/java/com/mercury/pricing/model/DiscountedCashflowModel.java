@@ -1,7 +1,6 @@
 package com.mercury.pricing.model;
 
 import com.mercury.core.money.Currency;
-import com.mercury.core.time.DayCountConvention;
 import com.mercury.instrument.Cashflow;
 import com.mercury.instrument.CashflowGenerating;
 import com.mercury.instrument.FinancialInstrument;
@@ -48,13 +47,12 @@ import java.util.Objects;
  * which is what makes an FX forward come out right: its two legs settle in different
  * currencies and must be discounted on different curves before being compared.
  *
- * <p>{@code T} is measured ACT/365F, matching the convention {@link BlackScholesModel} uses,
- * so an option and a bond in one portfolio agree about how long a year is.
+ * <p>{@code T} is measured by the curve, which uses ACT/365F - the same convention
+ * {@link BlackScholesModel} uses - so an option and a bond in one portfolio agree about how
+ * long a year is.
  *
  * <h2>Simplifications, named</h2>
  * <ul>
- *   <li><b>Flat discounting.</b> One rate per currency for every maturity. A real curve
- *       arrives at M5b; until then the ten-year point discounts at the overnight rate.</li>
  *   <li><b>Continuous compounding.</b> {@code e^-rT} rather than {@code (1+r)^-T}. The two
  *       differ by roughly {@code r^2 T / 2}, so quoting a rate on the wrong basis is a real
  *       error - the convention is fixed here and stated on {@code MarketDataKey}.</li>
@@ -62,15 +60,18 @@ import java.util.Objects;
  *       corporate bond prices as though it were a government one.</li>
  * </ul>
  *
+ * <p>Flat discounting was on this list until M5b. Each cashflow now discounts on the actual
+ * term structure of its currency, so a ten-year payment no longer discounts at the overnight
+ * rate. Nothing here changed to make that work: the model asks the snapshot for a curve, and a
+ * market quoted as a single flat rate returns a one-pillar curve that discounts exactly as the
+ * old code did.
+ *
  * <p>Stateless, pure and thread-safe.
  */
 public final class DiscountedCashflowModel<T extends FinancialInstrument & CashflowGenerating>
         implements PricingModel<T> {
 
     public static final ModelName NAME = ModelName.of("discounted-cashflow");
-
-    /** Time is measured the same way here as in Black-Scholes, so the two agree. */
-    private static final DayCountConvention TIME_CONVENTION = DayCountConvention.ACT_365F;
 
     private final Class<T> instrumentType;
 
@@ -98,7 +99,7 @@ public final class DiscountedCashflowModel<T extends FinancialInstrument & Cashf
         double presentValue = 0.0;
 
         for (Cashflow cashflow : instrument.cashflows(asOf)) {
-            presentValue += presentValueOf(cashflow, market, asOf, target);
+            presentValue += presentValueOf(cashflow, market, target);
         }
         return new ValuationResult(presentValue, target, NAME);
     }
@@ -112,10 +113,10 @@ public final class DiscountedCashflowModel<T extends FinancialInstrument & Cashf
      * using dollar interest rates.
      */
     private double presentValueOf(Cashflow cashflow, MarketDataSnapshot market,
-                                  LocalDate asOf, Currency target) {
+                                  Currency target) {
         Currency currency = cashflow.amount().currency();
-        double years = TIME_CONVENTION.yearFraction(asOf, cashflow.paymentDate());
-        double discountFactor = Math.exp(-market.discountRate(currency) * years);
+        double discountFactor = market.yieldCurve(currency)
+                .discountFactor(cashflow.paymentDate());
         double amount = cashflow.amount().amount().doubleValue();
 
         return amount * discountFactor * market.fxRate(currency, target);

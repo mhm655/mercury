@@ -59,7 +59,7 @@ class DiscountedCashflowModelTest {
     }
 
     private static MarketDataSnapshot usdAt(double rate) {
-        return MarketDataSnapshot.builder().discountRate(Currency.USD, rate).build();
+        return MarketDataSnapshot.builder(VALUATION).discountRate(Currency.USD, rate).build();
     }
 
     @Nested
@@ -139,7 +139,7 @@ class DiscountedCashflowModelTest {
 
         /** Spot 1.10, EUR at 3%, USD at 5%. */
         private static MarketDataSnapshot fxMarket() {
-            return MarketDataSnapshot.builder()
+            return MarketDataSnapshot.builder(VALUATION)
                     .fxRate(EURUSD, 1.10)
                     .discountRate(Currency.EUR, 0.03)
                     .discountRate(Currency.USD, 0.05)
@@ -232,7 +232,7 @@ class DiscountedCashflowModelTest {
         @Test
         @DisplayName("a currency against itself is one, without consulting the snapshot")
         void sameCurrencyIsOne() {
-            assertThat(MarketDataSnapshot.empty().fxRate(Currency.USD, Currency.USD))
+            assertThat(MarketDataSnapshot.empty(VALUATION).fxRate(Currency.USD, Currency.USD))
                     .isCloseTo(1.0, within(1e-15));
         }
 
@@ -241,7 +241,7 @@ class DiscountedCashflowModelTest {
         void inverseIsDerived() {
             // Storing both directions would let them drift apart, and a snapshot whose EUR/USD
             // and USD/EUR were not exact reciprocals would imply a risk-free round trip.
-            MarketDataSnapshot market = MarketDataSnapshot.builder().fxRate(EURUSD, 1.10).build();
+            MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION).fxRate(EURUSD, 1.10).build();
 
             assertThat(market.fxRate(Currency.EUR, Currency.USD)).isCloseTo(1.10, within(1e-15));
             assertThat(market.fxRate(Currency.USD, Currency.EUR))
@@ -255,7 +255,7 @@ class DiscountedCashflowModelTest {
         @Test
         @DisplayName("a missing pair fails in both directions")
         void missingPairThrows() {
-            assertThatThrownBy(() -> MarketDataSnapshot.empty()
+            assertThatThrownBy(() -> MarketDataSnapshot.empty(VALUATION)
                     .fxRate(Currency.EUR, Currency.JPY))
                     .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class)
                     .hasMessageContaining("fx:EUR/JPY");
@@ -264,7 +264,7 @@ class DiscountedCashflowModelTest {
         @Test
         @DisplayName("a non-positive rate is rejected")
         void rejectsNonPositiveRate() {
-            assertThatThrownBy(() -> MarketDataSnapshot.builder().fxRate(EURUSD, 0.0))
+            assertThatThrownBy(() -> MarketDataSnapshot.builder(VALUATION).fxRate(EURUSD, 0.0))
                     .isInstanceOf(
                             com.mercury.marketdata.MarketDataKey.InvalidMarketDataException.class)
                     .hasMessageContaining("must be positive");
@@ -284,7 +284,7 @@ class DiscountedCashflowModelTest {
                     .register(new DiscountedCashflowModel<>(Bond.class))
                     .register(new DiscountedCashflowModel<>(FxForward.class))
                     .build();
-            MarketDataSnapshot market = MarketDataSnapshot.builder()
+            MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION)
                     .discountRate(Currency.USD, 0.05)
                     .discountRate(Currency.EUR, 0.03)
                     .fxRate(EURUSD, 1.10)
@@ -300,12 +300,12 @@ class DiscountedCashflowModelTest {
         }
 
         @Test
-        @DisplayName("a missing discount rate fails loudly rather than discounting at zero")
+        @DisplayName("a missing discount curve fails loudly rather than discounting at zero")
         void missingRateThrows() {
             assertThatThrownBy(() -> BOND_MODEL.price(
-                    zeroCouponBond("0"), MarketDataSnapshot.empty(), VALUATION))
+                    zeroCouponBond("0"), MarketDataSnapshot.empty(VALUATION), VALUATION))
                     .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class)
-                    .hasMessageContaining("rate:USD");
+                    .hasMessageContaining("zero:USD");
         }
     }
 }

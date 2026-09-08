@@ -34,8 +34,12 @@ import java.util.Objects;
  *   <li><b>Constant volatility.</b> One number per underlying, no smile and no term
  *       structure. Real markets charge more for out-of-the-money strikes; this is the single
  *       largest source of error against traded prices.</li>
- *   <li><b>Constant, flat interest rate.</b> Consistent with the flat
- *       {@code MarketDataKey.DiscountRate} this milestone uses.</li>
+ *   <li><b>A single interest rate.</b> The formula takes one rate for the whole life of the
+ *       option, which is intrinsic to Black-Scholes and not a limitation of the market data.
+ *       Since M5b the rate is read off the currency's curve <em>at the option's own
+ *       expiry</em>, so a one-year and a five-year option on the same underlying now discount
+ *       at different rates - which is more nearly right than the one flat rate they shared
+ *       before, and still not a stochastic term structure.</li>
  *   <li><b>Lognormal returns, continuous trading, no transaction costs, European
  *       exercise.</b> The last is enforced by the type - an American option would need a
  *       lattice, which is why it is a separate class rather than a flag.</li>
@@ -79,8 +83,12 @@ public final class BlackScholesModel implements PricingModel<EuropeanOption> {
         double spot = market.spot(option.underlyingId());
         double strike = option.strike().value().doubleValue();
         double volatility = market.volatility(option.underlyingId());
-        double rate = market.discountRate(option.currency());
         double years = option.yearsToExpiry(asOf);
+
+        // The zero rate to this option's own expiry, not a single rate for the whole market.
+        // Black-Scholes needs one number, and the honest one is the curve's answer for the
+        // horizon that actually matters here.
+        double rate = market.yieldCurve(option.currency()).zeroRate(years);
 
         double perShare = price(option.optionType(), spot, strike, years, rate, volatility);
 

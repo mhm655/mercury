@@ -3,11 +3,12 @@ package com.mercury.app;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
+import com.mercury.core.time.Tenor;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * The risk factors a report should measure the portfolio against.
+ * What a report measures the portfolio against, and where it samples the curves.
  *
  * <h2>Why they are listed rather than discovered</h2>
  * The engine could infer them - walk the positions, collect every underlying, currency and
@@ -18,23 +19,24 @@ import java.util.Objects;
  * shape depend on the portfolio's contents, which is also the fastest way to a golden master
  * that changes for uninteresting reasons.
  *
- * <p>Grouping them in one type rather than passing three lists keeps
- * {@link ValuationReport#render} at six parameters instead of eight, and gives the three
- * kinds of risk a single place to grow when curve tenors arrive at M5b.
+ * <p>Grouping them in one type rather than passing four lists keeps
+ * {@link ValuationReport#render} at six parameters instead of nine.
+ *
+ * <p>{@code curveTenors} is the one member that is not a risk factor: it is where the report
+ * samples each discount curve for display. It lives here because it answers the same question
+ * as the others - what should this report show - and a second parameter object holding one
+ * list would be ceremony.
  */
 public record RiskFactors(
         List<InstrumentId> spots,
         List<CurrencyPair> fxPairs,
-        List<Currency> rateCurrencies) {
+        List<Currency> rateCurrencies,
+        List<Tenor> curveTenors) {
 
     public RiskFactors {
         spots = List.copyOf(Objects.requireNonNull(spots, "spots"));
         fxPairs = List.copyOf(Objects.requireNonNull(fxPairs, "fxPairs"));
         rateCurrencies = List.copyOf(Objects.requireNonNull(rateCurrencies, "rateCurrencies"));
-    }
-
-    /** Equity risk only - the shape of the report before M5 added rates and FX. */
-    public static RiskFactors ofSpots(List<InstrumentId> spots) {
-        return new RiskFactors(spots, List.of(), List.of());
+        curveTenors = List.copyOf(Objects.requireNonNull(curveTenors, "curveTenors"));
     }
 }

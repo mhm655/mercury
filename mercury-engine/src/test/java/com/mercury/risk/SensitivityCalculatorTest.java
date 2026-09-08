@@ -64,7 +64,7 @@ class SensitivityCalculatorTest {
     }
 
     private static MarketDataSnapshot market() {
-        return MarketDataSnapshot.builder()
+        return MarketDataSnapshot.builder(VALUATION)
                 .spot(AAPL, 200.0)
                 .spot(MSFT, 400.0)
                 .volatility(AAPL, 0.25)
@@ -327,7 +327,7 @@ class SensitivityCalculatorTest {
 
         /** USD 5%, EUR 3%, EUR/USD 1.10. */
         private static MarketDataSnapshot rateMarket() {
-            return MarketDataSnapshot.builder()
+            return MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0)
                     .discountRate(Currency.USD, 0.05)
                     .discountRate(Currency.EUR, 0.03)
@@ -416,7 +416,7 @@ class SensitivityCalculatorTest {
             Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
                     .position(FORWARD.id(), 1).build();
 
-            MarketDataSnapshot inverted = MarketDataSnapshot.builder()
+            MarketDataSnapshot inverted = MarketDataSnapshot.builder(VALUATION)
                     .spot(AAPL, 200.0)
                     .discountRate(Currency.USD, 0.05)
                     .discountRate(Currency.EUR, 0.03)
