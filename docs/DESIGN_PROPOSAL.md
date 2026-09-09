@@ -584,6 +584,20 @@ Each entry states the *problem*, not just the pattern name.
 > proves it is needed, and expensive to remove once it is load-bearing** — which is the whole
 > argument for not reaching for one in advance.
 
+> **Settled at M6.** The predicted second case arrived exactly as described: `SwapModel`
+> projects each floating coupon off the curve before discounting it, which the bond and the FX
+> forward do not do. It justified extracting something shared — and what it justified was
+> `CashflowDiscounting`, a four-line **static function** that both models call.
+>
+> Not a base class. There is still nothing for a subclass to override: the varying part lives
+> entirely inside `SwapModel`, before the shared sum is reached, and a Template Method would
+> have had to invent a hook for a step that only one of the two models performs at all.
+>
+> The useful conclusion is a negative one, and worth recording as such. Waiting for the second
+> case did not vindicate the pattern the design predicted — it showed the pattern was never the
+> right shape. What the two pricers genuinely had in common was four lines of arithmetic, and
+> that is what they now share.
+
 **Deliberately rejected, and the README will say why:**
 
 - **Visitor** — breaks open-closed on the instrument axis (§5.1).
@@ -732,7 +746,7 @@ scaffolding.
 | **M4** | **Vertical slice: value a portfolio** | Minimal `MarketDataSnapshot`, `MarketShock`, `PricingModel` registry, **two** pricers (stock + Black-Scholes), minimal `Position`/`Portfolio`, market value, **Delta by bump-and-revalue**, and a CLI that prints it. **First runnable end-to-end capability.** |
 | M5 | Broaden pricing | Generic DCF model (not a template — see §6), bond and FX-forward pricers, flat discounting; reference-value tests against published figures — ✅ **done**, audited, with DV01, FX delta and clean/dirty reporting added in response |
 | M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — ✅ **done**. Pillars are dates rather than tenors, for a reason that cost a defect to learn (ADR 0006); the whole pricing stack moved onto curves without a single reference value changing |
-| M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments |
+| M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments — ✅ **done**, with the par-rate round trip as its check |
 | M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure |
 | M8 | Trade lifecycle & execution | State machine, audit trail, both venues, `Counterparty`; closes gaps G-1 and G-2 |
 | M9 | Risk limits | `RiskLimit` composite, pro-forma projection, breach events, rejection |
@@ -872,6 +886,19 @@ adding it.
 - **M5** — discounted-cashflow pricing for bonds and FX forwards; FX rates in market data.
   Template Method dropped after implementation showed it had no varying step (§6).
   **397 tests green.**
+- **M5 audit** — market-data invariants moved onto `MarketDataKey`, DV01 and FX delta added,
+  a bond's clean price separated from its dirty one. The instructive finding was not a defect:
+  the engine had been measuring interest-rate and currency risk and printing none of it.
+  **409 tests green.**
+- **M5b** — yield curves, two interpolation schemes, and a bootstrapper validated by the par
+  round trip. Pillars are keyed by settlement date rather than tenor, which cost a defect to
+  learn (ADR 0006). The whole pricing stack moved onto curves without a single reference value
+  changing, because a flat rate is now the one-pillar case of the same type.
+  **461 tests green.**
+- **M6** — swap pricing: floating coupons projected at the simple forward rate off the curve.
+  All five instrument types now price in one portfolio. Template Method settled for good (§6):
+  the second case justified a shared function, not a base class. Found that the stress
+  scenario had been silently missing its rates leg since M4. **474 tests green.**
 
 ### Settled
 

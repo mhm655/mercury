@@ -60,6 +60,7 @@ decision.
 | Area | Not modelled | Why |
 |---|---|---|
 | Bonds | Amortisation, call/put schedules, floating-rate notes, inflation linkage | The vanilla bullet bond already answers the design question (how a cashflow-bearing instrument exposes itself to a generic pricer). The rest is domain surface without architectural gain. |
+| Swaps | Historical index fixings | A floating period already under way has, in reality, fixed its rate at the start. Mercury stores no past fixings, so such a period is projected from the valuation date instead — exact for a swap starting today, an approximation for a seasoned one. A fixing store is bookkeeping, not a design question, and belongs with the trade lifecycle at M8. |
 | Swaps | Cross-currency, basis (float-float), amortising notionals, principal exchange | All are different *compositions* of the existing legs rather than new structures — which is the point of composing legs instead of subclassing. |
 | Curves | Dual-curve / OIS discounting | Single-curve is the pre-2008 convention. Real desks discount OIS and project on a separate index curve; the basis between them is itself a quoted market. We are single-curve and say so. |
 | Curves | Futures quotes, and their convexity adjustment | The bootstrapper takes deposits and par swaps, which cover the whole curve. Futures are the third common input and need a convexity adjustment — a genuinely subtle correction — for no new design question. |
@@ -70,6 +71,38 @@ decision.
 | FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
+
+---
+
+## Fixed during M6
+
+### D-1 · The stress scenario had been missing its rates leg since M4 · fixed
+
+`DESIGN_PROPOSAL.md` §5.3 specifies the market-crash scenario as equities −30% **and**
+volatility +50% **and** FX −10% **and rates +150bp**. The implementation had three of the four:
+
+```java
+MarketShock crash = MarketShock.scaleAllSpots(0.70)
+        .and(MarketShock.scaleAllVolatilities(1.50))
+        .and(MarketShock.scaleAllFxRates(0.90));   // and nothing for rates
+```
+
+**Why it went unnoticed.** Until M5 the book was equities and options, which have almost no
+rate sensitivity, so the missing leg moved the answer by a few dollars. A bond, an FX forward
+and a swap made it expensive: the headline number went from −104,888.50 to −56,815.17 once the
+rates leg was added — the scenario had been overstating the loss by 46%.
+
+**Why this is the worst kind of gap.** A stress test that silently omits a factor is more
+dangerous than one that is absent, because it produces a number people act on. Nothing failed,
+nothing warned, and the output looked exactly as authoritative as it does now.
+
+**The fix.** The leg, and a golden-master test asserting the scenario names every factor it
+shocks — so the label and the shock cannot drift apart again.
+
+The number reconciles: rates alone contribute +47,661.76, the other three −104,888.50, and the
+interaction between them +411.57 (the options' rho changes once spot has fallen 30%). First
+order, DV01 × 150bp would predict +49,457.59; the −1,795.83 difference is convexity over a
+move that large, which is about the right size for a book of duration 4.4.
 
 ---
 

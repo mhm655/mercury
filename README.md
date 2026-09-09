@@ -14,9 +14,9 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M5b complete** — the engine values a mixed portfolio of equities, options, a bond and an FX
-forward against **discount curves bootstrapped from market quotes**, and reports its equity,
-interest-rate and currency risk. CI green on every push.
+**M6 complete** — the engine prices **all five instrument types** in one portfolio against
+discount curves bootstrapped from market quotes, and reports its equity, interest-rate and
+currency risk. CI green on every push.
 
 ```bash
 mvn -q -DskipTests package
@@ -33,8 +33,9 @@ POSITIONS
   AAPL-P-180                8      1040.3824          8323.06  black-scholes
   CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
   FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
+  IRS-5Y                    1     11109.2141         11109.21  swap-discounting
   --------------------------------------------------------------------------
-  TOTAL                                             548475.45
+  TOTAL                                             559584.66
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
@@ -52,32 +53,39 @@ RISK
   FX DELTA  (value change per unit rise in the rate)
     EUR/USD               484092.3573
   DV01  (value change per +1bp on the discount rate)
-    USD                      -71.7505
+    USD                      381.4940
     EUR                      -51.7767
 
-STRESS  (equities -30%, volatility +50%, FX -10%)
-  P&L impact                                       -104888.50
+STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
+  P&L impact                                        -56815.17
 ```
 
-Four instrument types, three models, three kinds of risk, and no `instanceof` anywhere in the
+Five instrument types, four models, three kinds of risk, and no `instanceof` anywhere in the
 dispatch. **Nothing in the demo states a five-year zero rate** — it states deposit and swap
 quotes, and the bootstrapper finds the curve that reprices all of them at once.
 
 Every number is explainable, which is the check that the pieces agree with each other. The
 covered call and protective put cut AAPL delta from 1000 to 488. The bond prices above par
 because five-year discounting at 4.18% is below its 4.5% coupon. The FX delta of 484,092 is
-exactly the euro notional discounted on the euro curve.
+exactly the euro notional discounted on the euro curve. The swap is worth 11,109 because it
+pays 4.00% fixed when the five-year par rate is 4.25%, over an annuity of 4.44.
 
-The forward is the one worth reading twice. Under the flat 4.5% and 3.2% rates this scenario
-used before curves, the fair forward rate was 1.0865 and a contract struck at 1.09 was worth
-**−1,675.68**. On the real curves the one-year rate differential is 1.71% rather than 1.30%,
-which puts the fair rate at 1.0910 — so the same contract is now worth **+423.72**. A sign
-flip out of a curve shape, which is exactly the kind of thing a flat rate hides.
+**The USD DV01 is positive.** Every other position in the book — the bond, both option legs,
+the forward's dollar leg — loses value when rates rise. One payer swap on a million of notional
+outweighs all of them, so the portfolio is short rates while five of its seven positions are
+long. No single line of the report shows that; only the aggregate does, which is the argument
+for computing risk at portfolio level rather than summing per-instrument numbers.
 
-The most interesting figure is the USD DV01. It is the bond's contribution, the forward's USD
-leg, **and about −10 of option rho** — picked up with no rho formula anywhere in the codebase,
-because sensitivities are computed by shocking the market and revaluing rather than by
-per-instrument formulas.
+That DV01 also carries **about −10 of option rho**, picked up with no rho formula anywhere in
+the codebase, because sensitivities are computed by shocking the market and revaluing.
+
+Two figures worth reading twice. The FX forward was worth **−1,675.68** under the flat rates
+this scenario used before curves and is worth **+423.72** on the real ones — a sign flip out of
+nothing but curve shape, because the one-year rate differential is 1.71% rather than 1.30%. And
+the stress number moved from −104,888.50 to −56,815.17 when the scenario's **rates leg was
+restored**: it had been specified in the design document since M4 and quietly missing from the
+code, which nobody noticed while the book held no material rate risk
+([D-1](docs/KNOWN_GAPS.md)).
 
 Three audits have found five real defects and one weak test suite: a bond that reported itself
 matured while still owing its principal, a market-data shock that could build a market the
@@ -106,7 +114,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M5 — Discounted cashflows: bonds and FX forwards | ✅ complete |
 | M5 audit — invariants on market data, DV01 / FX delta, clean vs dirty | ✅ complete |
 | M5b — Curve construction (bootstrapping) | ✅ complete |
-| M6 — Swap pricing: floating-leg projection off a curve | next |
+| M6 — Swap pricing: all five instrument types | ✅ complete |
+| M7 — Full portfolio: cash, realised P&L, exposure | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -156,10 +165,14 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 - **Open-closed pricing dispatch.** A type-keyed registry: a new instrument costs one class,
   one model and one registration line. `PricingServiceTest` proves it by adding a sixth
   instrument type inline and pricing it alongside the rest, with nothing existing modified.
-- **Restraint, recorded.** The design proposal listed Template Method as justified for the
-  discounted-cashflow base. Implementing it showed there was no varying step to override, so
-  it was dropped and [the entry struck through](docs/DESIGN_PROPOSAL.md#6-design-patterns--used-and-deliberately-not-used)
-  rather than quietly deleted. A build check also fails on any public method nobody calls.
+- **Restraint, recorded — and then settled.** The design proposal listed Template Method as
+  justified for the discounted-cashflow base. Implementing it showed there was no varying step
+  to override, so it was dropped and [the entry struck through](docs/DESIGN_PROPOSAL.md#6-design-patterns--used-and-deliberately-not-used)
+  rather than quietly deleted. M6 brought the predicted second case — a floating swap leg,
+  which genuinely does need projection before discounting — and it justified extracting a
+  four-line static function, not a base class. Waiting did not vindicate the pattern; it showed
+  the pattern was never the right shape. A build check also fails on any public method nobody
+  calls.
 - **One mechanism, three features — the first two working.** Immutable snapshots plus
   composable shocks already drive both stress scenarios and bump-and-revalue risk; Monte
   Carlo reuses the same abstraction at M12. Equity delta, DV01 and FX delta are the same two
@@ -169,6 +182,9 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   can take, so the builder and `withShock` cannot disagree about what a legal market is. They
   did: a shock could impose a negative spot price that the builder rejected, and it surfaced
   four layers down as a NaN blaming the pricing model for bad data.
+- **All five instruments, one dispatch.** Stock, bond, FX forward, European option and
+  interest-rate swap, priced by four models through a type-keyed registry. Adding the swap at
+  M6 cost one registration line and changed nothing else in the pricing stack.
 - **Curves fitted, not typed in.** Deposits and par swaps go in; a discount curve comes out,
   solved pillar by pillar and validated by repricing its own inputs to par. Pillars are keyed
   by settlement date rather than tenor, which sounds like pedantry and was not — a 2Y swap
