@@ -26,12 +26,8 @@ import java.util.Objects;
  * {@link Money}. The product is formed in the model domain and crosses into {@code Money}
  * once per line, so each line rounds exactly once and the total is an exact sum of
  * exactly-rounded lines - which is what makes a headline total reconcile against the detail
- * printed beneath it.
- *
- * <p>The order matters and was got wrong first time here: rounding the per-unit value to
- * cents and <em>then</em> multiplying by the holding scales the rounding error by the
- * quantity, and quantises the line so badly that any sensitivity derived from it collapses.
- * Round once, and round last (ADR 0001).
+ * printed beneath it. The rule, and what it cost to learn, is on {@link Money#fromModelValue};
+ * this class is where it is applied.
  *
  * <h2>The market and the valuation date must agree</h2>
  * A snapshot carries the day it describes, and this refuses to value a portfolio against a

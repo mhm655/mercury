@@ -14,6 +14,11 @@ import java.time.LocalDate;
  * American option means adding a class that implements {@code FinancialInstrument},
  * {@link HasUnderlying} and this interface, plus a binomial pricing model. Everything that
  * consumes option terms generically keeps working, untouched.
+ *
+ * <h2>No reader yet</h2>
+ * The same standing as {@link HasUnderlying}: one implementor, and every caller that wants
+ * these terms has a concrete {@link EuropeanOption} in hand. Kept for the second option type
+ * rather than for anything today, and worth deleting if that type does not arrive.
  */
 public interface OptionTerms {
 

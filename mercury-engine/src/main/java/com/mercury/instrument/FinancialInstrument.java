@@ -63,6 +63,19 @@ import com.mercury.core.money.Currency;
 public interface FinancialInstrument {
 
     /** Unique identity. Also the key positions and market data are held under. */
+    /**
+     * <h2>Two of these have no reader yet</h2>
+     * {@link #assetClass()} and {@link #tradability()} are implemented by every instrument
+     * and read by no production code at M7. They are not speculative in the sense of being
+     * unplanned - the OTC-versus-order-book split is a settled design decision and
+     * {@code tradability} is what will route a trade to a venue at M8 - but "built ahead of
+     * its consumer" and "justified" are different things, and a reader hunting for the caller
+     * deserves to be told there isn't one.
+     *
+     * <p>If M8 arrives and does not read them, they should go. The cost of keeping them is
+     * paid by every new instrument, which is exactly the tax the extensibility proof was
+     * supposed to be measuring.
+     */
     InstrumentId id();
 
     /**

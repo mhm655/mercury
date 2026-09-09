@@ -9,7 +9,6 @@ import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.Frequency;
 import com.mercury.core.time.HolidayCalendar;
-import com.mercury.core.time.SimulationClock;
 import com.mercury.core.time.Tenor;
 import com.mercury.curve.CurveBootstrapper;
 import com.mercury.curve.CurveInstrument;
@@ -87,11 +86,6 @@ public final class DemoScenario {
     private static final CurrencyPair EURUSD = CurrencyPair.parse("EUR/USD");
 
     private DemoScenario() {
-    }
-
-    /** A clock frozen at the valuation date, injected rather than read. */
-    public static SimulationClock clock() {
-        return SimulationClock.fixedAt(VALUATION_DATE);
     }
 
     public static List<FinancialInstrument> instruments() {

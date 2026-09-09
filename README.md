@@ -173,7 +173,13 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 
 ## Built so far
 
-- **An order book with real data structures.** Price-time priority via a `TreeMap` of
+- **An order book with real data structures** — *and not yet wired to the book.* The matching
+  engine is 979 lines that no production code calls: it is tested and benchmarked, and nothing
+  in the demo, the portfolio or the ledger routes a trade through it. The trades that build the
+  demo's positions are written by hand. M8 is what connects them, and until it does, this repo
+  contains a matching engine and a portfolio that have never met. Said here because the rest of
+  this section would otherwise imply one system.
+  Price-time priority via a `TreeMap` of
   price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
   [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
   execute at the *resting* order's price — the rule most often got wrong.
@@ -226,6 +232,21 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   A flat rate is now the one-pillar case of the same type, which is how the whole pricing stack
   moved onto curves without a single reference value changing.
 
+### Dead weight, looked for on purpose
+
+A build check fails on any public method nobody calls, in both modules. That catches unused
+API and cannot see the larger problem, so as of M7 the audits also look for abstractions built
+ahead of any consumer — and label the ones being kept:
+
+| | Standing |
+|---|---|
+| `matching` package | 979 lines, no production caller. Connected at M8 |
+| `assetClass()`, `tradability()` | Implemented six times, read by nothing. `tradability` routes to a venue at M8; if it doesn't, both should go |
+| `HasUnderlying`, `OptionTerms` | One implementor each, and callers use the concrete type. Kept for a second option type, deleted if one doesn't arrive |
+| `SimulationClock` | The ArchUnit rule banning clock reads is doing the work; the type is unused until the M14 harness |
+
+Each is labelled in its own javadoc too, so the note is where the reader is, not only here.
+
 ## Planned, not yet built
 
 Listed separately on purpose — a README that describes intentions in the present tense is
@@ -263,7 +284,8 @@ Layering is enforced by ArchUnit tests rather than asserted in documentation.
 | 5 | Distributed compute — only if a requirement justifies it |
 
 The order book ships early (milestone 3), ahead of pricing and portfolio, so the most
-technically interesting component exists first. Milestone-level detail is in the
+technically interesting component exists first — at the cost, still unpaid at M7, of it
+standing apart from everything built since. Milestone-level detail is in the
 [design proposal](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
 There is deliberately **no web dashboard** on the roadmap; the reasoning is in

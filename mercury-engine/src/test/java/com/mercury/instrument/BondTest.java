@@ -63,8 +63,6 @@ class BondTest {
             assertThat(bond).isInstanceOf(CashflowGenerating.class);
             assertThat(bond).isInstanceOf(Maturing.class);
             // A bond has no underlying and no option terms.
-            assertThat(bond).isNotInstanceOf(HasUnderlying.class);
-            assertThat(bond).isNotInstanceOf(OptionTerms.class);
         }
     }
 

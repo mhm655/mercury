@@ -94,6 +94,23 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
      * {@code double -> BigDecimal} boundary is greppable, and so nobody converts by
      * accident. Rejects NaN and infinity, which are how a broken model most often
      * announces itself.
+     *
+     * <h2>Multiply first, then convert, and round once</h2>
+     * This is the rule every caller of this method follows, stated here so that it is
+     * stated once. Form the whole product in the model domain - unit value times quantity
+     * times any FX rate - and cross into {@code Money} at the end.
+     *
+     * <p>Rounding earlier scales the error by everything that comes after it. A unit value
+     * of 24.4987 rounded to 24.50 first is 0.13 out across a hundred contracts. Worse, it
+     * quantises the result: a numerical delta once came out as exactly 50.0 against an
+     * analytic 61.23, because a per-contract move of 0.0122 could only round to one cent or
+     * two. That is the defect this rule exists to prevent, and it was found by reading a
+     * report, not by a failing test.
+     *
+     * <p>Applied in {@code PortfolioValuationService} for a position's market value, in
+     * {@code Bond} for a coupon, and in {@code PortfolioLedger} for a trade's consideration.
+     * Each of those points here rather than retelling it. See ADR 0001 for the wider split
+     * between exact ledger amounts and approximate model output.
      */
     public static Money fromModelValue(double modelValue, Currency currency) {
         if (!Double.isFinite(modelValue)) {

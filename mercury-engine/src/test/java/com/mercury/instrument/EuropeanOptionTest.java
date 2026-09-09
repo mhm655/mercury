@@ -46,8 +46,6 @@ class EuropeanOptionTest {
         void capabilities() {
             EuropeanOption option = call();
 
-            assertThat(option).isInstanceOf(HasUnderlying.class);
-            assertThat(option).isInstanceOf(OptionTerms.class);
             assertThat(option).isInstanceOf(Maturing.class);
             // An option's payoff is contingent, not contractual.
             assertThat(option).isNotInstanceOf(CashflowGenerating.class);

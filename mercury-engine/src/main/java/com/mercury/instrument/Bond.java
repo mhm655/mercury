@@ -31,7 +31,8 @@ import java.util.Objects;
  * comes from the bond's day count convention over its accrual period. The coupon rate is a
  * {@link BigDecimal} because it is a contract term and exact ("5%" means exactly 5%); the
  * year fraction is a {@code double} because it is computed. They are multiplied together
- * before touching {@code Money}, so the amount rounds exactly once - see ADR 0001.
+ * before touching {@code Money}, so the amount rounds exactly once - the rule is stated in
+ * full on {@link Money#fromModelValue} and in ADR 0001.
  *
  * <p>Immutable and thread-safe. The schedule is generated once at construction.
  */
