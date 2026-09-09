@@ -10,7 +10,9 @@ import com.mercury.instrument.AccruingInterest;
 import com.mercury.curve.YieldCurve;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
+import com.mercury.portfolio.PnlStatement;
 import com.mercury.portfolio.Portfolio;
+import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
 import com.mercury.risk.SensitivityCalculator;
 import java.time.LocalDate;
@@ -60,20 +62,22 @@ public final class ValuationReport {
     }
 
     /** The whole report: positions, total, deltas, and a stress scenario. */
-    public static String render(Portfolio portfolio, PortfolioValuation valuation,
+    public static String render(PortfolioLedger ledger, PortfolioValuation valuation,
                                 MarketDataSnapshot market, SensitivityCalculator sensitivities,
                                 RiskFactors riskFactors, LocalDate asOf) {
-        Objects.requireNonNull(portfolio, "portfolio");
+        Objects.requireNonNull(ledger, "ledger");
         Objects.requireNonNull(valuation, "valuation");
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(sensitivities, "sensitivities");
         Objects.requireNonNull(riskFactors, "riskFactors");
         Objects.requireNonNull(asOf, "asOf");
 
+        Portfolio portfolio = ledger.toPortfolio();
         StringBuilder out = new StringBuilder(2048);
         header(out, portfolio, asOf);
         positions(out, valuation);
         currencies(out, valuation, portfolio);
+        cashAndPnl(out, ledger, valuation, market);
         accruals(out, valuation, asOf);
         curves(out, market, riskFactors, asOf);
         risk(out, portfolio, market, sensitivities, riskFactors, asOf);
@@ -110,6 +114,46 @@ public final class ValuationReport {
         }
         line(out, "  %s", ROW);
         line(out, "  %-48s %16s", "TOTAL", valuation.totalValue().amount().toPlainString());
+        line(out, "");
+    }
+
+    /**
+     * Cash, profit already taken, and profit still at risk.
+     *
+     * <h2>Why realised and unrealised are two rows and never one</h2>
+     * Realised profit is a fact: the trade happened, the cash moved, and no later market can
+     * change it. Unrealised profit is an opinion - the difference between what a position cost
+     * and what a model says it is worth today. Adding them is how a book that has been quietly
+     * losing money for a year still looks profitable, and how a good one looks alarming after a
+     * bad afternoon.
+     *
+     * <p>The net asset value line is what makes the cash balances mean something. Positions
+     * alone are not what the book is worth; the cash spent acquiring them is part of the same
+     * number, and a report showing only the first would make every purchase look like a gain.
+     */
+    private static void cashAndPnl(StringBuilder out, PortfolioLedger ledger,
+                                   PortfolioValuation valuation, MarketDataSnapshot market) {
+        Currency reporting = valuation.totalValue().currency();
+        line(out, "CASH");
+        Money cashInReporting = Money.zero(reporting);
+        for (Currency currency : ledger.cash().currencies()) {
+            Money balance = ledger.cash().balance(currency);
+            line(out, "  %-48s %16s", currency.code(), balance.amount().toPlainString());
+            cashInReporting = cashInReporting.plus(currency == reporting
+                    ? balance
+                    : Money.fromModelValue(
+                            balance.amount().doubleValue() * market.fxRate(currency, reporting),
+                            reporting));
+        }
+        line(out, "  %-48s %16s", "NET ASSET VALUE  (positions + cash)",
+                valuation.totalValue().plus(cashInReporting).amount().toPlainString());
+        line(out, "");
+
+        PnlStatement pnl = PnlStatement.of(ledger, valuation, market);
+        line(out, "PROFIT AND LOSS  (%s cost basis)", ledger.costBasisMethod().displayName());
+        line(out, "  %-48s %16s", "Realised", pnl.realised().amount().toPlainString());
+        line(out, "  %-48s %16s", "Unrealised", pnl.unrealised().amount().toPlainString());
+        line(out, "  %-48s %16s", "Total", pnl.total().amount().toPlainString());
         line(out, "");
     }
 

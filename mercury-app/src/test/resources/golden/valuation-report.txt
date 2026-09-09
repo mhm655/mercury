@@ -22,6 +22,16 @@ EXPOSURE BY CURRENCY  (positions settling in each, valued in USD)
   USD                                                     559584.66
   EUR                                                     211167.73
 
+CASH
+  USD                                                     469100.00
+  EUR                                                    -198000.00
+  NET ASSET VALUE  (positions + cash)                    1027497.39
+
+PROFIT AND LOSS  (FIFO cost basis)
+  Realised                                                  2400.00
+  Unrealised                                               25097.39
+  Total                                                    27497.39
+
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
   CORP-5Y               1010.9455         1.3700      1012.3155

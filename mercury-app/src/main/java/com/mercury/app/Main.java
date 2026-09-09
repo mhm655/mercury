@@ -26,7 +26,7 @@ public final class Main {
                 .value(portfolio, DemoScenario.market(), DemoScenario.VALUATION_DATE);
 
         String report = ValuationReport.render(
-                portfolio,
+                DemoScenario.ledger(),
                 valuation,
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),

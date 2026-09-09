@@ -6,6 +6,7 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
+import com.mercury.core.money.Quantity;
 import com.mercury.core.time.Frequency;
 import com.mercury.core.time.HolidayCalendar;
 import com.mercury.core.time.SimulationClock;
@@ -23,8 +24,11 @@ import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.InterestRateSwap;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
+import com.mercury.portfolio.CashAccount;
+import com.mercury.portfolio.CostBasisMethod;
 import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.portfolio.Portfolio;
+import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuationService;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
@@ -64,6 +68,16 @@ public final class DemoScenario {
 
     /** Fixed, so the scenario never depends on when it is run. */
     public static final LocalDate VALUATION_DATE = LocalDate.of(2024, 6, 28);
+
+    /**
+     * What the book started with, before it held anything.
+     *
+     * <p>Named rather than buried in {@link #ledger()} because it is what makes the whole
+     * report checkable: a book that began as cash and nothing else must have made exactly
+     * {@code net asset value - opening cash}, so total profit and loss has an answer that owes
+     * nothing to the P&amp;L code.
+     */
+    public static final Money OPENING_CASH = Money.of("1000000", Currency.USD);
 
     private static final LocalDate EXPIRY = LocalDate.of(2025, 6, 20);
     private static final LocalDate BOND_MATURITY = LocalDate.of(2029, 6, 15);
@@ -210,16 +224,46 @@ public final class DemoScenario {
      * portfolio, settling in two currencies.
      */
     public static Portfolio portfolio() {
-        return Portfolio.builder(PortfolioId.of("US-EQUITY-BOOK"), Currency.USD)
-                .position(AAPL, 1_000)
-                .position(MSFT, 250)
-                .position(AAPL_CALL, -5)
-                .position(AAPL_PUT, 8)
-                .position(CORP_BOND, 250)
-                .position(EUR_FORWARD, 1)
-                .position(SWAP, 1)
-                .position(EUR_BOND, 200)
-                .build();
+        return ledger().toPortfolio();
+    }
+
+    /**
+     * How the book got to where it is: eight trades, one of them closed at a profit.
+     *
+     * <p>The positions are no longer declared - they are what this history adds up to. That is
+     * the point of keeping a ledger separate from a portfolio: a quantity says what is held and
+     * cannot say what it cost, so realised profit, cost basis and cash all need the trades that
+     * produced them.
+     *
+     * <p>The AAPL line is deliberately not a single purchase. Twelve hundred were bought in
+     * February and two hundred sold in May, which realises 2,400 of profit and leaves the
+     * thousand still held - so the report has something to show in both P&amp;L columns rather
+     * than a realised figure that is always zero.
+     *
+     * <p>The swap and the FX forward are booked at nothing, because that is what they cost.
+     * Neither has a price to quote at inception, so their entire value is unrealised from the
+     * first day - which is exactly what the P&amp;L block shows.
+     */
+    public static PortfolioLedger ledger() {
+        return PortfolioLedger.opening(PortfolioId.of("US-EQUITY-BOOK"), Currency.USD,
+                        CostBasisMethod.FIRST_IN_FIRST_OUT,
+                        CashAccount.of(OPENING_CASH))
+                .buy(AAPL, Quantity.of(1_200), Price.of("180.00"), Currency.USD,
+                        LocalDate.of(2024, 2, 15))
+                .sell(AAPL, Quantity.of(200), Price.of("192.00"), Currency.USD,
+                        LocalDate.of(2024, 5, 10))
+                .buy(MSFT, Quantity.of(250), Price.of("430.00"), Currency.USD,
+                        LocalDate.of(2024, 3, 1))
+                .sell(AAPL_CALL, Quantity.of(5), Price.of("2500.00"), Currency.USD,
+                        LocalDate.of(2024, 5, 2))
+                .buy(AAPL_PUT, Quantity.of(8), Price.of("1100.00"), Currency.USD,
+                        LocalDate.of(2024, 5, 2))
+                .buy(CORP_BOND, Quantity.of(250), Price.of("998.00"), Currency.USD,
+                        LocalDate.of(2024, 6, 20))
+                .trade(EUR_FORWARD, Quantity.of(1), Money.zero(Currency.USD), VALUATION_DATE)
+                .trade(SWAP, Quantity.of(1), Money.zero(Currency.USD), VALUATION_DATE)
+                .buy(EUR_BOND, Quantity.of(200), Price.of("990.00"), Currency.EUR,
+                        VALUATION_DATE);
     }
 
     /**

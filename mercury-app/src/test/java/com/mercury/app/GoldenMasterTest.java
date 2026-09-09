@@ -3,8 +3,12 @@ package com.mercury.app;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.offset;
 
+import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
+import com.mercury.marketdata.MarketDataSnapshot;
+import com.mercury.portfolio.PnlStatement;
 import com.mercury.portfolio.Portfolio;
+import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
 import java.io.IOException;
 import java.io.InputStream;
@@ -118,6 +122,46 @@ class GoldenMasterTest {
                 .contains("EUR/USD")
                 .contains("USD")
                 .contains("EUR");
+    }
+
+    @Test
+    @DisplayName("total profit is exactly what the book has made since it opened")
+    void profitReconcilesAgainstOpeningCash() {
+        // The strongest check in the suite, because it owes nothing to the code it checks.
+        // This book began as one million of cash and nothing else. Whatever it has done since,
+        // its profit must be what it is worth now - positions plus cash - minus what it
+        // started with. Cost basis, FIFO matching, realised-versus-unrealised and the FX
+        // conversion all have to be right at once for that to come out.
+        PortfolioLedger ledger = DemoScenario.ledger();
+        MarketDataSnapshot market = DemoScenario.market();
+        PortfolioValuation valuation = valueDemoPortfolio();
+
+        Money cash = Money.zero(Currency.USD);
+        for (Currency currency : ledger.cash().currencies()) {
+            Money balance = ledger.cash().balance(currency);
+            cash = cash.plus(currency == Currency.USD ? balance
+                    : Money.fromModelValue(balance.amount().doubleValue()
+                            * market.fxRate(currency, Currency.USD), Currency.USD));
+        }
+        Money netAssetValue = valuation.totalValue().plus(cash);
+        Money madeSinceOpening = netAssetValue.minus(DemoScenario.OPENING_CASH);
+
+        PnlStatement pnl = PnlStatement.of(ledger, valuation, market);
+
+        assertThat(pnl.total()).isEqualTo(madeSinceOpening);
+        assertThat(pnl.realised()).isEqualTo(Money.of("2400.00", Currency.USD));
+    }
+
+    @Test
+    @DisplayName("realised and unrealised profit are reported as separate lines")
+    void pnlIsSplit() {
+        // One figure would let a book that has been quietly losing money look profitable.
+        assertThat(runScenario())
+                .contains("PROFIT AND LOSS")
+                .contains("FIFO cost basis")
+                .contains("Realised")
+                .contains("Unrealised")
+                .contains("NET ASSET VALUE");
     }
 
     @Test
@@ -238,7 +282,7 @@ class GoldenMasterTest {
     private static String runScenario() {
         Portfolio portfolio = DemoScenario.portfolio();
         return ValuationReport.render(
-                portfolio,
+                DemoScenario.ledger(),
                 valueDemoPortfolio(),
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),
