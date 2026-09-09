@@ -2,6 +2,7 @@ package com.mercury.matching;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
@@ -34,6 +35,19 @@ import net.jqwik.api.statistics.Statistics;
 class OrderBookProperties {
 
     private static final InstrumentId AAPL = InstrumentId.of("AAPL");
+
+    /**
+     * Buy and sell actions get distinct owners, same as {@code OrderBookTest}: these
+     * properties are about price-time priority and book invariants under load, not
+     * self-trade prevention (which has its own targeted tests in {@code OrderBookTest}), and
+     * a single shared owner would silently block every crossing action generated here.
+     */
+    private static final CounterpartyId BUY_OWNER = CounterpartyId.of("CPTY-PROP-BUY");
+    private static final CounterpartyId SELL_OWNER = CounterpartyId.of("CPTY-PROP-SELL");
+
+    private static CounterpartyId ownerFor(Side side) {
+        return side.isBuy() ? BUY_OWNER : SELL_OWNER;
+    }
 
     private static final String DEPTH = "book depth reached";
 
@@ -115,7 +129,8 @@ class OrderBookProperties {
                 }
                 OrderId id = OrderId.of("O-" + counter++);
                 Order order = Order.limit(id, AAPL, action.side(),
-                        Price.of(BigDecimal.valueOf(action.priceTicks())), action.quantity());
+                        Price.of(BigDecimal.valueOf(action.priceTicks())), action.quantity(),
+                        ownerFor(action.side()));
 
                 MatchResult result = book.submit(order);
                 if (action.side().isBuy()) {
@@ -201,7 +216,8 @@ class OrderBookProperties {
             OrderId id = OrderId.of("O-" + counter++);
             submitted.add(id);
             MatchResult result = book.submit(Order.limit(id, AAPL, action.side(),
-                    Price.of(BigDecimal.valueOf(action.priceTicks())), action.quantity()));
+                    Price.of(BigDecimal.valueOf(action.priceTicks())), action.quantity(),
+                    ownerFor(action.side())));
 
             for (Fill fill : result.fills()) {
                 assertThat(fill.restingOrderId()).isNotEqualTo(fill.aggressingOrderId());
@@ -288,7 +304,7 @@ class OrderBookProperties {
             OrderId id = OrderId.of("O-" + i);
             ids.add(id);
             book.submit(Order.limit(id, AAPL, Side.BUY,
-                    Price.of(BigDecimal.valueOf(priceTicks + (i % 5))), 100));
+                    Price.of(BigDecimal.valueOf(priceTicks + (i % 5))), 100, BUY_OWNER));
         }
         ids.forEach(book::cancel);
 
@@ -308,7 +324,8 @@ class OrderBookProperties {
         for (Action action : actions) {
             Price limit = Price.of(BigDecimal.valueOf(action.priceTicks()));
             MatchResult result = book.submit(Order.limit(
-                    OrderId.of("O-" + counter++), AAPL, action.side(), limit, action.quantity()));
+                    OrderId.of("O-" + counter++), AAPL, action.side(), limit, action.quantity(),
+                    ownerFor(action.side())));
 
             for (Fill fill : result.fills()) {
                 if (action.side().isBuy()) {

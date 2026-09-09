@@ -6,6 +6,7 @@ import com.mercury.core.money.Price;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -123,14 +124,15 @@ public final class OrderBook {
         }
 
         List<Fill> fills = new ArrayList<>();
-        long remaining = match(order, fills);
+        List<SelfTradePrevention> selfTradePrevented = new ArrayList<>();
+        long remaining = match(order, fills, selfTradePrevented);
         long filled = order.quantity() - remaining;
 
         if (remaining > 0 && order.timeInForce().restsInBook()) {
             rest(order, remaining);
             return new MatchResult(order.id(),
                     filled > 0 ? OrderStatus.PARTIALLY_FILLED_RESTING : OrderStatus.RESTING,
-                    fills, filled, remaining);
+                    fills, selfTradePrevented, filled, remaining);
         }
         OrderStatus status;
         if (remaining == 0) {
@@ -140,50 +142,73 @@ public final class OrderBook {
         } else {
             status = OrderStatus.CANCELLED;
         }
-        return new MatchResult(order.id(), status, fills, filled, 0);
+        return new MatchResult(order.id(), status, fills, selfTradePrevented, filled, 0);
     }
 
     /**
      * Crosses {@code order} against the opposite side, appending executions to {@code fills}.
      *
-     * <p>Walks the opposite book from the best price outwards, taking each level's queue from
-     * the head so that price priority and time priority are both honoured. Stops when the
-     * order is filled, the book runs out, or the next level is a price the order will not
-     * accept.
+     * <p>Walks the opposite book from the best price outwards, price level by price level, so
+     * that price priority is honoured; within a level it walks from the head so time priority
+     * is honoured too. Stops when the order is filled, the book runs out, or the next level is
+     * a price the order will not accept.
+     *
+     * <h2>Self-trade prevention</h2>
+     * A resting order sharing {@code order.owner()} is never filled against - see
+     * {@link SelfTradePrevention}. It is left exactly where it is (still resting, still
+     * first in its level's queue for anyone else) and the walk continues to the next node,
+     * then the next level, on this aggressor's behalf only. That is why this method walks
+     * price levels with an explicit iterator rather than re-reading the cached top of book on
+     * every pass, as an earlier version did: a level that is blocked rather than exhausted
+     * never empties, so re-reading the cache would read the same level forever.
      *
      * @return the quantity still unfilled
      */
-    private long match(Order order, List<Fill> fills) {
+    private long match(Order order, List<Fill> fills, List<SelfTradePrevention> selfTradePrevented) {
         long remaining = order.quantity();
-        TreeMap<Price, PriceLevel> opposite = order.isBuy() ? asks : bids;
+        boolean buy = order.isBuy();
+        TreeMap<Price, PriceLevel> opposite = buy ? asks : bids;
 
-        while (remaining > 0) {
-            PriceLevel level = order.isBuy() ? bestAsk : bestBid;
-            if (level == null || !order.acceptsPrice(level.price())) {
+        Iterator<PriceLevel> levels = opposite.values().iterator();
+        while (remaining > 0 && levels.hasNext()) {
+            PriceLevel level = levels.next();
+            if (!order.acceptsPrice(level.price())) {
                 break;
             }
-            while (remaining > 0 && !level.isEmpty()) {
-                OrderNode resting = level.head();
-                long fillQuantity = Math.min(remaining, resting.remainingQuantity());
+
+            OrderNode node = level.head();
+            while (remaining > 0 && node != null) {
+                OrderNode candidate = node;
+                node = candidate.next;
+
+                if (candidate.order().owner().equals(order.owner())) {
+                    long blocked = Math.min(remaining, candidate.remainingQuantity());
+                    selfTradePrevented.add(new SelfTradePrevention(
+                            instrumentId, candidate.orderId(), order.id(), blocked));
+                    continue;
+                }
+
+                long fillQuantity = Math.min(remaining, candidate.remainingQuantity());
 
                 // Executes at the RESTING order's price, never the aggressor's: the resting
                 // order named its price first and is entitled to it, and the aggressor takes
                 // the price improvement. See Fill's documentation.
-                fills.add(new Fill(++fillSequence, instrumentId, resting.orderId(), order.id(),
+                fills.add(new Fill(++fillSequence, instrumentId, candidate.orderId(), order.id(),
                         order.side(), level.price(), fillQuantity));
 
-                resting.reduceBy(fillQuantity);
+                candidate.reduceBy(fillQuantity);
                 level.recordFill(fillQuantity);
                 remaining -= fillQuantity;
 
-                if (resting.isFullyFilled()) {
-                    level.remove(resting);
-                    restingOrders.remove(resting.orderId());
+                if (candidate.isFullyFilled()) {
+                    level.remove(candidate);
+                    restingOrders.remove(candidate.orderId());
                 }
             }
+
             if (level.isEmpty()) {
-                opposite.remove(level.price());
-                refreshBest(order.isBuy() ? Side.SELL : Side.BUY);
+                levels.remove();
+                refreshBest(buy ? Side.SELL : Side.BUY);
             }
         }
         return remaining;

@@ -86,7 +86,8 @@ public class DestructiveOrderBookBenchmark {
     @OperationsPerInvocation(OrderBookBenchmark.ORDER_COUNT)
     public int matchSweep() {
         Order sweeper = Order.market(OrderId.of("SWEEP"), OrderBookBenchmark.AAPL, Side.SELL,
-                (long) OrderBookBenchmark.ORDER_COUNT * OrderBookBenchmark.QUANTITY_PER_ORDER);
+                (long) OrderBookBenchmark.ORDER_COUNT * OrderBookBenchmark.QUANTITY_PER_ORDER,
+                OrderBookBenchmark.SWEEPER_OWNER);
         return book.submit(sweeper).fills().size();
     }
 }

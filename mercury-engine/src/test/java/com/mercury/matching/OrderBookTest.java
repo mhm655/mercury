@@ -3,6 +3,7 @@ package com.mercury.matching;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
@@ -16,6 +17,15 @@ import org.junit.jupiter.api.Test;
 class OrderBookTest {
 
     private static final InstrumentId AAPL = InstrumentId.of("AAPL");
+
+    /**
+     * Buy-side and sell-side helpers use distinct owners so ordinary tests keep crossing
+     * normally under self-trade prevention (G-2) - two different market participants, exactly
+     * as a real book has. The self-trade-prevention tests below use their own, deliberately
+     * shared, owner instead.
+     */
+    private static final CounterpartyId BUYER = CounterpartyId.of("CPTY-BUYER");
+    private static final CounterpartyId SELLER = CounterpartyId.of("CPTY-SELLER");
 
     private OrderBook book;
     private AtomicInteger orderCounter;
@@ -31,19 +41,19 @@ class OrderBookTest {
     }
 
     private MatchResult buy(String price, long quantity) {
-        return book.submit(Order.limit(nextId(), AAPL, Side.BUY, Price.of(price), quantity));
+        return book.submit(Order.limit(nextId(), AAPL, Side.BUY, Price.of(price), quantity, BUYER));
     }
 
     private MatchResult sell(String price, long quantity) {
-        return book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of(price), quantity));
+        return book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of(price), quantity, SELLER));
     }
 
     private MatchResult marketBuy(long quantity) {
-        return book.submit(Order.market(nextId(), AAPL, Side.BUY, quantity));
+        return book.submit(Order.market(nextId(), AAPL, Side.BUY, quantity, BUYER));
     }
 
     private MatchResult marketSell(long quantity) {
-        return book.submit(Order.market(nextId(), AAPL, Side.SELL, quantity));
+        return book.submit(Order.market(nextId(), AAPL, Side.SELL, quantity, SELLER));
     }
 
     @Nested
@@ -178,9 +188,9 @@ class OrderBookTest {
             OrderId first = nextId();
             OrderId second = nextId();
             OrderId third = nextId();
-            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100));
-            book.submit(Order.limit(second, AAPL, Side.SELL, Price.of("100.00"), 100));
-            book.submit(Order.limit(third, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
+            book.submit(Order.limit(second, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
+            book.submit(Order.limit(third, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
 
             MatchResult result = buy("100.00", 250);
 
@@ -195,8 +205,8 @@ class OrderBookTest {
         void partialFillKeepsPriority() {
             OrderId first = nextId();
             OrderId second = nextId();
-            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100));
-            book.submit(Order.limit(second, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
+            book.submit(Order.limit(second, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
 
             buy("100.00", 60);   // takes 60 of the first order
             MatchResult next = buy("100.00", 60);
@@ -212,8 +222,8 @@ class OrderBookTest {
         void betterPriceStillWinsOverTime() {
             OrderId early = nextId();
             OrderId lateButBetter = nextId();
-            book.submit(Order.limit(early, AAPL, Side.SELL, Price.of("101.00"), 100));
-            book.submit(Order.limit(lateButBetter, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(early, AAPL, Side.SELL, Price.of("101.00"), 100, SELLER));
+            book.submit(Order.limit(lateButBetter, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
 
             MatchResult result = buy("101.00", 100);
 
@@ -361,7 +371,8 @@ class OrderBookTest {
         @DisplayName("cannot be constructed with a limit price")
         void rejectPriceOnMarketOrder() {
             assertThatThrownBy(() -> new Order(OrderId.of("X"), AAPL, Side.BUY, OrderType.MARKET,
-                    java.util.Optional.of(Price.of("100")), 100, TimeInForce.IMMEDIATE_OR_CANCEL))
+                    java.util.Optional.of(Price.of("100")), 100, TimeInForce.IMMEDIATE_OR_CANCEL,
+                    BUYER))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("must not state a limit price");
         }
@@ -370,7 +381,7 @@ class OrderBookTest {
         @DisplayName("cannot be good-till-cancel, having no price to rest at")
         void rejectGtcMarketOrder() {
             assertThatThrownBy(() -> new Order(OrderId.of("X"), AAPL, Side.BUY, OrderType.MARKET,
-                    java.util.Optional.empty(), 100, TimeInForce.GOOD_TILL_CANCEL))
+                    java.util.Optional.empty(), 100, TimeInForce.GOOD_TILL_CANCEL, BUYER))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("cannot rest");
         }
@@ -386,7 +397,7 @@ class OrderBookTest {
             sell("100.00", 40);
 
             MatchResult result = book.submit(Order.immediateOrCancel(
-                    nextId(), AAPL, Side.BUY, Price.of("100.00"), 100));
+                    nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, BUYER));
 
             assertThat(result.status()).isEqualTo(OrderStatus.PARTIALLY_FILLED_CANCELLED);
             assertThat(result.filledQuantity()).isEqualTo(40);
@@ -399,7 +410,7 @@ class OrderBookTest {
             sell("105.00", 100);
 
             MatchResult result = book.submit(Order.immediateOrCancel(
-                    nextId(), AAPL, Side.BUY, Price.of("100.00"), 100));
+                    nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, BUYER));
 
             assertThat(result.status()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(result.fills()).isEmpty();
@@ -414,7 +425,7 @@ class OrderBookTest {
         @DisplayName("removes a resting order")
         void cancelsRestingOrder() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 500));
+            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 500, BUYER));
 
             assertThat(book.cancel(id)).isPresent();
 
@@ -430,9 +441,9 @@ class OrderBookTest {
             OrderId first = nextId();
             OrderId middle = nextId();
             OrderId last = nextId();
-            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100));
-            book.submit(Order.limit(middle, AAPL, Side.SELL, Price.of("100.00"), 100));
-            book.submit(Order.limit(last, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(first, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
+            book.submit(Order.limit(middle, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
+            book.submit(Order.limit(last, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
 
             book.cancel(middle);
 
@@ -447,7 +458,7 @@ class OrderBookTest {
         @DisplayName("removes the price level when the last order at it is cancelled")
         void removesEmptyLevel() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100));
+            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100, BUYER));
             buy("99.00", 100);
 
             book.cancel(id);
@@ -467,7 +478,7 @@ class OrderBookTest {
         @DisplayName("cancelling twice is harmless")
         void doubleCancelIsHarmless() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100));
+            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100, BUYER));
 
             assertThat(book.cancel(id)).isPresent();
             assertThat(book.cancel(id)).isEmpty();
@@ -477,7 +488,7 @@ class OrderBookTest {
         @DisplayName("a filled order can no longer be cancelled")
         void filledOrderCannotBeCancelled() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(id, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
             buy("100.00", 100);
 
             assertThat(book.cancel(id)).isEmpty();
@@ -487,7 +498,7 @@ class OrderBookTest {
         @DisplayName("a partially filled order can be cancelled for its remainder")
         void cancelsPartiallyFilledRemainder() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.SELL, Price.of("100.00"), 100));
+            book.submit(Order.limit(id, AAPL, Side.SELL, Price.of("100.00"), 100, SELLER));
             buy("100.00", 30);
 
             assertThat(book.cancel(id)).isPresent();
@@ -577,7 +588,7 @@ class OrderBookTest {
         @DisplayName("rejects an order for a different instrument")
         void rejectsWrongInstrument() {
             Order wrong = Order.limit(nextId(), InstrumentId.of("MSFT"), Side.BUY,
-                    Price.of("100"), 100);
+                    Price.of("100"), 100, BUYER);
 
             assertThatThrownBy(() -> book.submit(wrong))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -588,10 +599,10 @@ class OrderBookTest {
         @DisplayName("rejects a duplicate resting order id")
         void rejectsDuplicateId() {
             OrderId id = nextId();
-            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100));
+            book.submit(Order.limit(id, AAPL, Side.BUY, Price.of("100.00"), 100, BUYER));
 
             assertThatThrownBy(() -> book.submit(
-                    Order.limit(id, AAPL, Side.BUY, Price.of("101.00"), 100)))
+                    Order.limit(id, AAPL, Side.BUY, Price.of("101.00"), 100, BUYER)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("already resting");
         }
@@ -599,7 +610,7 @@ class OrderBookTest {
         @Test
         @DisplayName("rejects a non-positive order quantity")
         void rejectsNonPositiveQuantity() {
-            assertThatThrownBy(() -> Order.limit(nextId(), AAPL, Side.BUY, Price.of("100"), 0))
+            assertThatThrownBy(() -> Order.limit(nextId(), AAPL, Side.BUY, Price.of("100"), 0, BUYER))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("must be positive");
         }
@@ -614,6 +625,82 @@ class OrderBookTest {
             List<Fill> fills = result.fills();
 
             assertThat(fills.get(0).sequence()).isLessThan(fills.get(1).sequence());
+        }
+    }
+
+    @Nested
+    @DisplayName("self-trade prevention (G-2)")
+    class SelfTradePreventionTests {
+
+        /** Deliberately the same owner on both sides, unlike every other test in this class. */
+        private static final CounterpartyId SAME_OWNER = CounterpartyId.of("CPTY-SAME");
+        private static final CounterpartyId DIFFERENT_OWNER = CounterpartyId.of("CPTY-DIFFERENT");
+
+        @Test
+        @DisplayName("a same-owner pairing does not fill")
+        void sameOwnerDoesNotFill() {
+            OrderId resting = nextId();
+            book.submit(Order.limit(resting, AAPL, Side.SELL, Price.of("100.00"), 100, SAME_OWNER));
+
+            MatchResult result = book.submit(
+                    Order.limit(nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, SAME_OWNER));
+
+            assertThat(result.fills()).isEmpty();
+            assertThat(result.status()).isEqualTo(OrderStatus.RESTING);
+            // The blocked resting order is untouched - still there for anyone else.
+            assertThat(book.contains(resting)).isTrue();
+            assertThat(book.bestAskQuantity()).isEqualTo(100);
+        }
+
+        @Test
+        @DisplayName("records what it blocked, naming both orders and the quantity")
+        void recordsTheBlockedFact() {
+            OrderId resting = nextId();
+            book.submit(Order.limit(resting, AAPL, Side.SELL, Price.of("100.00"), 100, SAME_OWNER));
+
+            OrderId aggressor = nextId();
+            MatchResult result = book.submit(
+                    Order.limit(aggressor, AAPL, Side.BUY, Price.of("100.00"), 100, SAME_OWNER));
+
+            assertThat(result.selfTradePrevented()).hasSize(1);
+            SelfTradePrevention prevented = result.selfTradePrevented().get(0);
+            assertThat(prevented.restingOrderId()).isEqualTo(resting);
+            assertThat(prevented.aggressingOrderId()).isEqualTo(aggressor);
+            assertThat(prevented.quantity()).isEqualTo(100);
+        }
+
+        @Test
+        @DisplayName("is a targeted skip of one pairing, not a book-wide freeze")
+        void thirdPartyStillMatchesNormally() {
+            book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of("100.00"), 100, SAME_OWNER));
+            OrderId genuineSeller = nextId();
+            book.submit(Order.limit(
+                    genuineSeller, AAPL, Side.SELL, Price.of("100.00"), 100, DIFFERENT_OWNER));
+
+            MatchResult result = book.submit(
+                    Order.limit(nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, SAME_OWNER));
+
+            assertThat(result.fills()).hasSize(1);
+            assertThat(result.fills().get(0).restingOrderId()).isEqualTo(genuineSeller);
+            assertThat(result.filledQuantity()).isEqualTo(100);
+            assertThat(result.selfTradePrevented()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a large aggressor sweeps past a blocked level to a genuine one beyond it")
+        void sweepsPastBlockedLevel() {
+            book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of("100.00"), 100, SAME_OWNER));
+            OrderId genuineSeller = nextId();
+            book.submit(Order.limit(
+                    genuineSeller, AAPL, Side.SELL, Price.of("101.00"), 100, DIFFERENT_OWNER));
+
+            MatchResult result = book.submit(
+                    Order.limit(nextId(), AAPL, Side.BUY, Price.of("101.00"), 100, SAME_OWNER));
+
+            assertThat(result.fills()).hasSize(1);
+            assertThat(result.fills().get(0).price()).isEqualTo(Price.of("101.00"));
+            assertThat(result.selfTradePrevented()).hasSize(1);
+            assertThat(book.bestAsk()).contains(Price.of("100.00"));
         }
     }
 }

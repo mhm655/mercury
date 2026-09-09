@@ -18,6 +18,7 @@ public record MatchResult(
         OrderId orderId,
         OrderStatus status,
         List<Fill> fills,
+        List<SelfTradePrevention> selfTradePrevented,
         long filledQuantity,
         long restingQuantity) {
 
@@ -25,7 +26,9 @@ public record MatchResult(
         Objects.requireNonNull(orderId, "orderId");
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(fills, "fills");
+        Objects.requireNonNull(selfTradePrevented, "selfTradePrevented");
         fills = List.copyOf(fills);
+        selfTradePrevented = List.copyOf(selfTradePrevented);
 
         if (filledQuantity < 0 || restingQuantity < 0) {
             throw new IllegalArgumentException(

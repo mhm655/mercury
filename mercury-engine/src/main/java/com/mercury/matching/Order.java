@@ -1,5 +1,6 @@
 package com.mercury.matching;
 
+import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
@@ -26,6 +27,13 @@ import java.util.Optional;
  * decision first and a performance one second - though it does also keep the matching loop
  * free of allocation.
  *
+ * <h2>Owner</h2>
+ * {@code owner} identifies who submitted the order - reusing {@link CounterpartyId} rather
+ * than inventing a separate trader identity, since it is the same "who is this" question the
+ * OTC venue already answers. It exists so the book can refuse to match an order against
+ * another resting order with the same owner: see {@code OrderBook.match} and
+ * {@link SelfTradePrevention}.
+ *
  * <p>Immutable and thread-safe.
  */
 public record Order(
@@ -35,7 +43,8 @@ public record Order(
         OrderType type,
         Optional<Price> limitPrice,
         long quantity,
-        TimeInForce timeInForce) {
+        TimeInForce timeInForce,
+        CounterpartyId owner) {
 
     public Order {
         Objects.requireNonNull(id, "id");
@@ -44,6 +53,7 @@ public record Order(
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(limitPrice, "limitPrice");
         Objects.requireNonNull(timeInForce, "timeInForce");
+        Objects.requireNonNull(owner, "owner");
 
         if (quantity <= 0) {
             throw new IllegalArgumentException(
@@ -69,22 +79,23 @@ public record Order(
 
     /** A limit order that rests until filled or cancelled. */
     public static Order limit(OrderId id, InstrumentId instrumentId, Side side,
-                              Price limitPrice, long quantity) {
+                              Price limitPrice, long quantity, CounterpartyId owner) {
         return new Order(id, instrumentId, side, OrderType.LIMIT, Optional.of(limitPrice),
-                quantity, TimeInForce.GOOD_TILL_CANCEL);
+                quantity, TimeInForce.GOOD_TILL_CANCEL, owner);
     }
 
     /** A limit order that takes what it can immediately and cancels the rest. */
     public static Order immediateOrCancel(OrderId id, InstrumentId instrumentId, Side side,
-                                          Price limitPrice, long quantity) {
+                                          Price limitPrice, long quantity, CounterpartyId owner) {
         return new Order(id, instrumentId, side, OrderType.LIMIT, Optional.of(limitPrice),
-                quantity, TimeInForce.IMMEDIATE_OR_CANCEL);
+                quantity, TimeInForce.IMMEDIATE_OR_CANCEL, owner);
     }
 
     /** A market order: takes whatever liquidity exists, cancels any remainder. */
-    public static Order market(OrderId id, InstrumentId instrumentId, Side side, long quantity) {
+    public static Order market(OrderId id, InstrumentId instrumentId, Side side, long quantity,
+                               CounterpartyId owner) {
         return new Order(id, instrumentId, side, OrderType.MARKET, Optional.empty(),
-                quantity, TimeInForce.IMMEDIATE_OR_CANCEL);
+                quantity, TimeInForce.IMMEDIATE_OR_CANCEL, owner);
     }
 
     public boolean isBuy() {

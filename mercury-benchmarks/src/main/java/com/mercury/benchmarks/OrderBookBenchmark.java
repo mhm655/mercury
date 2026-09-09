@@ -1,5 +1,6 @@
 package com.mercury.benchmarks;
 
+import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
@@ -55,6 +56,14 @@ public class OrderBookBenchmark {
     static final int PRICE_LEVELS = 1_000;
 
     static final InstrumentId AAPL = InstrumentId.of("AAPL");
+
+    /**
+     * Resting ladder orders and a sweeping aggressor (in
+     * {@link DestructiveOrderBookBenchmark#matchSweep}) must have distinct owners, or
+     * self-trade prevention would block every fill and the benchmark would measure nothing.
+     */
+    static final CounterpartyId LADDER_OWNER = CounterpartyId.of("CPTY-LADDER");
+    static final CounterpartyId SWEEPER_OWNER = CounterpartyId.of("CPTY-SWEEPER");
 
     private List<Order> restingOrders;
 
@@ -118,7 +127,7 @@ public class OrderBookBenchmark {
                     ? BigDecimal.valueOf(1000 - tick)
                     : BigDecimal.valueOf(1000 + tick + 1);
             orders.add(Order.limit(OrderId.of("O-" + i), instrument, side,
-                    Price.of(price), QUANTITY_PER_ORDER));
+                    Price.of(price), QUANTITY_PER_ORDER, LADDER_OWNER));
         }
         return List.copyOf(orders);
     }
