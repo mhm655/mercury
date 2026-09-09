@@ -187,6 +187,50 @@ public final class YieldCurve {
         return (zeroRate(to) * to - zeroRate(from) * from) / (to - from);
     }
 
+    /**
+     * The <b>simple</b> forward rate an index would fix at for the period {@code start} to
+     * {@code end}, accrued on {@code dayCount}.
+     *
+     * <pre>
+     *   L = ( DF(start) / DF(end) - 1 ) / tau
+     * </pre>
+     *
+     * <h2>Not the same number as {@link #forwardRate}</h2>
+     * That method returns the continuously-compounded forward, which is the curve describing
+     * itself. This one returns the rate a floating coupon actually accrues at, and the two
+     * differ by the compounding convention and by the day count - for a three-month period at
+     * 5% they are about four basis points apart.
+     *
+     * <p>The distinction is worth stating loudly because using the wrong one breaks a
+     * property that is otherwise exact. Discounting a coupon of
+     * {@code N x L x tau} paid at {@code end} gives
+     *
+     * <pre>
+     *   N x ( DF(start)/DF(end) - 1 ) x DF(end)  =  N x ( DF(start) - DF(end) )
+     * </pre>
+     *
+     * so the tau and the day count cancel, and a floating leg's present value telescopes to
+     * {@code N x (DF(first start) - DF(final end))} - independent of how often it pays. That
+     * identity is what makes a par swap worth exactly zero. Project with the continuous
+     * forward instead and the cancellation fails, a swap struck at the curve's own par rate
+     * comes out worth something, and the error looks like a small modelling imprecision rather
+     * than the convention mistake it is.
+     *
+     * @throws IllegalArgumentException if {@code end} is not after {@code start}
+     */
+    public double simpleForwardRate(LocalDate start, LocalDate end, DayCountConvention dayCount) {
+        Objects.requireNonNull(start, "start");
+        Objects.requireNonNull(end, "end");
+        Objects.requireNonNull(dayCount, "dayCount");
+        if (!end.isAfter(start)) {
+            throw new IllegalArgumentException(
+                    "An accrual period needs a length, but was asked for " + start + " to " + end
+                            + ". The end must be strictly after the start.");
+        }
+        double accrualFraction = dayCount.yearFraction(start, end);
+        return (discountFactor(start) / discountFactor(end) - 1.0) / accrualFraction;
+    }
+
     /** A new curve with {@code date} added, or replaced if the curve already has that pillar. */
     public YieldCurve withPillar(LocalDate date, double zeroRate) {
         Objects.requireNonNull(date, "date");

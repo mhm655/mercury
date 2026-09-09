@@ -1,7 +1,6 @@
 package com.mercury.pricing.model;
 
 import com.mercury.core.money.Currency;
-import com.mercury.instrument.Cashflow;
 import com.mercury.instrument.CashflowGenerating;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -32,11 +31,13 @@ import java.util.Objects;
  * CashflowGenerating>} expresses the requirement exactly - the compiler will not let this be
  * registered for an instrument that cannot produce cashflows.
  *
- * <p>A floating swap leg is precisely the case that <em>would</em> need a varying step, since
- * its coupons must be projected from a curve before they can be discounted. That is why it
- * does not implement {@code CashflowGenerating}, and why it will get its own model at M6 -
- * at which point a shared skeleton may genuinely be worth extracting. Patterns are cheaper to
- * add when a second case proves they are needed than to remove once they are load-bearing.
+ * <p><b>M6 settled this.</b> A floating swap leg was the predicted second case, the one whose
+ * coupons must be projected off a curve before they can be discounted - and it arrived. What
+ * it justified was extracting {@link CashflowDiscounting}, a four-line static function that
+ * this model and {@link SwapModel} both call. Not a base class: there is still nothing for a
+ * subclass to override, only a sum two pricers need to compute identically. Waiting for the
+ * second case did not vindicate the pattern the design predicted; it showed the pattern was
+ * never the right shape.
  *
  * <h2>The mathematics</h2>
  * <pre>
@@ -96,29 +97,9 @@ public final class DiscountedCashflowModel<T extends FinancialInstrument & Cashf
         Objects.requireNonNull(asOf, "asOf");
 
         Currency target = instrument.currency();
-        double presentValue = 0.0;
+        double presentValue = CashflowDiscounting.presentValue(
+                instrument.cashflows(asOf), market, target);
 
-        for (Cashflow cashflow : instrument.cashflows(asOf)) {
-            presentValue += presentValueOf(cashflow, market, target);
-        }
         return new ValuationResult(presentValue, target, NAME);
-    }
-
-    /**
-     * One cashflow, discounted on its own currency's curve and converted to {@code target}.
-     *
-     * <p>Discounting before converting is the correct order and not merely a preference: the
-     * cashflow is certain in <em>its</em> currency, so it is that currency's time value which
-     * applies. Converting first and discounting at the target rate would price a euro payment
-     * using dollar interest rates.
-     */
-    private double presentValueOf(Cashflow cashflow, MarketDataSnapshot market,
-                                  Currency target) {
-        Currency currency = cashflow.amount().currency();
-        double discountFactor = market.yieldCurve(currency)
-                .discountFactor(cashflow.paymentDate());
-        double amount = cashflow.amount().amount().doubleValue();
-
-        return amount * discountFactor * market.fxRate(currency, target);
     }
 }

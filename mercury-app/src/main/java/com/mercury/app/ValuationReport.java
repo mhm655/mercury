@@ -1,6 +1,7 @@
 package com.mercury.app;
 
 import com.mercury.core.id.InstrumentId;
+import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
@@ -211,13 +212,20 @@ public final class ValuationReport {
                                SensitivityCalculator sensitivities, LocalDate asOf) {
         // The same shock mechanism the deltas above use, applied at scenario scale rather than
         // as an infinitesimal bump - which is the point of DESIGN_PROPOSAL.md section 5.3.
+        //
+        // The rates leg was missing until M6. The design document had specified this scenario
+        // as equities down, volatility up, FX down AND rates up 150bp from the start, and the
+        // implementation quietly dropped the last one - which nobody noticed while the book
+        // held no material rate risk. A bond and a swap made the omission expensive: the
+        // headline stress number was describing three quarters of a market crash.
         MarketShock crash = MarketShock.scaleAllSpots(0.70)
                 .and(MarketShock.scaleAllVolatilities(1.50))
-                .and(MarketShock.scaleAllFxRates(0.90));
+                .and(MarketShock.scaleAllFxRates(0.90))
+                .and(MarketShock.bumpAllRates(BasisPoints.of(150)));
 
         Money impact = sensitivities.valueChangeUnder(portfolio, crash, market, asOf);
 
-        line(out, "STRESS  (equities -30%%, volatility +50%%, FX -10%%)");
+        line(out, "STRESS  (equities -30%%, volatility +50%%, FX -10%%, rates +150bp)");
         line(out, "  %-42s %16s", "P&L impact", impact.amount().toPlainString());
     }
 

@@ -17,8 +17,10 @@ import com.mercury.curve.ParSwapQuote;
 import com.mercury.curve.YieldCurve;
 import com.mercury.instrument.Bond;
 import com.mercury.instrument.EuropeanOption;
+import com.mercury.instrument.FloatingRateIndex;
 import com.mercury.instrument.FxForward;
 import com.mercury.instrument.FinancialInstrument;
+import com.mercury.instrument.InterestRateSwap;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.InstrumentCatalog;
@@ -28,6 +30,7 @@ import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
 import com.mercury.pricing.model.DiscountedCashflowModel;
 import com.mercury.pricing.model.SpotPriceModel;
+import com.mercury.pricing.model.SwapModel;
 import com.mercury.risk.SensitivityCalculator;
 import java.time.LocalDate;
 import java.util.List;
@@ -56,6 +59,7 @@ public final class DemoScenario {
     public static final InstrumentId AAPL_PUT = InstrumentId.of("AAPL-P-180");
     public static final InstrumentId CORP_BOND = InstrumentId.of("CORP-5Y");
     public static final InstrumentId EUR_FORWARD = InstrumentId.of("FWD-EURUSD");
+    public static final InstrumentId SWAP = InstrumentId.of("IRS-5Y");
 
     /** Fixed, so the scenario never depends on when it is run. */
     public static final LocalDate VALUATION_DATE = LocalDate.of(2024, 6, 28);
@@ -63,6 +67,7 @@ public final class DemoScenario {
     private static final LocalDate EXPIRY = LocalDate.of(2025, 6, 20);
     private static final LocalDate BOND_MATURITY = LocalDate.of(2029, 6, 15);
     private static final LocalDate FORWARD_SETTLEMENT = LocalDate.of(2025, 6, 27);
+    private static final LocalDate SWAP_MATURITY = LocalDate.of(2029, 6, 28);
     private static final CurrencyPair EURUSD = CurrencyPair.parse("EUR/USD");
 
     private DemoScenario() {
@@ -81,7 +86,34 @@ public final class DemoScenario {
                 EuropeanOption.put("AAPL-P-180", AAPL, Price.of("180"), EXPIRY, Currency.USD),
                 corporateBond(),
                 // Quoted EUR/USD, so it values in USD and belongs in a USD book.
-                FxForward.buy("FWD-EURUSD", EURUSD, "500000", "1.09", FORWARD_SETTLEMENT));
+                FxForward.buy("FWD-EURUSD", EURUSD, "500000", "1.09", FORWARD_SETTLEMENT),
+                payerSwap());
+    }
+
+    /**
+     * A five-year payer swap struck below the market.
+     *
+     * <p>Paying 4.00% fixed when the five-year par rate is nearer 4.25% is a good trade, so
+     * the position is worth something rather than nothing - which is the point of striking it
+     * off market. A swap at par would price to zero and demonstrate only that the arithmetic
+     * cancels.
+     *
+     * <p>It also turns the book around on rates. Everything else here is long fixed income:
+     * the bond and the two option legs all lose value when rates rise. A payer swap gains, and
+     * on a million of notional it gains more than the rest of the book loses - so the reported
+     * DV01 changes sign, which no single position in the portfolio would show on its own.
+     */
+    private static InterestRateSwap payerSwap() {
+        return InterestRateSwap.builder()
+                .id("IRS-5Y")
+                .notional(Money.of("1000000", Currency.USD))
+                .fixedRate("0.04")
+                .payingFixed()
+                .fixedFrequency(Frequency.SEMI_ANNUAL)
+                .index(FloatingRateIndex.usdSofr3M())
+                .effectiveDate(VALUATION_DATE)
+                .maturityDate(SWAP_MATURITY)
+                .build();
     }
 
     /** A five-year 4.5% semi-annual bond, quoted per 1,000 of face. */
@@ -146,8 +178,8 @@ public final class DemoScenario {
     }
 
     /**
-     * A long equity book with an options overlay: long stock, a covered call written against
-     * it, and a protective put.
+     * A long equity book with an options overlay, a corporate bond, an FX forward and a payer
+     * swap - all five instrument types the engine models, in one portfolio.
      */
     public static Portfolio portfolio() {
         return Portfolio.builder(PortfolioId.of("US-EQUITY-BOOK"), Currency.USD)
@@ -157,15 +189,18 @@ public final class DemoScenario {
                 .position(AAPL_PUT, 8)
                 .position(CORP_BOND, 250)
                 .position(EUR_FORWARD, 1)
+                .position(SWAP, 1)
                 .build();
     }
 
     /**
      * Every model the demo needs.
      *
-     * <p>Four instrument types, three models - the discounted-cashflow model is registered
-     * twice, once per cashflow-bearing instrument. Adding a fifth type would add exactly one
-     * line here and change nothing else.
+     * <p>Five instrument types, four models - the discounted-cashflow model is registered
+     * twice, once per cashflow-bearing instrument. The swap arriving at M6 cost exactly one
+     * line here and changed nothing else in this file beyond adding the instrument and the
+     * position, which is the open-closed claim behaving as advertised on a real addition
+     * rather than on a test fixture.
      */
     public static PricingService pricingService() {
         return PricingService.builder()
@@ -173,6 +208,7 @@ public final class DemoScenario {
                 .register(new BlackScholesModel())
                 .register(new DiscountedCashflowModel<>(Bond.class))
                 .register(new DiscountedCashflowModel<>(FxForward.class))
+                .register(new SwapModel())
                 .build();
     }
 

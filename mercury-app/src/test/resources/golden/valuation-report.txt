@@ -13,8 +13,9 @@ POSITIONS
   AAPL-P-180                8      1040.3824          8323.06  black-scholes
   CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
   FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
+  IRS-5Y                    1     11109.2141         11109.21  swap-discounting
   --------------------------------------------------------------------------
-  TOTAL                                             548475.45
+  TOTAL                                             559584.66
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
@@ -32,8 +33,8 @@ RISK
   FX DELTA  (value change per unit rise in the rate)
     EUR/USD               484092.3573
   DV01  (value change per +1bp on the discount rate)
-    USD                      -71.7505
+    USD                      381.4940
     EUR                      -51.7767
 
-STRESS  (equities -30%, volatility +50%, FX -10%)
-  P&L impact                                       -104888.50
+STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
+  P&L impact                                        -56815.17

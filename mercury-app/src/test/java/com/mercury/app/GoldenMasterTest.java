@@ -84,7 +84,8 @@ class GoldenMasterTest {
         assertThat(runScenario())
                 .contains("spot")
                 .contains("black-scholes")
-                .contains("discounted-cashflow");
+                .contains("discounted-cashflow")
+                .contains("swap-discounting");
     }
 
     @Test
@@ -97,7 +98,7 @@ class GoldenMasterTest {
 
         assertThat(runScenario())
                 .contains(valuation.totalValue().amount().toPlainString());
-        assertThat(valuation.lines()).hasSize(6);
+        assertThat(valuation.lines()).hasSize(7);
     }
 
     @Test
@@ -116,6 +117,20 @@ class GoldenMasterTest {
                 .contains("EUR/USD")
                 .contains("USD")
                 .contains("EUR");
+    }
+
+    @Test
+    @DisplayName("the stress scenario shocks every risk factor the book carries")
+    void stressCoversRates() {
+        // The rates leg of this scenario was specified in the design document and missing from
+        // the implementation until M6, which nobody noticed while the book held no material
+        // rate risk. A stress test that silently omits a factor is worse than one that is
+        // absent, because it produces a number people act on.
+        assertThat(runScenario())
+                .contains("equities -30%")
+                .contains("volatility +50%")
+                .contains("FX -10%")
+                .contains("rates +150bp");
     }
 
     @Test
