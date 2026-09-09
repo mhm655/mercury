@@ -69,6 +69,8 @@ decision.
 | Order types | Fill-or-kill, good-till-date, stop, iceberg | Each adds a branch in the matching loop and no new insight. Limit, market and IOC cover price-time priority, resting, partial fills and cancellation. |
 | Order book | Tick-indexed price array | O(1) for everything and what a real exchange uses, but it assumes a bounded tick grid the simulation does not fix. See ADR 0005. |
 | FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
+| Portfolio | A trade that carries a position through zero | Selling fifteen when long ten is two trades: closing ten at the old cost basis and opening a short five at today's price. `PositionLots` refuses it rather than inventing where the boundary falls. Book the two legs separately. |
+| Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store, and that arrives with M8. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
 

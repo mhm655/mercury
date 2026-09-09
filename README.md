@@ -14,9 +14,10 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M6 complete** — the engine prices **all five instrument types** in one portfolio against
-discount curves bootstrapped from market quotes, and reports its equity, interest-rate and
-currency risk. CI green on every push.
+**M7 complete** — the engine runs a **multi-currency book with a trade history**: five
+instrument types priced against bootstrapped discount curves, cash and cost basis tracked per
+lot, and profit split into what has been realised and what is still at risk. CI green on every
+push.
 
 ```bash
 mvn -q -DskipTests package
@@ -25,21 +26,37 @@ java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.
 
 ```
 POSITIONS
-  INSTRUMENT         QUANTITY     UNIT VALUE     MARKET VALUE  MODEL
-  --------------------------------------------------------------------------
-  AAPL                   1000       195.5000        195500.00  spot
-  MSFT                    250       412.2500        103062.50  spot
-  AAPL-C-200               -5      2382.5395        -11912.70  black-scholes
-  AAPL-P-180                8      1040.3824          8323.06  black-scholes
-  CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
-  FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
-  IRS-5Y                    1     11109.2141         11109.21  swap-discounting
-  --------------------------------------------------------------------------
-  TOTAL                                             559584.66
+  INSTRUMENT         QUANTITY   CCY     UNIT VALUE     MARKET VALUE  MODEL
+  --------------------------------------------------------------------------------
+  AAPL                   1000   USD       195.5000        195500.00  spot
+  MSFT                    250   USD       412.2500        103062.50  spot
+  AAPL-C-200               -5   USD      2382.5395        -11912.70  black-scholes
+  AAPL-P-180                8   USD      1040.3824          8323.06  black-scholes
+  CORP-5Y                 250   USD      1012.3155        253078.87  discounted-cashflow
+  FWD-EURUSD                1   USD       423.7203           423.72  discounted-cashflow
+  IRS-5Y                    1   USD     11109.2141         11109.21  swap-discounting
+  BUND-3Y                 200   EUR       984.4650        211167.73  discounted-cashflow
+  --------------------------------------------------------------------------------
+  TOTAL                                                   770752.39
+
+EXPOSURE BY CURRENCY  (positions settling in each, valued in USD)
+  USD                                                     559584.66
+  EUR                                                     211167.73
+
+CASH
+  USD                                                     469100.00
+  EUR                                                    -198000.00
+  NET ASSET VALUE  (positions + cash)                    1027497.39
+
+PROFIT AND LOSS  (FIFO cost basis)
+  Realised                                                  2400.00
+  Unrealised                                               25097.39
+  Total                                                    27497.39
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
   CORP-5Y               1010.9455         1.3700      1012.3155
+  BUND-3Y                984.4650         0.0000       984.4650
 
 DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
   CURRENCY          1Y        2Y        5Y       10Y
@@ -51,18 +68,26 @@ RISK
     AAPL                     487.9941
     MSFT                     250.0000
   FX DELTA  (value change per unit rise in the rate)
-    EUR/USD               484092.3573
+    EUR/USD               680985.3499
   DV01  (value change per +1bp on the discount rate)
     USD                      381.4940
-    EUR                      -51.7767
+    EUR                     -113.5839
 
 STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
-  P&L impact                                        -56815.17
+  P&L impact                                        -86093.00
 ```
 
-Five instrument types, four models, three kinds of risk, and no `instanceof` anywhere in the
-dispatch. **Nothing in the demo states a five-year zero rate** — it states deposit and swap
-quotes, and the bootstrapper finds the curve that reprices all of them at once.
+Five instrument types, four models, three kinds of risk, two currencies, and no `instanceof`
+anywhere in the dispatch. **Nothing in the demo states a five-year zero rate** — it states
+deposit and swap quotes, and the bootstrapper finds the curve that reprices all of them at
+once. **Nor does it state a position** — it states eight trades, and the positions are what
+they add up to.
+
+The strongest number in the report is the one that owes nothing to the code producing it. This
+book opened as **1,000,000 of cash and nothing else**, so whatever it has done since, its total
+profit must be net asset value minus that. It comes to **27,497.39** both ways — which requires
+cost basis, FIFO lot matching, the realised/unrealised split and the FX conversion all to be
+right at once.
 
 Every number is explainable, which is the check that the pieces agree with each other. The
 covered call and protective put cut AAPL delta from 1000 to 488. The bond prices above par
@@ -115,7 +140,9 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M5 audit — invariants on market data, DV01 / FX delta, clean vs dirty | ✅ complete |
 | M5b — Curve construction (bootstrapping) | ✅ complete |
 | M6 — Swap pricing: all five instrument types | ✅ complete |
-| M7 — Full portfolio: cash, realised P&L, exposure | next |
+| Extensibility proof — a sixth instrument, zero files modified | ✅ complete |
+| M7 — Full portfolio: multi-currency, cash, cost basis, P&L | ✅ complete |
+| M8 — Trade lifecycle, venues, counterparties | next |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -128,7 +155,7 @@ Three artifacts, each checkable in about a minute:
 | Artifact | Status | What it proves |
 |---|---|---|
 | **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
-| Extensibility-proof commit | planned (M15) | A sixth instrument added in a single diff that modifies **zero existing files** — the open-closed claim, demonstrated rather than asserted |
+| **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
 | **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
 
 ### Measured so far
@@ -182,6 +209,12 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   can take, so the builder and `withShock` cannot disagree about what a legal market is. They
   did: a shock could impose a negative spot price that the builder rejected, and it surfaced
   four layers down as a NaN blaming the pricing model for bad data.
+- **A book with a history, not just a snapshot.** Lots, cost basis under FIFO, LIFO or average
+  cost, cash per currency, and profit split into the part already taken and the part still at
+  risk. Buy 100 at 50, buy 100 at 90, sell 100 at 100 and the answer is 5,000, 1,000 or 3,000
+  depending on the method — all three correct, all three asserted.
+- **Multi-currency valuation.** A euro bond is priced on the euro curve and converted at the
+  end, never discounted at a dollar rate. Deferred from M4 through M6 and finally closed.
 - **All five instruments, one dispatch.** Stock, bond, FX forward, European option and
   interest-rate swap, priced by four models through a type-keyed registry. Adding the swap at
   M6 cost one registration line and changed nothing else in the pricing stack.

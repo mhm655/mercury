@@ -747,7 +747,7 @@ scaffolding.
 | M5 | Broaden pricing | Generic DCF model (not a template — see §6), bond and FX-forward pricers, flat discounting; reference-value tests against published figures — ✅ **done**, audited, with DV01, FX delta and clean/dirty reporting added in response |
 | M5b | Curve construction | `YieldCurve`, interpolation strategies, bootstrapper, par round-trip test — ✅ **done**. Pillars are dates rather than tenors, for a reason that cost a defect to learn (ADR 0006); the whole pricing stack moved onto curves without a single reference value changing |
 | M6 | Swap pricing | Floating-leg projection against a curve; completes all five instruments — ✅ **done**, with the par-rate round trip as its check |
-| M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure |
+| M7 | Full portfolio | `CashAccount`, realized/unrealized P&L, `CostBasisMethod`, exposure, **multi-currency valuation** — ✅ **done**. Positions are now projected from a trade history rather than declared, and the whole report reconciles against the book's opening cash |
 | M8 | Trade lifecycle & execution | State machine, audit trail, both venues, `Counterparty`; closes gaps G-1 and G-2 |
 | M9 | Risk limits | `RiskLimit` composite, pro-forma projection, breach events, rejection |
 | M10 | Risk engine | Remaining Greeks, analytic vs numerical cross-validation, **Gamma validation (§5.3.1)**, DV01, historical VaR |
@@ -895,6 +895,10 @@ adding it.
   learn (ADR 0006). The whole pricing stack moved onto curves without a single reference value
   changing, because a flat rate is now the one-pillar case of the same type.
   **461 tests green.**
+- **Extensibility proof** — a sixth instrument type (interest-rate cap and floor) in one commit
+  touching no existing file. See `docs/EXTENSIBILITY.md`. **495 tests green.**
+- **M7** — multi-currency valuation, retiring a deferral carried from M4; then lots, cost basis,
+  cash and the realised/unrealised split. **529 tests green.**
 - **M6** — swap pricing: floating coupons projected at the simple forward rate off the curve.
   All five instrument types now price in one portfolio. Template Method settled for good (§6):
   the second case justified a shared function, not a base class. Found that the stress
