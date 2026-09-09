@@ -95,6 +95,22 @@ class SwapModelTest {
                 .build();
     }
 
+    /** The same swap traded the other way round. */
+    private static InterestRateSwap receiverSwapAt(String fixedRate) {
+        return InterestRateSwap.builder()
+                .id("IRS-5Y-RECEIVER")
+                .notional(NOTIONAL)
+                .fixedRate(fixedRate)
+                .receivingFixed()
+                .fixedFrequency(Frequency.SEMI_ANNUAL)
+                .fixedDayCount(DayCountConvention.THIRTY_360_US)
+                .floatingFrequency(Frequency.QUARTERLY)
+                .index(FloatingRateIndex.usdSofr3M())
+                .effectiveDate(TODAY)
+                .maturityDate(Tenor.years(5).addTo(TODAY))
+                .build();
+    }
+
     @Nested
     @DisplayName("par")
     class Par {
@@ -145,6 +161,105 @@ class SwapModelTest {
 
             assertThat(expensive).isNegative();
             assertThat(cheap).isPositive();
+        }
+    }
+
+    @Nested
+    @DisplayName("negative rates")
+    class NegativeRates {
+
+        /** A market through zero, of the kind EUR and JPY have both traded in. */
+        private static MarketDataSnapshot belowZero() {
+            return MarketDataSnapshot.builder(TODAY)
+                    .curve(Currency.USD, CurveBootstrapper.bootstrap(TODAY, List.of(
+                            DepositQuote.of(Tenor.months(6), -0.0050),
+                            ParSwapQuote.of(Tenor.years(2), -0.0040),
+                            ParSwapQuote.of(Tenor.years(5), -0.0030))))
+                    .build();
+        }
+
+        @Test
+        @DisplayName("the par rate is negative when the market is")
+        void parRateKeepsItsSign() {
+            // Regression for E-1. parRate normalised the floating leg with Math.abs, which
+            // looks equivalent to normalising by direction and is not: a floating leg's value
+            // is signed twice, once by who receives it and once by the curve. Below zero those
+            // two signs disagree, abs kept the wrong one, and the model reported +0.30% for a
+            // market quoting -0.30%.
+            double par = MODEL.parRate(swapAt("0.00"), belowZero(), TODAY);
+
+            assertThat(par).isNegative();
+            assertThat(par).isCloseTo(-0.0030, within(1e-6));
+        }
+
+        @Test
+        @DisplayName("a swap struck at that par rate really is worth nothing")
+        void parRateIsUsableBelowZero() {
+            // The check that makes the one above more than a sign assertion. Under the defect
+            // a swap struck at the reported par rate was worth -302,828 on ten million of
+            // notional - three per cent of notional, from a number that looked like a rate.
+            MarketDataSnapshot market = belowZero();
+            double par = MODEL.parRate(swapAt("0.00"), market, TODAY);
+
+            double value = MODEL.price(
+                    swapAt(java.math.BigDecimal.valueOf(par).toPlainString()), market, TODAY)
+                    .value();
+
+            assertThat(value).isCloseTo(0.0, within(ROUNDING));
+        }
+
+        @Test
+        @DisplayName("payer and receiver still agree on it")
+        void directionStillDoesNotMatter() {
+            MarketDataSnapshot market = belowZero();
+
+            double payer = MODEL.parRate(swapAt("0.00"), market, TODAY);
+            double receiver = MODEL.parRate(receiverSwapAt("0.00"), market, TODAY);
+
+            assertThat(receiver).isCloseTo(payer, within(1e-12));
+        }
+    }
+
+    @Nested
+    @DisplayName("fixings the engine does not have")
+    class Fixings {
+
+        @Test
+        @DisplayName("a swap already part-way through a floating period is refused")
+        void seasonedSwapIsRefused() {
+            // Regression for E-2. The first version clamped: it projected the rate from the
+            // valuation date to the period end, then accrued that rate over the whole period.
+            // Six weeks into a three-month period that charged a 48-day rate for 92 days of
+            // accrual - dimensionally wrong and worth tens of thousands on this notional.
+            //
+            // An index fixing is market data. The snapshot does not hold it, and this engine
+            // treats missing market data as an error rather than a zero.
+            InterestRateSwap seasoned = InterestRateSwap.builder()
+                    .id("IRS-SEASONED")
+                    .notional(NOTIONAL)
+                    .fixedRate("0.0425")
+                    .payingFixed()
+                    .fixedFrequency(Frequency.SEMI_ANNUAL)
+                    .fixedDayCount(DayCountConvention.THIRTY_360_US)
+                    .floatingFrequency(Frequency.QUARTERLY)
+                    .index(FloatingRateIndex.usdSofr3M())
+                    .effectiveDate(LocalDate.of(2023, 5, 15))
+                    .maturityDate(LocalDate.of(2028, 5, 15))
+                    .build();
+
+            assertThatThrownBy(() -> MODEL.price(seasoned, market(), TODAY))
+                    .isInstanceOf(SwapModel.MissingFixingException.class)
+                    .hasMessageContaining("2024-05-15")
+                    .hasMessageContaining("fixing history");
+        }
+
+        @Test
+        @DisplayName("a swap starting on the valuation date is not")
+        void spotStartingSwapIsFine() {
+            // The boundary. Every swap is spot-starting at the moment it is traded, so the
+            // refusal above must not catch the ordinary case.
+            assertThat(MODEL.price(swapAt("0.0425"), market(), TODAY).value())
+                    .isCloseTo(0.0, within(ROUNDING));
         }
     }
 
@@ -270,20 +385,7 @@ class SwapModelTest {
             MarketDataSnapshot market = market();
 
             double payer = MODEL.price(swapAt("0.0500"), market, TODAY).value();
-            double receiver = MODEL.price(
-                    InterestRateSwap.builder()
-                            .id("IRS-RECEIVER")
-                            .notional(NOTIONAL)
-                            .fixedRate("0.0500")
-                            .receivingFixed()
-                            .fixedFrequency(Frequency.SEMI_ANNUAL)
-                            .fixedDayCount(DayCountConvention.THIRTY_360_US)
-                            .floatingFrequency(Frequency.QUARTERLY)
-                            .index(FloatingRateIndex.usdSofr3M())
-                            .effectiveDate(TODAY)
-                            .maturityDate(Tenor.years(5).addTo(TODAY))
-                            .build(),
-                    market, TODAY).value();
+            double receiver = MODEL.price(receiverSwapAt("0.0500"), market, TODAY).value();
 
             assertThat(receiver).isCloseTo(-payer, within(1e-9));
         }

@@ -1,12 +1,13 @@
 package com.mercury.pricing.model;
 
+import com.mercury.core.MercuryException;
 import com.mercury.core.money.Currency;
-import com.mercury.core.money.Money;
 import com.mercury.core.time.SchedulePeriod;
 import com.mercury.curve.YieldCurve;
 import com.mercury.instrument.Cashflow;
 import com.mercury.instrument.FloatingRateLeg;
 import com.mercury.instrument.InterestRateSwap;
+import com.mercury.instrument.PayReceive;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.pricing.ModelName;
 import com.mercury.pricing.PricingModel;
@@ -52,10 +53,10 @@ import java.util.Objects;
  *   <li><b>Single curve.</b> The same curve projects the floating leg and discounts both. Real
  *       desks have discounted on OIS and projected on a separate index curve since 2008, and
  *       the basis between them is its own quoted market. Listed in {@code KNOWN_GAPS.md}.</li>
- *   <li><b>No fixing history.</b> A period already under way has, in reality, fixed its rate
- *       at the start - and Mercury stores no past fixings. Such a period is projected from the
- *       valuation date instead, which is exact for a swap starting today and an approximation
- *       for a seasoned one. Named here rather than silently applied.</li>
+ *   <li><b>No fixing history.</b> A period already under way fixed its rate at the start, and
+ *       Mercury stores no past fixings, so such a swap is <em>refused</em> rather than
+ *       approximated - see {@link MissingFixingException}. Swaps valued on or before their
+ *       start date, which is every swap at the moment it is traded, are unaffected.</li>
  * </ul>
  *
  * <p>Stateless, pure and thread-safe.
@@ -126,10 +127,20 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
                             + "to be paid on.");
         }
 
-        // The floating leg, unsigned - the par rate is a property of the schedule and the
-        // curve, not of which way round the holder trades it.
-        double floating = Math.abs(CashflowDiscounting.presentValue(
-                projectedCashflows(swap.floatingLeg(), market, asOf), market, currency));
+        // The par rate is a property of the schedule and the curve, not of which way round the
+        // holder trades it - so the floating leg is normalised to "as if received".
+        //
+        // By DIRECTION, not by magnitude. Math.abs looks like it does the same job and does
+        // not: a floating leg's present value is signed twice over, once by whether the holder
+        // receives it and once by the curve. In a negative-rate market a received floating leg
+        // is worth less than nothing, and abs threw that second sign away - reporting +0.30%
+        // for a market quoting -0.30%, and pricing a swap struck at its own reported par rate
+        // at -302,828 on ten million of notional. See E-1 in KNOWN_GAPS.md.
+        double floating = CashflowDiscounting.presentValue(
+                projectedCashflows(swap.floatingLeg(), market, asOf), market, currency);
+        if (swap.floatingLeg().payReceive() == PayReceive.PAY) {
+            floating = -floating;
+        }
 
         return floating / (annuity * notional);
     }
@@ -137,10 +148,8 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
     /**
      * Each unpaid floating period, projected off the curve and turned into a dated amount.
      *
-     * <p>A period already under way is projected from the valuation date rather than from its
-     * own start. Mercury holds no fixing history, and a curve cannot discount a date in the
-     * past - it would compound it forward, inflating a rate that was set weeks ago. Clamping
-     * is exact for a swap that starts today and an approximation for a seasoned one.
+     * @throws MissingFixingException if a period has already begun, so its rate was set
+     *         before the valuation date and cannot be projected
      */
     private static List<Cashflow> projectedCashflows(FloatingRateLeg leg,
                                                      MarketDataSnapshot market, LocalDate asOf) {
@@ -149,11 +158,52 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
         List<Cashflow> cashflows = new ArrayList<>(remaining.size());
 
         for (SchedulePeriod period : remaining) {
-            LocalDate start = period.accrualStart().isBefore(asOf) ? asOf : period.accrualStart();
-            double projected = curve.simpleForwardRate(start, period.accrualEnd(), leg.dayCount());
-            Money coupon = leg.couponFor(period, projected);
-            cashflows.add(new Cashflow(period.paymentDate(), coupon));
+            if (period.accrualStart().isBefore(asOf)) {
+                throw new MissingFixingException(leg, period, asOf);
+            }
+            double projected = curve.simpleForwardRate(
+                    period.accrualStart(), period.accrualEnd(), leg.dayCount());
+            cashflows.add(new Cashflow(period.paymentDate(), leg.couponFor(period, projected)));
         }
         return cashflows;
+    }
+
+    /**
+     * Raised when a floating period has already started, so its rate is history rather than a
+     * projection.
+     *
+     * <h2>Why this refuses rather than approximates</h2>
+     * The first version clamped: it projected the rate from the valuation date to the period
+     * end and then accrued that rate over the <em>whole</em> period. Those are two different
+     * lengths of time. On a swap seasoned six weeks into a three-month period it charged a
+     * 48-day rate for 92 days of accrual - dimensionally wrong, quietly plausible, and worth
+     * tens of thousands on a ten-million notional.
+     *
+     * <p>Every alternative that returns a number invents one. Accruing only over the remaining
+     * stub silently drops the interest already earned; assuming the index fixed at today's
+     * equivalent-tenor rate makes up a fixing that is a matter of public record. Both produce a
+     * valuation that looks exactly as authoritative as a correct one.
+     *
+     * <p>So this follows the rule the rest of the engine already follows: an index fixing is
+     * market data, the snapshot does not hold it, and missing market data is an error rather
+     * than a zero - the same reasoning as
+     * {@code MarketDataSnapshot.MissingMarketDataException}. A fixing store is bookkeeping
+     * rather than a design question, and arrives with the trade lifecycle at M8.
+     *
+     * <p>Swaps that start on or after the valuation date - every swap at the moment it is
+     * traded - are unaffected.
+     */
+    public static final class MissingFixingException extends MercuryException {
+        MissingFixingException(FloatingRateLeg leg, SchedulePeriod period, LocalDate asOf) {
+            super("The floating period " + period + " on a " + leg.index()
+                    + " leg began before the valuation date " + asOf + ", so its rate was fixed "
+                    + "on " + period.accrualStart() + " and is a published figure rather than "
+                    + "something a curve can project. Mercury holds no fixing history, and "
+                    + "guessing the rate would produce a plausible wrong coupon: the accrual "
+                    + "runs for the whole period, so any rate covering only the remainder is "
+                    + "charged over a longer time than it applies to. Fixings arrive with the "
+                    + "trade lifecycle at M8; until then a swap must be valued on or before its "
+                    + "start date.");
+        }
     }
 }

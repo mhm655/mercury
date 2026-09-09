@@ -60,7 +60,7 @@ decision.
 | Area | Not modelled | Why |
 |---|---|---|
 | Bonds | Amortisation, call/put schedules, floating-rate notes, inflation linkage | The vanilla bullet bond already answers the design question (how a cashflow-bearing instrument exposes itself to a generic pricer). The rest is domain surface without architectural gain. |
-| Swaps | Historical index fixings | A floating period already under way has, in reality, fixed its rate at the start. Mercury stores no past fixings, so such a period is projected from the valuation date instead — exact for a swap starting today, an approximation for a seasoned one. A fixing store is bookkeeping, not a design question, and belongs with the trade lifecycle at M8. |
+| Swaps | Historical index fixings | A floating period already under way fixed its rate at the start, and Mercury stores no past fixings — so a seasoned swap is **refused**, not approximated (see E-2). An index fixing is market data, and this engine treats missing market data as an error rather than a zero. A fixing store is bookkeeping rather than a design question and belongs with the trade lifecycle at M8. |
 | Swaps | Cross-currency, basis (float-float), amortising notionals, principal exchange | All are different *compositions* of the existing legs rather than new structures — which is the point of composing legs instead of subclassing. |
 | Curves | Dual-curve / OIS discounting | Single-curve is the pre-2008 convention. Real desks discount OIS and project on a separate index curve; the basis between them is itself a quoted market. We are single-curve and say so. |
 | Curves | Futures quotes, and their convexity adjustment | The bootstrapper takes deposits and par swaps, which cover the whole curve. Futures are the third common input and need a convexity adjustment — a genuinely subtle correction — for no new design question. |
@@ -71,6 +71,71 @@ decision.
 | FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
+
+---
+
+## Fixed during the M6 audit
+
+### E-1 · `parRate` reported the wrong sign below zero · fixed
+
+`SwapModel.parRate` normalised the floating leg with `Math.abs`, to make the answer
+independent of which way round the swap is traded. That looks equivalent to normalising by
+direction and is not.
+
+A floating leg's present value carries **two** signs: one from whether the holder receives it,
+and one from the curve. Above zero they agree, so `abs` happened to give the right answer.
+Below zero they do not — a received floating leg on a negative curve is worth less than
+nothing — and `abs` kept the wrong one:
+
+| | |
+|---|---:|
+| Market 5Y par swap quote | **−0.30%** |
+| `parRate()` reported | **+0.30%** |
+| PV of a swap struck at the reported rate | **−302,828.70** on 10,000,000 notional |
+| PV at the true par rate | 0.04 |
+
+Three per cent of notional, out of a number that looks exactly like a rate.
+
+**Why nothing caught it.** Every swap test used a positive-rate curve.
+`CurveBootstrapperTest` did exercise a negative-rate market — but only against the *curve*,
+never against the swap model built on top of it. Coverage of a component is not coverage of
+its callers.
+
+**Why it matters more than an ordinary sign bug.** The engine explicitly advertises this
+market condition. `MarketDataKey.ZeroRate` says negative rates are permitted because
+"rejecting them would encode a market condition as a validation rule". A capability the
+documentation claims and one method silently breaks is worse than one that was never offered.
+
+**The fix.** Normalise by `PayReceive`, not by magnitude. The direction sign is removed
+deliberately; the curve's sign is left alone.
+
+### E-2 · A seasoned swap was priced with a rate that did not match its accrual · fixed
+
+The first version handled a floating period already under way by clamping: project the rate
+from the valuation date to the period end, then accrue that rate over the period. Those are
+two different lengths of time.
+
+On a swap six weeks into a three-month period, it charged a **48-day rate for 92 days of
+accrual**:
+
+```
+period            [2024-05-15 -> 2024-08-15]   tau = 0.2556 (ACT/360)
+rate projected    2024-06-28 -> 2024-08-15     covering only 0.1333
+coupon accrued    over the full 0.2556
+```
+
+The error is small on a flat front end and grows with its slope — invisible either way, and
+worth tens of thousands on a ten-million notional.
+
+**Why it now refuses rather than approximating better.** Every alternative that returns a
+number invents one. Accruing over the remaining stub alone silently discards interest already
+earned; assuming the index fixed at today's equivalent-tenor rate makes up a figure that is a
+matter of public record. Both produce a valuation indistinguishable from a correct one.
+
+An index fixing is market data. The snapshot does not hold it. The engine's existing rule for
+that case is `MissingMarketDataException` — loud beats plausible — and `MissingFixingException`
+now follows it. Swaps valued on or before their start date, which is every swap at the moment
+it is traded, are unaffected.
 
 ---
 
