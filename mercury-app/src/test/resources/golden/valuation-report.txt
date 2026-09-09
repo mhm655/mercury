@@ -1,25 +1,31 @@
 MERCURY - portfolio valuation
-------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 Portfolio      : US-EQUITY-BOOK
 Valuation date : 2024-06-28
 Currency       : USD
 
 POSITIONS
-  INSTRUMENT         QUANTITY     UNIT VALUE     MARKET VALUE  MODEL
-  --------------------------------------------------------------------------
-  AAPL                   1000       195.5000        195500.00  spot
-  MSFT                    250       412.2500        103062.50  spot
-  AAPL-C-200               -5      2382.5395        -11912.70  black-scholes
-  AAPL-P-180                8      1040.3824          8323.06  black-scholes
-  CORP-5Y                 250      1012.3155        253078.87  discounted-cashflow
-  FWD-EURUSD                1       423.7203           423.72  discounted-cashflow
-  IRS-5Y                    1     11109.2141         11109.21  swap-discounting
-  --------------------------------------------------------------------------
-  TOTAL                                             559584.66
+  INSTRUMENT         QUANTITY   CCY     UNIT VALUE     MARKET VALUE  MODEL
+  --------------------------------------------------------------------------------
+  AAPL                   1000   USD       195.5000        195500.00  spot
+  MSFT                    250   USD       412.2500        103062.50  spot
+  AAPL-C-200               -5   USD      2382.5395        -11912.70  black-scholes
+  AAPL-P-180                8   USD      1040.3824          8323.06  black-scholes
+  CORP-5Y                 250   USD      1012.3155        253078.87  discounted-cashflow
+  FWD-EURUSD                1   USD       423.7203           423.72  discounted-cashflow
+  IRS-5Y                    1   USD     11109.2141         11109.21  swap-discounting
+  BUND-3Y                 200   EUR       984.4650        211167.73  discounted-cashflow
+  --------------------------------------------------------------------------------
+  TOTAL                                                   770752.39
+
+EXPOSURE BY CURRENCY  (positions settling in each, valued in USD)
+  USD                                                     559584.66
+  EUR                                                     211167.73
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
   CORP-5Y               1010.9455         1.3700      1012.3155
+  BUND-3Y                984.4650         0.0000       984.4650
 
 DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
   CURRENCY          1Y        2Y        5Y       10Y
@@ -31,10 +37,10 @@ RISK
     AAPL                     487.9941
     MSFT                     250.0000
   FX DELTA  (value change per unit rise in the rate)
-    EUR/USD               484092.3573
+    EUR/USD               680985.3499
   DV01  (value change per +1bp on the discount rate)
     USD                      381.4940
-    EUR                      -51.7767
+    EUR                     -113.5839
 
 STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
-  P&L impact                                        -56815.17
+  P&L impact                                        -86093.00

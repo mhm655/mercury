@@ -1,6 +1,7 @@
 package com.mercury.portfolio;
 
 import com.mercury.core.MercuryException;
+import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -38,12 +39,22 @@ import java.util.Objects;
  * date; it matters more now that it does, because a curve is referenced to a date and reading
  * it from the wrong one shifts every discount factor by that many days of interest.
  *
- * <h2>Single currency, at M4</h2>
- * Every position must be in the portfolio's reporting currency. Converting is not hard, but
- * doing it properly means FX rates in the snapshot, a stated convention for which side of the
- * pair applies, and a decision about where conversion happens - and getting that wrong
- * silently produces a plausible total. It arrives at M7 with the multi-currency cash account.
- * Until then a mismatch throws rather than being quietly ignored or wrongly converted.
+ * <h2>Multi-currency, since M7</h2>
+ * A position in any currency may be held, and is converted into the book's reporting currency
+ * at the snapshot's spot rate. This was deferred from M4 through M6 - three milestones of a
+ * mismatch throwing rather than converting - because doing it properly needed FX rates in the
+ * snapshot, a stated convention for which side of the pair applies, and a decision about where
+ * the conversion happens. All three exist now.
+ *
+ * <p>The conversion sits at the <em>end</em> of the per-position calculation, and that
+ * placement is the whole decision. Pricing stays in the instrument's own currency, because that
+ * is the currency its model and its discount curve are expressed in; only the finished figure
+ * crosses into the reporting currency. A euro bond is priced on the euro curve and then
+ * converted, and is never at any point discounted at a dollar rate.
+ *
+ * <p>A missing FX rate throws rather than defaulting to one. An unconverted foreign position
+ * silently added to a dollar total is precisely the plausible wrong number this whole layer is
+ * arranged to avoid.
  *
  * <p>Stateless and thread-safe, given a thread-safe {@link PricingService}.
  */
@@ -60,8 +71,9 @@ public final class PortfolioValuationService {
     /**
      * Values every position and sums them.
      *
-     * @throws CurrencyNotSupportedException if a position is not in the reporting currency
      * @throws MarketDateMismatchException if the market describes a different day
+     * @throws com.mercury.marketdata.MarketDataSnapshot.MissingMarketDataException
+     *         if a position is in a currency the snapshot holds no FX rate for
      */
     public PortfolioValuation value(Portfolio portfolio, MarketDataSnapshot market, LocalDate asOf) {
         Objects.requireNonNull(portfolio, "portfolio");
@@ -93,24 +105,31 @@ public final class PortfolioValuationService {
             Portfolio portfolio, Position position, MarketDataSnapshot market, LocalDate asOf) {
 
         FinancialInstrument instrument = catalog.require(position.instrumentId());
-        if (instrument.currency() != portfolio.reportingCurrency()) {
-            throw new CurrencyNotSupportedException(portfolio, instrument);
-        }
+        Currency local = instrument.currency();
+        Currency reporting = portfolio.reportingCurrency();
 
         ValuationResult unitValue = pricingService.price(instrument, market, asOf);
 
-        // Multiply THEN round. Rounding the per-unit value to cents first and multiplying by
-        // the holding magnifies the rounding error by the quantity: a unit value of 24.4987
-        // becomes 24.50, and across 100 contracts that is 0.13 of error in the line. It also
-        // quantises the line, which silently destroys any sensitivity computed from it - a
-        // numerical delta came out as exactly 50.0 because a 0.0122 move per contract could
-        // only round to 0.01 or 0.02. Market value is a model output multiplied by an exact
-        // quantity, so the whole product crosses into Money once (ADR 0001).
-        double modelValue = unitValue.value() * position.quantity().value().doubleValue();
-        Money marketValue = Money.fromModelValue(modelValue, instrument.currency());
+        // Multiply THEN convert THEN round. Rounding the per-unit value to cents first and
+        // multiplying by the holding magnifies the rounding error by the quantity: a unit value
+        // of 24.4987 becomes 24.50, and across 100 contracts that is 0.13 of error in the line.
+        // It also quantises the line, which silently destroys any sensitivity computed from it -
+        // a numerical delta came out as exactly 50.0 because a 0.0122 move per contract could
+        // only round to 0.01 or 0.02.
+        //
+        // The FX conversion joins that same chain rather than starting a second one. Converting
+        // an already-rounded local figure would round twice, once in each currency, with the
+        // second rounding applied to a number the first had already moved (ADR 0001).
+        double localModelValue = unitValue.value() * position.quantity().value().doubleValue();
+        double reportingModelValue = localModelValue * market.fxRate(local, reporting);
 
         return new PortfolioValuation.PositionValuation(
-                instrument, position.quantity(), unitValue, marketValue);
+                instrument,
+                position.quantity(),
+                unitValue,
+                Money.fromModelValue(localModelValue, local),
+                Money.fromModelValue(reportingModelValue, reporting),
+                reportingModelValue);
     }
 
     /**
@@ -130,15 +149,4 @@ public final class PortfolioValuationService {
         }
     }
 
-    /** Raised when a position's currency differs from the portfolio's reporting currency. */
-    public static final class CurrencyNotSupportedException extends MercuryException {
-        CurrencyNotSupportedException(Portfolio portfolio, FinancialInstrument instrument) {
-            super("Cannot value " + instrument.id() + ", which is denominated in "
-                    + instrument.currency().code() + ", in a portfolio reporting in "
-                    + portfolio.reportingCurrency().code()
-                    + ". Cross-currency valuation needs FX rates in the snapshot and a stated "
-                    + "conversion convention; it arrives at M7. Failing is deliberate - "
-                    + "converting at an assumed rate would produce a plausible wrong total.");
-        }
-    }
 }

@@ -60,6 +60,7 @@ public final class DemoScenario {
     public static final InstrumentId CORP_BOND = InstrumentId.of("CORP-5Y");
     public static final InstrumentId EUR_FORWARD = InstrumentId.of("FWD-EURUSD");
     public static final InstrumentId SWAP = InstrumentId.of("IRS-5Y");
+    public static final InstrumentId EUR_BOND = InstrumentId.of("BUND-3Y");
 
     /** Fixed, so the scenario never depends on when it is run. */
     public static final LocalDate VALUATION_DATE = LocalDate.of(2024, 6, 28);
@@ -68,6 +69,7 @@ public final class DemoScenario {
     private static final LocalDate BOND_MATURITY = LocalDate.of(2029, 6, 15);
     private static final LocalDate FORWARD_SETTLEMENT = LocalDate.of(2025, 6, 27);
     private static final LocalDate SWAP_MATURITY = LocalDate.of(2029, 6, 28);
+    private static final LocalDate EUR_BOND_MATURITY = LocalDate.of(2027, 6, 28);
     private static final CurrencyPair EURUSD = CurrencyPair.parse("EUR/USD");
 
     private DemoScenario() {
@@ -87,7 +89,32 @@ public final class DemoScenario {
                 corporateBond(),
                 // Quoted EUR/USD, so it values in USD and belongs in a USD book.
                 FxForward.buy("FWD-EURUSD", EURUSD, "500000", "1.09", FORWARD_SETTLEMENT),
-                payerSwap());
+                payerSwap(),
+                europeanBond());
+    }
+
+    /**
+     * A euro-denominated government bond - the position that makes this a multi-currency book.
+     *
+     * <p>It is priced entirely in euros, on the euro curve, and only the finished figure is
+     * converted at spot. That ordering is the point: discounting a euro payment at a dollar
+     * rate would be wrong by the whole rate differential, and no amount of converting
+     * afterwards would fix it.
+     *
+     * <p>A 2.5% coupon against a euro curve near 3% puts it below par, which is the opposite
+     * way round from the dollar bond above it - so the report shows both cases at once.
+     */
+    private static Bond europeanBond() {
+        return Bond.builder()
+                .id("BUND-3Y")
+                .name("Bund 2.5%")
+                .faceValue(Money.of("1000", Currency.EUR))
+                .couponRate("0.025")
+                .couponFrequency(Frequency.ANNUAL)
+                .calendar(HolidayCalendar.weekendsOnly())
+                .issueDate(VALUATION_DATE)
+                .maturityDate(EUR_BOND_MATURITY)
+                .build();
     }
 
     /**
@@ -178,8 +205,9 @@ public final class DemoScenario {
     }
 
     /**
-     * A long equity book with an options overlay, a corporate bond, an FX forward and a payer
-     * swap - all five instrument types the engine models, in one portfolio.
+     * A long equity book with an options overlay, two bonds in different currencies, an FX
+     * forward and a payer swap - all five instrument types the engine models, in one
+     * portfolio, settling in two currencies.
      */
     public static Portfolio portfolio() {
         return Portfolio.builder(PortfolioId.of("US-EQUITY-BOOK"), Currency.USD)
@@ -190,6 +218,7 @@ public final class DemoScenario {
                 .position(CORP_BOND, 250)
                 .position(EUR_FORWARD, 1)
                 .position(SWAP, 1)
+                .position(EUR_BOND, 200)
                 .build();
     }
 
@@ -197,7 +226,8 @@ public final class DemoScenario {
      * Every model the demo needs.
      *
      * <p>Five instrument types, four models - the discounted-cashflow model is registered
-     * twice, once per cashflow-bearing instrument. The swap arriving at M6 cost exactly one
+     * twice, once per cashflow-bearing instrument, and prices bonds in two currencies through
+     * the same registration. The swap arriving at M6 cost exactly one
      * line here and changed nothing else in this file beyond adding the instrument and the
      * position, which is the open-closed claim behaving as advertised on a real addition
      * rather than on a test fixture.

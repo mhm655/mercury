@@ -21,7 +21,8 @@ import java.util.Objects;
  *
  * <h2>Lines are kept, not just the total</h2>
  * A total nobody can decompose is a number nobody can trust. Keeping the per-position detail
- * means a valuation can always answer which holding contributed what, and under which model.
+ * means a valuation can always answer which holding contributed what, under which model, and -
+ * since M7 - in which currency.
  */
 public record PortfolioValuation(
         PortfolioId portfolioId,
@@ -48,18 +49,50 @@ public record PortfolioValuation(
         }
     }
 
-    /** One position's contribution. */
+    /**
+     * One position's contribution, in both the currency it trades in and the one the book
+     * reports in.
+     *
+     * <h2>Three values, and why none is redundant</h2>
+     * <ul>
+     *   <li>{@link #localValue} is what the position is worth to someone standing in its own
+     *       market - a euro bond in euros. It is the number a desk quotes.</li>
+     *   <li>{@link #marketValue} is the same position converted into the book's reporting
+     *       currency, and is what sums to the portfolio total.</li>
+     *   <li>{@link #reportingModelValue} is that second figure <em>before</em> rounding to the
+     *       cent. Risk is computed from it, for the reason ADR 0001 gives: a delta divides the
+     *       difference of two valuations by a very small number, so cent-level quantisation in
+     *       the numerator is amplified enormously in the result.</li>
+     * </ul>
+     *
+     * <p>When the two currencies are the same, {@code localValue} and {@code marketValue} are
+     * equal, and printing both would be noise - which is why the report shows the local column
+     * only for positions where it says something.
+     */
     public record PositionValuation(
             FinancialInstrument instrument,
             Quantity quantity,
             ValuationResult unitValue,
-            Money marketValue) {
+            Money localValue,
+            Money marketValue,
+            double reportingModelValue) {
 
         public PositionValuation {
             Objects.requireNonNull(instrument, "instrument");
             Objects.requireNonNull(quantity, "quantity");
             Objects.requireNonNull(unitValue, "unitValue");
+            Objects.requireNonNull(localValue, "localValue");
             Objects.requireNonNull(marketValue, "marketValue");
+            if (!Double.isFinite(reportingModelValue)) {
+                throw new IllegalArgumentException(
+                        "Position value for " + instrument.id() + " is not finite ("
+                                + reportingModelValue + ")");
+            }
+        }
+
+        /** True when the instrument trades in a currency the book does not report in. */
+        public boolean isForeign() {
+            return localValue.currency() != marketValue.currency();
         }
 
         @Override
@@ -88,9 +121,41 @@ public record PortfolioValuation(
      */
     public double modelTotal() {
         return lines.stream()
-                .mapToDouble(line -> line.unitValue().value()
-                        * line.quantity().value().doubleValue())
+                .mapToDouble(PositionValuation::reportingModelValue)
                 .sum();
+    }
+
+    /**
+     * The value of every position denominated in {@code currency}, converted into the book's
+     * reporting currency.
+     *
+     * <p>What "exposure to a currency" means here is deliberately narrow: the value of the
+     * positions that <em>settle</em> in it. A dollar-settled FX forward on the euro carries
+     * euro risk and does not appear under EUR by this measure - that exposure shows up in the
+     * FX delta instead, where it belongs. Two different questions, two different numbers, and
+     * conflating them is how a currency report ends up double-counting.
+     *
+     * <p>Summed from the rounded line values rather than the model figures behind them, so
+     * that the exposures add up to {@link #totalValue()} exactly. The first version summed the
+     * unrounded numbers and the two currency rows came to a cent more than the total they were
+     * decomposing - the same class of defect as a headline that disagrees with its own detail,
+     * and this type exists partly to make that impossible. Risk keeps the unrounded figures;
+     * see {@link #modelTotal()}.
+     */
+    public Money exposureTo(com.mercury.core.money.Currency currency) {
+        Objects.requireNonNull(currency, "currency");
+        return lines.stream()
+                .filter(line -> line.localValue().currency() == currency)
+                .map(PositionValuation::marketValue)
+                .reduce(Money.zero(totalValue.currency()), Money::plus);
+    }
+
+    /** Every currency the book actually settles in, in the order positions were valued. */
+    public java.util.List<com.mercury.core.money.Currency> currencies() {
+        return lines.stream()
+                .map(line -> line.localValue().currency())
+                .distinct()
+                .toList();
     }
 
     @Override

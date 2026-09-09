@@ -3,6 +3,7 @@ package com.mercury.app;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.offset;
 
+import com.mercury.core.money.Money;
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuation;
 import java.io.IOException;
@@ -98,7 +99,7 @@ class GoldenMasterTest {
 
         assertThat(runScenario())
                 .contains(valuation.totalValue().amount().toPlainString());
-        assertThat(valuation.lines()).hasSize(7);
+        assertThat(valuation.lines()).hasSize(8);
     }
 
     @Test
@@ -117,6 +118,41 @@ class GoldenMasterTest {
                 .contains("EUR/USD")
                 .contains("USD")
                 .contains("EUR");
+    }
+
+    @Test
+    @DisplayName("the currency breakdown adds up to the headline total")
+    void exposureReconciles() {
+        // A decomposition that does not sum to the thing it decomposes is worse than no
+        // decomposition. The first version summed the unrounded model values and the two rows
+        // came to a cent more than the total.
+        PortfolioValuation valuation = valueDemoPortfolio();
+
+        Money summed = valuation.currencies().stream()
+                .map(valuation::exposureTo)
+                .reduce(Money.zero(valuation.totalValue().currency()), Money::plus);
+
+        assertThat(summed).isEqualTo(valuation.totalValue());
+        assertThat(runScenario())
+                .contains("EXPOSURE BY CURRENCY")
+                .contains("BUND-3Y");
+    }
+
+    @Test
+    @DisplayName("a foreign position is quoted in its own currency and valued in the book's")
+    void foreignPositionShowsBothCurrencies() {
+        // The euro bond's unit value is in euros and its market value in dollars. Printing
+        // both under one heading without naming the currency would be a trap, so the row
+        // carries a CCY column.
+        PortfolioValuation.PositionValuation bund = valueDemoPortfolio().lines().stream()
+                .filter(line -> line.instrument().id().equals(DemoScenario.EUR_BOND))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no euro bond in the demo book"));
+
+        assertThat(bund.isForeign()).isTrue();
+        assertThat(bund.localValue().currency().code()).isEqualTo("EUR");
+        assertThat(bund.marketValue().currency().code()).isEqualTo("USD");
+        assertThat(runScenario()).contains("BUND-3Y                 200   EUR");
     }
 
     @Test
@@ -144,7 +180,16 @@ class GoldenMasterTest {
         String report = runScenario();
         assertThat(report).contains("DISCOUNT CURVES");
 
-        String usd = report.lines()
+        // Anchored to the section, not to the first line beginning "USD". Once the book held
+        // two currencies the exposure block gained a USD row of its own, several lines earlier
+        // and with a different number of columns - so a naive findFirst matched the wrong row
+        // and read past the end of it.
+        List<String> lines = report.lines().toList();
+        int header = lines.indexOf(lines.stream()
+                .filter(line -> line.startsWith("DISCOUNT CURVES"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no curve section")));
+        String usd = lines.subList(header, lines.size()).stream()
                 .filter(line -> line.trim().startsWith("USD"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no USD curve row"));

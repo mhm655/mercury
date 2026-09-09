@@ -2,10 +2,12 @@ package com.mercury.portfolio;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.PortfolioId;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.instrument.EuropeanOption;
@@ -180,23 +182,116 @@ class PortfolioValuationServiceTest {
         }
 
         @Test
-        @DisplayName("a foreign-currency position is rejected rather than assumed")
-        void foreignCurrencyRejected() {
-            // Converting at an assumed rate would produce a plausible wrong total, which is
-            // worse than refusing. FX conversion arrives at M7.
-            Stock european = Stock.of("SAP", Currency.EUR);
-            PortfolioValuationService withEuro = new PortfolioValuationService(
-                    PricingService.builder().register(new SpotPriceModel()).build(),
-                    InstrumentCatalog.of(AAPL_STOCK, european));
-            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
-                    .position(InstrumentId.of("SAP"), 100).build();
-            MarketDataSnapshot withSap = MarketDataSnapshot.builder(VALUATION)
-                    .spot(InstrumentId.of("SAP"), 150.0).build();
+        @DisplayName("a foreign position is converted at the snapshot's rate")
+        void foreignCurrencyConverted() {
+            // Deferred from M4 through M6, and the deferral note was copied forward three
+            // times. 100 shares at EUR 150 is EUR 15,000, which at 1.10 is USD 16,500.
+            PortfolioValuation valuation = europeanBook().value(
+                    europeanPortfolio(), europeanMarket(1.10), VALUATION);
 
-            assertThatThrownBy(() -> withEuro.value(portfolio, withSap, VALUATION))
-                    .isInstanceOf(PortfolioValuationService.CurrencyNotSupportedException.class)
-                    .hasMessageContaining("EUR")
-                    .hasMessageContaining("M7");
+            PortfolioValuation.PositionValuation line = valuation.lines().get(0);
+
+            assertThat(line.localValue()).isEqualTo(Money.of("15000.00", Currency.EUR));
+            assertThat(line.marketValue()).isEqualTo(Money.of("16500.00", Currency.USD));
+            assertThat(line.isForeign()).isTrue();
+            assertThat(valuation.totalValue()).isEqualTo(Money.of("16500.00", Currency.USD));
+        }
+
+        @Test
+        @DisplayName("the local value does not move when the exchange rate does")
+        void localValueIsInvariantToFx() {
+            // The reason both figures are kept. A euro position is worth the same in euros
+            // whatever the dollar does; only the reported figure moves.
+            PortfolioValuation weak = europeanBook().value(
+                    europeanPortfolio(), europeanMarket(1.05), VALUATION);
+            PortfolioValuation strong = europeanBook().value(
+                    europeanPortfolio(), europeanMarket(1.25), VALUATION);
+
+            assertThat(weak.lines().get(0).localValue())
+                    .isEqualTo(strong.lines().get(0).localValue());
+            assertThat(strong.totalValue().amount())
+                    .isGreaterThan(weak.totalValue().amount());
+        }
+
+        @Test
+        @DisplayName("a domestic position reports the same figure twice")
+        void domesticPositionIsNotForeign() {
+            PortfolioValuation valuation = service().value(
+                    Portfolio.builder(BOOK, Currency.USD).position(AAPL, 100).build(),
+                    market(), VALUATION);
+
+            PortfolioValuation.PositionValuation line = valuation.lines().get(0);
+
+            assertThat(line.isForeign()).isFalse();
+            assertThat(line.localValue()).isEqualTo(line.marketValue());
+        }
+
+        @Test
+        @DisplayName("exposure is reported per settlement currency")
+        void exposureByCurrency() {
+            // Deliberately narrow: the value of positions that SETTLE in a currency. A
+            // dollar-settled forward on the euro carries euro risk and does not appear here -
+            // that shows up in the FX delta, where it belongs.
+            PortfolioValuation valuation = mixedBook().value(
+                    Portfolio.builder(BOOK, Currency.USD)
+                            .position(AAPL, 100)
+                            .position(InstrumentId.of("SAP"), 100)
+                            .build(),
+                    europeanMarket(1.10), VALUATION);
+
+            assertThat(valuation.currencies()).containsExactlyInAnyOrder(
+                    Currency.USD, Currency.EUR);
+            assertThat(valuation.exposureTo(Currency.USD))
+                    .isEqualTo(Money.of("20000.00", Currency.USD));
+            assertThat(valuation.exposureTo(Currency.EUR))
+                    .isEqualTo(Money.of("16500.00", Currency.USD));
+            assertThat(valuation.exposureTo(Currency.JPY))
+                    .isEqualTo(Money.zero(Currency.USD));
+
+            // The decomposition must add up to the thing it decomposes.
+            assertThat(valuation.exposureTo(Currency.USD)
+                    .plus(valuation.exposureTo(Currency.EUR)))
+                    .isEqualTo(valuation.totalValue());
+        }
+
+        @Test
+        @DisplayName("a missing FX rate fails loudly rather than assuming one")
+        void missingRateIsRefused() {
+            // The rule that made refusing right in the first place has not gone away; it has
+            // moved to the one place that can now check it.
+            MarketDataSnapshot noFx = MarketDataSnapshot.builder(VALUATION)
+                    .spot(InstrumentId.of("SAP"), 150.0)
+                    .build();
+
+            assertThatThrownBy(
+                    () -> europeanBook().value(europeanPortfolio(), noFx, VALUATION))
+                    .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class)
+                    .hasMessageContaining("fx:EUR/USD");
+        }
+
+        private static PortfolioValuationService europeanBook() {
+            return new PortfolioValuationService(
+                    PricingService.builder().register(new SpotPriceModel()).build(),
+                    InstrumentCatalog.of(Stock.of("SAP", Currency.EUR)));
+        }
+
+        private static PortfolioValuationService mixedBook() {
+            return new PortfolioValuationService(
+                    PricingService.builder().register(new SpotPriceModel()).build(),
+                    InstrumentCatalog.of(AAPL_STOCK, Stock.of("SAP", Currency.EUR)));
+        }
+
+        private static Portfolio europeanPortfolio() {
+            return Portfolio.builder(BOOK, Currency.USD)
+                    .position(InstrumentId.of("SAP"), 100).build();
+        }
+
+        private static MarketDataSnapshot europeanMarket(double eurusd) {
+            return MarketDataSnapshot.builder(VALUATION)
+                    .spot(AAPL, 200.0)
+                    .spot(InstrumentId.of("SAP"), 150.0)
+                    .fxRate(CurrencyPair.parse("EUR/USD"), eurusd)
+                    .build();
         }
 
         @Test

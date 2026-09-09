@@ -53,8 +53,8 @@ import java.util.Objects;
  */
 public final class ValuationReport {
 
-    private static final String SEPARATOR = "-".repeat(78);
-    private static final String ROW = "-".repeat(74);
+    private static final String SEPARATOR = "-".repeat(84);
+    private static final String ROW = "-".repeat(80);
 
     private ValuationReport() {
     }
@@ -73,6 +73,7 @@ public final class ValuationReport {
         StringBuilder out = new StringBuilder(2048);
         header(out, portfolio, asOf);
         positions(out, valuation);
+        currencies(out, valuation, portfolio);
         accruals(out, valuation, asOf);
         curves(out, market, riskFactors, asOf);
         risk(out, portfolio, market, sensitivities, riskFactors, asOf);
@@ -91,20 +92,50 @@ public final class ValuationReport {
 
     private static void positions(StringBuilder out, PortfolioValuation valuation) {
         line(out, "POSITIONS");
-        line(out, "  %-16s %10s %14s %16s  %s",
-                "INSTRUMENT", "QUANTITY", "UNIT VALUE", "MARKET VALUE", "MODEL");
+        line(out, "  %-16s %10s %5s %14s %16s  %s",
+                "INSTRUMENT", "QUANTITY", "CCY", "UNIT VALUE", "MARKET VALUE", "MODEL");
         line(out, "  %s", ROW);
 
         for (PortfolioValuation.PositionValuation position : valuation.lines()) {
-            line(out, "  %-16s %10s %14.4f %16s  %s",
+            // Unit value is quoted in the instrument's own currency and market value in the
+            // book's. Naming the currency per line is what keeps that from being a trap: the
+            // two columns are in different units whenever CCY is not the reporting currency.
+            line(out, "  %-16s %10s %5s %14.4f %16s  %s",
                     position.instrument().id(),
                     position.quantity(),
+                    position.localValue().currency().code(),
                     position.unitValue().value(),
                     position.marketValue().amount().toPlainString(),
                     position.unitValue().model());
         }
         line(out, "  %s", ROW);
-        line(out, "  %-42s %16s", "TOTAL", valuation.totalValue().amount().toPlainString());
+        line(out, "  %-48s %16s", "TOTAL", valuation.totalValue().amount().toPlainString());
+        line(out, "");
+    }
+
+    /**
+     * What the book is worth in each currency it settles in, converted to the reporting one.
+     *
+     * <p>Skipped entirely for a single-currency book, where every row would repeat the total.
+     *
+     * <p>This measures <em>settlement</em> exposure: the value of positions that pay in a
+     * currency. It is not the same question as the FX delta further down, which measures how
+     * the book moves when a rate does - a dollar-settled forward on the euro appears in the
+     * second and not the first. Two questions, two numbers, and conflating them is how a
+     * currency report ends up double-counting.
+     */
+    private static void currencies(StringBuilder out, PortfolioValuation valuation,
+                                   Portfolio portfolio) {
+        List<Currency> currencies = valuation.currencies();
+        if (currencies.size() < 2) {
+            return;
+        }
+        line(out, "EXPOSURE BY CURRENCY  (positions settling in each, valued in %s)",
+                portfolio.reportingCurrency().code());
+        for (Currency currency : currencies) {
+            line(out, "  %-48s %16s", currency.code(),
+                    valuation.exposureTo(currency).amount().toPlainString());
+        }
         line(out, "");
     }
 
