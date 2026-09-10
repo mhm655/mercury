@@ -68,6 +68,46 @@ actually discovered rather than bolted onto the venue interface above it.
 
 ---
 
+## Fixed during a post-M8 review
+
+### F-1 · `OtcNegotiationVenue`'s spread silently did nothing on a zero-priced instrument · fixed
+
+The spread was applied as `mid × (1 ± spread)` - the right convention for anything quoted
+as a clean per-unit price (a stock, a bond, an option premium), and the wrong one for a
+net-present-value instrument like a swap or a forward. A swap negotiated at or near
+inception prices at or near **zero**, and a percentage of a number near zero is a number
+near zero: `TradeLifecycleDemo`'s own OTC negotiation happened to work only because the
+demo's swap priced at 11,109.21, comfortably away from zero. The same code, run against a
+swap struck at par, would have booked a trade that claimed a spread and applied none -
+silently, with no error, no warning, nothing to distinguish it from a genuinely zero-cost
+trade.
+
+**How it was found.** A post-ship debugging pass, not a test - the shipped test suite
+happened to only ever price this venue against instruments comfortably away from zero.
+
+**Why a percentage-of-mid convention is the wrong shape here, not just imprecise.** A real
+desk quotes a swap spread on the *rate*, not as a fraction of its NPV - repricing the
+instrument with a bumped rate input, which Mercury's `PricingModel` interface does not
+generically support today (see the deliberate scope limit below). Deriving a spread's
+monetary size from a number that can legitimately be zero is broken by construction, for
+any instrument whose priced value is a net PV rather than a market-quoted price - not a
+rounding edge case to patch around.
+
+**The fix.** `OtcNegotiationVenue.execute` now checks whether a nonzero requested spread
+actually changed the consideration, and throws `SpreadHadNoEffectException` if it did not,
+rather than booking a trade that silently applied none - the same "loud beats plausible"
+rule `MarketDataSnapshot` and `SwapModel` already follow for missing data (see C-1 and
+E-2). A zero spread on a zero-priced instrument is unaffected and still books normally: a
+genuinely zero-cost trade at inception is legitimate, and the exception is about a
+requested spread having no effect, not about zero consideration itself.
+
+**What is still deferred.** A real rate-based spread convention for NPV instruments is not
+implemented - see "A percentage-of-mid spread on NPV instruments" below. This fix turns the
+silent wrong answer into a loud, correct refusal; it does not add the machinery a correct
+answer would need.
+
+---
+
 ## Deliberate scope limits
 
 These are not defects and are not scheduled. They are named so their absence reads as a
@@ -92,6 +132,7 @@ decision.
 | Counterparty | Credit-limit enforcement | `Counterparty` carries a stated `CreditLimit` from M8, and nothing checks a proposed trade against it. The pro-forma exposure projection and breach-rejection machinery is `RiskLimit` work at M9 — see `docs/DESIGN_PROPOSAL.md` A2.6 and the roadmap. Added the entity now anyway, since retrofitting it later would be invasive. |
 | Trade lifecycle | Settlement scheduling | `Trade` carries a `settlementDate` and supports the `SETTLED` state, but nothing moves a trade there automatically on clock advancement (`docs/DESIGN_PROPOSAL.md` A2.7). Driving a trade to `SETTLED` is a caller's explicit action until a real scheduler exists; adding one now, with no consumer, would be exactly the speculative machinery the project's restraint principle (A2.9) argues against. |
 | OTC negotiation | A separate, expiring quote step | `OtcNegotiationVenue` prices and executes in one call. A real RFQ workflow quotes a price that can expire before it is accepted. Collapsing the two is a stated simplification, in the same spirit as the project's existing single-curve and vanilla-swap simplifications — not a gap that was missed. |
+| OTC negotiation | A percentage-of-mid spread on NPV instruments | `OtcNegotiationVenue` applies its spread as a fraction of the priced mid, which is the right convention for a clean per-unit price and the wrong one for a swap or forward's net present value — see F-1. A correct version needs `PricingModel` to reprice at a shocked rate input, which the interface does not support generically today; adding it for one caller would be speculative. For now, F-1 makes the venue refuse a spread that would have had no effect rather than pretend one was applied. |
 
 ---
 

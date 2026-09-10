@@ -72,8 +72,35 @@ class OtcNegotiationVenueTest {
         }
     }
 
+    /** Prices at exactly zero - the net-present-value-at-inception case a swap hits routinely. */
+    private static final class ZeroPriceModel implements PricingModel<TestOtcInstrument> {
+        @Override
+        public Class<TestOtcInstrument> instrumentType() {
+            return TestOtcInstrument.class;
+        }
+
+        @Override
+        public ModelName name() {
+            return ModelName.of("zero");
+        }
+
+        @Override
+        public ValuationResult price(TestOtcInstrument instrument, MarketDataSnapshot market,
+                                     LocalDate asOf) {
+            return new ValuationResult(0.0, instrument.currency(), name());
+        }
+    }
+
     private static OtcNegotiationVenue newVenue(BasisPoints ignored) {
         PricingService pricingService = PricingService.builder().register(new FixedPriceModel()).build();
+        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
+        InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
+        return new OtcNegotiationVenue(pricingService, market, catalog, new TradeIdGenerator("TRD-"),
+                OWN_BOOK);
+    }
+
+    private static OtcNegotiationVenue newZeroPricedVenue() {
+        PricingService pricingService = PricingService.builder().register(new ZeroPriceModel()).build();
         MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
         InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
         return new OtcNegotiationVenue(pricingService, market, catalog, new TradeIdGenerator("TRD-"),
@@ -121,6 +148,33 @@ class OtcNegotiationVenueTest {
         Trade trade = venue.execute(instruction, CLOCK).get(0);
 
         assertThat(trade.consideration()).isEqualTo(Money.of("1000.00", Currency.USD));
+    }
+
+    @Test
+    void refusesANonzeroSpreadThatHadNoEffectOnAZeroPricedInstrument() {
+        // The bug this guards against: a swap at inception prices at (or near) zero, and a
+        // percentage-of-mid spread on a number that is already zero is still zero - a trade
+        // would silently claim a spread was applied when it was not.
+        OtcNegotiationVenue venue = newZeroPricedVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.ofPercent(0.10));
+
+        assertThatThrownBy(() -> venue.execute(instruction, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.SpreadHadNoEffectException.class)
+                .hasMessageContaining("net-present-value");
+    }
+
+    @Test
+    void aZeroSpreadOnAZeroPricedInstrumentIsNotAnError() {
+        // No spread was ever requested, so there is nothing for it to have failed to do -
+        // a genuinely zero-consideration trade (e.g. a swap at inception) is legitimate.
+        OtcNegotiationVenue venue = newZeroPricedVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        Trade trade = venue.execute(instruction, CLOCK).get(0);
+
+        assertThat(trade.consideration()).isEqualTo(Money.zero(Currency.USD));
     }
 
     @Test
