@@ -12,9 +12,14 @@ import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.ValuationResult;
+import com.mercury.risk.LimitCheckResult;
+import com.mercury.risk.RiskLimit;
+import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -46,6 +51,28 @@ import java.util.Optional;
  * owner is whichever participant's order it came from; an OTC trade is always Mercury's own
  * book on one side and the named counterparty on the other, so {@code ownBook} is supplied
  * once at construction rather than per instruction.
+ *
+ * <h2>M9: a pre-trade credit check, and where its running state lives</h2>
+ * Every negotiation is checked against {@code riskLimit} before it is allowed to execute -
+ * {@code docs/DESIGN_PROPOSAL.md} section A2.6's "evaluate limits against the portfolio as it
+ * would be if the trade executed." The projection is cheap because nothing is committed until
+ * the check clears: {@code exposureByCounterparty} - the running gross notional traded against
+ * each counterparty, in that counterparty's own {@code CreditLimit} currency - is read to form
+ * the projected total, and only written to once a trade actually executes. This venue already
+ * holds other mutable per-instance state ({@link OrderBookVenue} holds its order books and
+ * owners the same way), so adding one more running total here is the established shape, not a
+ * new one.
+ *
+ * <p>Only OTC trades are checked. A CLOB fill has no named counterparty to check - see
+ * {@code TradabilityProfile} - so a counterparty exposure limit has nothing to apply to there.
+ *
+ * <p>A breach does not throw. {@link #negotiate} returns a {@link NegotiationResult} carrying
+ * either the executed trade or the breaches that stopped it - {@code MercuryException}'s own
+ * javadoc names this as the shape a risk-limit breach should take, an expected business outcome
+ * rather than a defect. {@link #execute}, the shared {@link ExecutionVenue} method, forwards
+ * only {@link NegotiationResult#trades()} - empty on a breach - exactly as
+ * {@code OrderBookVenue.execute} forwards only {@code MatchResult.fills()} and drops
+ * {@code selfTradePrevented()}.
  */
 public final class OtcNegotiationVenue implements ExecutionVenue {
 
@@ -54,15 +81,22 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     private final InstrumentCatalog instruments;
     private final TradeIdGenerator tradeIdGenerator;
     private final CounterpartyId ownBook;
+    private final CounterpartyDirectory counterparties;
+    private final RiskLimit riskLimit;
+
+    private final Map<CounterpartyId, Money> exposureByCounterparty = new HashMap<>();
 
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
-                               CounterpartyId ownBook) {
+                               CounterpartyId ownBook, CounterpartyDirectory counterparties,
+                               RiskLimit riskLimit) {
         this.pricingService = Objects.requireNonNull(pricingService, "pricingService");
         this.market = Objects.requireNonNull(market, "market");
         this.instruments = Objects.requireNonNull(instruments, "instruments");
         this.tradeIdGenerator = Objects.requireNonNull(tradeIdGenerator, "tradeIdGenerator");
         this.ownBook = Objects.requireNonNull(ownBook, "ownBook");
+        this.counterparties = Objects.requireNonNull(counterparties, "counterparties");
+        this.riskLimit = Objects.requireNonNull(riskLimit, "riskLimit");
     }
 
     @Override
@@ -72,6 +106,19 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                     "OtcNegotiationVenue only executes OtcInstruction, but received "
                             + instruction.getClass().getSimpleName());
         }
+        return negotiate(otc, clock).trades();
+    }
+
+    /**
+     * Prices and negotiates {@code otc}, checking the projected exposure it would create
+     * against {@code riskLimit} before anything executes.
+     *
+     * @throws SpreadHadNoEffectException if a nonzero requested spread had no measurable effect
+     * @throws CounterpartyDirectory.UnknownCounterpartyException if {@code otc} names a
+     *         counterparty this venue does not know
+     */
+    public NegotiationResult negotiate(OtcInstruction otc, SimulationClock clock) {
+        Objects.requireNonNull(otc, "otc");
         Objects.requireNonNull(clock, "clock");
 
         FinancialInstrument instrument = instruments.require(otc.instrumentId());
@@ -101,13 +148,34 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
             }
         }
 
+        Counterparty counterparty = counterparties.require(otc.counterparty());
+        Currency limitCurrency = counterparty.creditLimit().maximum().currency();
+        Money existingExposure = exposureByCounterparty.getOrDefault(
+                counterparty.id(), Money.zero(limitCurrency));
+        // A risk check, not a ledger fact: converting an already-rounded consideration into
+        // the limit's currency here (rather than forming the product once, as
+        // PortfolioValuationService does for the ledger) is fine - a cent of double-rounding
+        // does not change which side of a credit limit a trade lands on.
+        double exposureInLimitCurrency =
+                consideration.abs().amount().doubleValue() * market.fxRate(currency, limitCurrency);
+        Money projectedExposure = existingExposure.plus(
+                Money.fromModelValue(exposureInLimitCurrency, limitCurrency));
+
+        LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
+        if (check.isBreached()) {
+            return NegotiationResult.rejected(check.breaches());
+        }
+
         Quantity delta = buy ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
 
         Trade trade = Trade.newTrade(tradeIdGenerator.next(), instrument.id(), ownBook, delta,
                 consideration, clock.today(), Optional.empty(), Optional.of(otc.counterparty()));
-        return List.of(trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
+        trade = trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
                 .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
-                .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock));
+                .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
+
+        exposureByCounterparty.put(counterparty.id(), projectedExposure);
+        return NegotiationResult.executed(trade);
     }
 
     /**

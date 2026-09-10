@@ -7,6 +7,7 @@ import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
@@ -22,6 +23,9 @@ import com.mercury.pricing.PricingModel;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.ValuationResult;
 import com.mercury.pricing.model.SpotPriceModel;
+import com.mercury.risk.RiskLimit;
+import com.mercury.trade.CreditLimit;
+import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import java.time.LocalDate;
 import java.util.List;
@@ -33,6 +37,8 @@ class ExecutionRouterTest {
     private static final SimulationClock CLOCK = SimulationClock.fixedAt(VALUATION_DATE);
     private static final CounterpartyId BUYER = CounterpartyId.of("CPTY-BUYER");
     private static final CounterpartyId SELLER = CounterpartyId.of("CPTY-SELLER");
+    private static final CounterpartyDirectory COUNTERPARTIES = CounterpartyDirectory.of(
+            new Counterparty(SELLER, "Seller Capital", new CreditLimit(Money.of("1000000000.00", Currency.USD))));
 
     /** A minimal OTC instrument, priced at a fixed 100.00 - just enough to prove routing. */
     private record TestOtcInstrument(InstrumentId id, Currency currency) implements FinancialInstrument {
@@ -78,7 +84,7 @@ class ExecutionRouterTest {
                 new OrderBookVenue(new TradeIdGenerator("TRD-"), catalog),
                 new OtcNegotiationVenue(PricingService.builder().register(new SpotPriceModel()).build(),
                         MarketDataSnapshot.builder(VALUATION_DATE).spot(aapl.id(), 195.50).build(),
-                        catalog, new TradeIdGenerator("TRD-"), BUYER));
+                        catalog, new TradeIdGenerator("TRD-"), BUYER, COUNTERPARTIES, RiskLimit.none()));
 
         router.execute(aapl, OrderBookInstruction.limit(
                 aapl.id(), Side.SELL, Price.of("100.00"), 100, SELLER), CLOCK);
@@ -97,7 +103,7 @@ class ExecutionRouterTest {
                 new OrderBookVenue(new TradeIdGenerator("TRD-"), catalog),
                 new OtcNegotiationVenue(PricingService.builder().register(new FixedPriceModel()).build(),
                         MarketDataSnapshot.builder(VALUATION_DATE).build(),
-                        catalog, new TradeIdGenerator("TRD-"), BUYER));
+                        catalog, new TradeIdGenerator("TRD-"), BUYER, COUNTERPARTIES, RiskLimit.none()));
 
         List<Trade> trades = router.execute(instrument,
                 new OtcInstruction(instrument.id(), Side.BUY, Quantity.of(1), SELLER, BasisPoints.ZERO),
@@ -115,7 +121,7 @@ class ExecutionRouterTest {
                 new OrderBookVenue(new TradeIdGenerator("TRD-"), catalog),
                 new OtcNegotiationVenue(PricingService.builder().register(new SpotPriceModel()).build(),
                         MarketDataSnapshot.builder(VALUATION_DATE).spot(aapl.id(), 195.50).build(),
-                        catalog, new TradeIdGenerator("TRD-"), BUYER));
+                        catalog, new TradeIdGenerator("TRD-"), BUYER, COUNTERPARTIES, RiskLimit.none()));
 
         assertThatThrownBy(() -> router.execute(aapl,
                 new OtcInstruction(aapl.id(), Side.BUY, Quantity.of(1), SELLER, BasisPoints.ZERO),

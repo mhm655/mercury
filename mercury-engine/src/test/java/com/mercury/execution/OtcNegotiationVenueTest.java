@@ -20,6 +20,10 @@ import com.mercury.pricing.ModelName;
 import com.mercury.pricing.PricingModel;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.ValuationResult;
+import com.mercury.risk.CounterpartyExposureLimit;
+import com.mercury.risk.RiskLimit;
+import com.mercury.trade.CreditLimit;
+import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
@@ -32,6 +36,10 @@ class OtcNegotiationVenueTest {
     private static final SimulationClock CLOCK = SimulationClock.fixedAt(VALUATION_DATE);
     private static final CounterpartyId OWN_BOOK = CounterpartyId.of("CPTY-MERCURY");
     private static final CounterpartyId COUNTERPARTY = CounterpartyId.of("CPTY-ACME");
+
+    /** A limit generous enough that it never fires in tests that aren't about the risk check. */
+    private static final Counterparty ACME = new Counterparty(COUNTERPARTY, "Acme Capital",
+            new CreditLimit(Money.of("1000000000.00", Currency.USD)));
 
     /** A minimal OTC instrument, priced at a fixed 100.00 - just enough to exercise the venue. */
     private record TestOtcInstrument(InstrumentId id, Currency currency) implements FinancialInstrument {
@@ -92,19 +100,27 @@ class OtcNegotiationVenueTest {
     }
 
     private static OtcNegotiationVenue newVenue(BasisPoints ignored) {
-        PricingService pricingService = PricingService.builder().register(new FixedPriceModel()).build();
-        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
-        InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
-        return new OtcNegotiationVenue(pricingService, market, catalog, new TradeIdGenerator("TRD-"),
-                OWN_BOOK);
+        return newVenue(new FixedPriceModel(), ACME.creditLimit());
     }
 
     private static OtcNegotiationVenue newZeroPricedVenue() {
         PricingService pricingService = PricingService.builder().register(new ZeroPriceModel()).build();
         MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
         InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
+        CounterpartyDirectory counterparties = CounterpartyDirectory.of(ACME);
         return new OtcNegotiationVenue(pricingService, market, catalog, new TradeIdGenerator("TRD-"),
-                OWN_BOOK);
+                OWN_BOOK, counterparties, new CounterpartyExposureLimit());
+    }
+
+    private static OtcNegotiationVenue newVenue(PricingModel<TestOtcInstrument> model,
+                                                CreditLimit creditLimit) {
+        PricingService pricingService = PricingService.builder().register(model).build();
+        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
+        InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
+        Counterparty counterparty = new Counterparty(COUNTERPARTY, "Acme Capital", creditLimit);
+        CounterpartyDirectory counterparties = CounterpartyDirectory.of(counterparty);
+        return new OtcNegotiationVenue(pricingService, market, catalog, new TradeIdGenerator("TRD-"),
+                OWN_BOOK, counterparties, new CounterpartyExposureLimit());
     }
 
     @Test
@@ -186,5 +202,74 @@ class OtcNegotiationVenueTest {
         assertThatThrownBy(() -> venue.execute(wrong, CLOCK))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("OtcInstruction");
+    }
+
+    @Test
+    void aTradeWithinTheCreditLimitExecutes() {
+        // mid 100.00, no spread, x 100 units = 10,000.00 - comfortably under a 20,000 limit.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("20000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        NegotiationResult result = venue.negotiate(instruction, CLOCK);
+
+        assertThat(result.isRejected()).isFalse();
+        assertThat(result.trades()).hasSize(1);
+    }
+
+    @Test
+    void aTradeOverTheCreditLimitIsRejectedRatherThanExecuted() {
+        // mid 100.00, no spread, x 100 units = 10,000.00 - over a 5,000 limit.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("5000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        NegotiationResult result = venue.negotiate(instruction, CLOCK);
+
+        assertThat(result.isRejected()).isTrue();
+        assertThat(result.trades()).isEmpty();
+        assertThat(result.breaches()).hasSize(1);
+        assertThat(result.breaches().get(0).counterparty()).isEqualTo(COUNTERPARTY);
+        assertThat(result.breaches().get(0).projectedExposure())
+                .isEqualTo(Money.of("10000.00", Currency.USD));
+    }
+
+    @Test
+    void aRejectedNegotiationDoesNotAdvanceTradeIds() {
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("5000.00", Currency.USD)));
+        OtcInstruction tooLarge = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        venue.negotiate(tooLarge, CLOCK);
+
+        // A trade small enough to fit under the same limit still gets the first trade id -
+        // proof the rejected attempt above never minted one.
+        OtcInstruction fits = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(10),
+                COUNTERPARTY, BasisPoints.ZERO);
+        NegotiationResult result = venue.negotiate(fits, CLOCK);
+
+        assertThat(result.trades().get(0).id().value()).isEqualTo("TRD-1");
+    }
+
+    @Test
+    void exposureAccumulatesAcrossNegotiationsAndABreachStopsShortOfCommittingIt() {
+        // Limit 15,000: first trade of 10,000 fits, a second of 10,000 would total 20,000 and
+        // breach. The rejection must not have moved the running total past the first trade's
+        // 10,000, so a later trade of 5,000 (total 15,000) still fits exactly.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("15000.00", Currency.USD)));
+        NegotiationResult first = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(first.isRejected()).isFalse();
+
+        NegotiationResult secondTooLarge = venue.negotiate(new OtcInstruction(INSTRUMENT.id(),
+                Side.BUY, Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(secondTooLarge.isRejected()).isTrue();
+
+        NegotiationResult third = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(50), COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(third.isRejected()).isFalse();
     }
 }
