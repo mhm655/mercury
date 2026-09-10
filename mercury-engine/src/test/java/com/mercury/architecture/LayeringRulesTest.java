@@ -113,6 +113,25 @@ class LayeringRulesTest {
     }
 
     @Test
+    @DisplayName("trade and market data do not depend on risk or execution")
+    void riskDependsOnTradeNotTheOtherWayAround() {
+        // RiskLimit (com.mercury.risk) judges a proposed trade's projected exposure, computed
+        // by OtcNegotiationVenue (com.mercury.execution) - so the dependency runs
+        // execution -> risk -> trade/marketdata. Trade and marketdata staying risk-agnostic is
+        // what keeps that a line rather than a cycle; the global no-cycles rule above would
+        // already fail the build if it became one, but naming the direction explicitly is
+        // what this file's own javadoc says to do "as the layers they describe come into
+        // existence."
+        noClasses()
+                .that().resideInAnyPackage("com.mercury.trade..", "com.mercury.marketdata..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "com.mercury.risk..", "com.mercury.execution..")
+                .because("a risk limit judges a trade, not the other way around - trade and "
+                        + "market data must stay usable without either")
+                .check(engineClasses);
+    }
+
+    @Test
     @DisplayName("core value types do not print to the console")
     void noConsoleOutputFromTheDomain() {
         noClasses()
