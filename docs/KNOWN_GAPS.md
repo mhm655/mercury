@@ -8,34 +8,40 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
-## Deferred to a later milestone
+## Fixed during M8
 
-### G-1 · Order ids are reusable after an order fills · → M8
+### G-1 · Order ids are reusable after an order fills · fixed
 
-`OrderBook.submit` rejects an id that is **currently resting**, but once an order fills, its
-id is free again:
+`OrderBook.submit` rejected an id that was **currently resting**, but once an order filled,
+its id was free again:
 
 ```java
 submit(X, sell 100)  // fills completely
 submit(X, sell 50)   // accepted - id is no longer resting
 ```
 
-`Fill` records therefore reference ids that are not unique over time, so a reconstructed
-audit trail can be ambiguous about which order a given execution belonged to.
+`Fill` records therefore referenced ids that were not unique over time, so a reconstructed
+audit trail could be ambiguous about which order a given execution belonged to.
 
-**Why deferred rather than fixed now.** The honest fix is not "remember every id forever" —
-that is an unbounded set in a long-running book. Real venues assign their own unique
-execution and order identifiers rather than trusting client-supplied ones. That belongs with
-the trade lifecycle and audit work at M8, where identifier generation gets designed properly.
-Patching it now with a growing `HashSet` would create a memory leak and a false sense of
-having solved it.
+**Why the fix is not inside `OrderBook`.** The honest fix was never "remember every id
+forever" inside the book - that is an unbounded set in a long-running book, trading one bug
+for a memory leak. Real venues assign their own unique order and execution identifiers
+rather than trusting client-supplied ones, so that is where the fix lives: `OrderBookVenue`
+(`com.mercury.execution`) is now the sole sanctioned way to submit an order. An
+`OrderBookInstruction` never carries an id at all; the venue mints one from its own
+`OrderIdGenerator`, a monotonic counter that cannot repeat a value it has already handed
+out. `OrderBook.submit` itself is unchanged and, driven directly, would still accept a
+reused client-supplied id - the fix is architectural (nothing outside the venue is a
+sanctioned caller), not a patch to the book's own check.
 
-**Interim risk.** None inside a single simulation run: ids are generated uniquely by the
-harness. The gap only matters once an external client supplies ids.
+**`TradeId`s needed the same care, for a different reason.** `TradeIdGenerator` is a single
+instance shared between `OrderBookVenue` and `OtcNegotiationVenue`, not one per venue - two
+independent counters would each start at `TRD-1` and collide the moment a CLOB trade and an
+OTC trade land in the same `PortfolioLedger`. Caught in review before it shipped.
 
-### G-2 · No self-trade prevention · → M8
+### G-2 · No self-trade prevention · fixed
 
-Two orders from the same participant will happily cross:
+Two orders from the same participant used to cross happily:
 
 ```java
 submit(A, sell 100 @ 100)
@@ -45,10 +51,20 @@ submit(B, buy  100 @ 100)   // fills against A
 Real venues are required to prevent this — self-matching is wash trading, and regulators
 treat it as market manipulation whether or not it was intended.
 
-**Why deferred.** Mercury has no concept of a participant yet. `Counterparty` arrives with
-the OTC venue and the risk limits at M8, and self-trade prevention is a one-line check *once
-there is an identity to compare*. Adding a participant field to `Order` now, used by nothing,
-would be speculative.
+**The fix.** `Order` gained a required `owner` (`CounterpartyId`, reused from the OTC side
+rather than inventing a separate trader identity). `OrderBook.match` now refuses to fill a
+resting order against an incoming order with the same owner: that pairing is skipped and
+matching continues against the rest of the book, so most of an order is unaffected by one
+self-owned order sitting in its path - a real, deliberately-chosen policy (pairwise
+self-trade prevention), not a blanket cancellation of the whole incoming order.
+
+**Silent skip was rejected as the design.** A first pass left the blocked resting order
+exactly where it was and moved on, with no signal anywhere that anything had happened. A
+real venue's self-trade prevention produces an auditable event, because a regulator expects
+to see that STP fired rather than infer it from an order that filled less than expected for
+no visible reason. `OrderBook.match` now records the fact - instrument, both order ids, the
+blocked quantity - and `MatchResult` carries it alongside `fills`, at the layer where it is
+actually discovered rather than bolted onto the venue interface above it.
 
 ---
 
@@ -60,7 +76,7 @@ decision.
 | Area | Not modelled | Why |
 |---|---|---|
 | Bonds | Amortisation, call/put schedules, floating-rate notes, inflation linkage | The vanilla bullet bond already answers the design question (how a cashflow-bearing instrument exposes itself to a generic pricer). The rest is domain surface without architectural gain. |
-| Swaps | Historical index fixings | A floating period already under way fixed its rate at the start, and Mercury stores no past fixings — so a seasoned swap is **refused**, not approximated (see E-2). An index fixing is market data, and this engine treats missing market data as an error rather than a zero. A fixing store is bookkeeping rather than a design question and belongs with the trade lifecycle at M8. |
+| Swaps | Historical index fixings | A floating period already under way fixed its rate at the start, and Mercury stores no past fixings — so a seasoned swap is **refused**, not approximated (see E-2). An index fixing is market data, and this engine treats missing market data as an error rather than a zero. A fixing store is bookkeeping rather than a design question; M8 built the trade lifecycle but not this, so it stays deferred and unscheduled rather than claiming a milestone it did not land in. |
 | Swaps | Cross-currency, basis (float-float), amortising notionals, principal exchange | All are different *compositions* of the existing legs rather than new structures — which is the point of composing legs instead of subclassing. |
 | Curves | Dual-curve / OIS discounting | Single-curve is the pre-2008 convention. Real desks discount OIS and project on a separate index curve; the basis between them is itself a quoted market. We are single-curve and say so. |
 | Curves | Futures quotes, and their convexity adjustment | The bootstrapper takes deposits and par swaps, which cover the whole curve. Futures are the third common input and need a convexity adjustment — a genuinely subtle correction — for no new design question. |
@@ -70,9 +86,12 @@ decision.
 | Order book | Tick-indexed price array | O(1) for everything and what a real exchange uses, but it assumes a bounded tick grid the simulation does not fix. See ADR 0005. |
 | FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
 | Portfolio | A trade that carries a position through zero | Selling fifteen when long ten is two trades: closing ten at the old cost basis and opening a short five at today's price. `PositionLots` refuses it rather than inventing where the boundary falls. Book the two legs separately. |
-| Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store, and that arrives with M8. |
+| Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store; still deferred and unscheduled after M8. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
+| Counterparty | Credit-limit enforcement | `Counterparty` carries a stated `CreditLimit` from M8, and nothing checks a proposed trade against it. The pro-forma exposure projection and breach-rejection machinery is `RiskLimit` work at M9 — see `docs/DESIGN_PROPOSAL.md` A2.6 and the roadmap. Added the entity now anyway, since retrofitting it later would be invasive. |
+| Trade lifecycle | Settlement scheduling | `Trade` carries a `settlementDate` and supports the `SETTLED` state, but nothing moves a trade there automatically on clock advancement (`docs/DESIGN_PROPOSAL.md` A2.7). Driving a trade to `SETTLED` is a caller's explicit action until a real scheduler exists; adding one now, with no consumer, would be exactly the speculative machinery the project's restraint principle (A2.9) argues against. |
+| OTC negotiation | A separate, expiring quote step | `OtcNegotiationVenue` prices and executes in one call. A real RFQ workflow quotes a price that can expire before it is accepted. Collapsing the two is a stated simplification, in the same spirit as the project's existing single-curve and vanilla-swap simplifications — not a gap that was missed. |
 
 ---
 

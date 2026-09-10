@@ -14,14 +14,21 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
-**M7 complete** — the engine runs a **multi-currency book with a trade history**: five
-instrument types priced against bootstrapped discount curves, cash and cost basis tracked per
-lot, and profit split into what has been realised and what is still at risk. CI green on every
+**M8 complete** — trades now have a **lifecycle**: an explicit state machine
+(`NEW → VALIDATED → BOOKED → EXECUTED → CONFIRMED → SETTLED`) with an append-only audit
+trail, two execution venues (a CLOB order book and an OTC negotiation, routed by instrument
+rather than by `instanceof`), and named counterparties. It also closed two gaps the M5
+audits had deliberately deferred here: order ids can no longer be reused after a fill, and
+self-trade prevention now blocks — and records — a same-owner crossing. CI green on every
 push.
+
+The report below is still M7's book — `Main`'s golden-master output is untouched by M8 on
+purpose (see "Built so far"). M8's own evidence is a separate runnable:
 
 ```bash
 mvn -q -DskipTests package
 java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.Main
+java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.TradeLifecycleDemo
 ```
 
 ```
@@ -142,7 +149,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M6 — Swap pricing: all five instrument types | ✅ complete |
 | Extensibility proof — a sixth instrument, zero files modified | ✅ complete |
 | M7 — Full portfolio: multi-currency, cash, cost basis, P&L | ✅ complete |
-| M8 — Trade lifecycle, venues, counterparties | next |
+| M8 — Trade lifecycle, venues, counterparties | ✅ complete |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -157,6 +164,7 @@ Three artifacts, each checkable in about a minute:
 | **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
 | **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
 | **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
+| **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ running from M8 | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, and one trade is walked to `SETTLED` and booked into a `PortfolioLedger` — all four M8 pieces, runnable in one command |
 
 ### Measured so far
 
@@ -173,12 +181,14 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 
 ## Built so far
 
-- **An order book with real data structures** — *and not yet wired to the book.* The matching
-  engine is 979 lines that no production code calls: it is tested and benchmarked, and nothing
-  in the demo, the portfolio or the ledger routes a trade through it. The trades that build the
-  demo's positions are written by hand. M8 is what connects them, and until it does, this repo
-  contains a matching engine and a portfolio that have never met. Said here because the rest of
-  this section would otherwise imply one system.
+- **An order book with real data structures**, now actually wired to a portfolio. M8 added
+  `ExecutionVenue`/`OrderBookVenue`/`OtcNegotiationVenue` (`com.mercury.execution`) and a
+  `Trade` lifecycle (`com.mercury.trade`) that turns a `Fill` into a booked ledger entry via
+  `PortfolioLedger.book(Trade)` — see `TradeLifecycleDemo` for a runnable walkthrough. The
+  curated `Main` demo above still declares its eight trades by hand rather than routing
+  through a venue; wiring the CLI/golden-master demo itself to the venues is **M14**'s job
+  ("full golden master"), not this one's, and rewriting it now would be unnecessary risk to
+  a fixed golden-master test for no M8 requirement.
   Price-time priority via a `TreeMap` of
   price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
   [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
