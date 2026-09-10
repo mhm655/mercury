@@ -8,8 +8,10 @@ import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
@@ -335,5 +337,108 @@ class OrderBookProperties {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------- self-trade prevention (G-2)
+
+    /**
+     * Every other generator in this file gives buy actions and sell actions distinct fixed
+     * owners, which was deliberate (see {@link #ownerFor}) but has a consequence worth
+     * stating plainly: none of the properties above have ever generated a self-trade,
+     * because a buy and a sell can never share an owner under that scheme. G-2 was covered
+     * only by the four hand-picked scenarios in {@code OrderBookTest}, never by fuzzing.
+     *
+     * <p>This generator draws each action's owner independently from a small shared pool
+     * instead, so a crossing buy and sell land on the same owner regularly - self-trades
+     * are common here rather than absent by construction.
+     */
+    private static final List<CounterpartyId> OWNER_POOL = List.of(
+            CounterpartyId.of("CPTY-PROP-1"), CounterpartyId.of("CPTY-PROP-2"),
+            CounterpartyId.of("CPTY-PROP-3"));
+
+    record OwnedAction(Side side, boolean isCancel, int priceTicks, long quantity,
+                       CounterpartyId owner) {
+    }
+
+    @Provide
+    Arbitrary<List<OwnedAction>> actionSequencesWithSharedOwners() {
+        Arbitrary<CounterpartyId> owner = Arbitraries.of(OWNER_POOL);
+        Arbitrary<OwnedAction> passiveBuy = ownedOrder(Side.BUY, 90, 99, owner);
+        Arbitrary<OwnedAction> passiveSell = ownedOrder(Side.SELL, 101, 110, owner);
+        Arbitrary<OwnedAction> crossingBuy = ownedOrder(Side.BUY, 100, 105, owner);
+        Arbitrary<OwnedAction> crossingSell = ownedOrder(Side.SELL, 95, 100, owner);
+        Arbitrary<OwnedAction> cancel = Arbitraries.of(Side.BUY, Side.SELL)
+                .map(side -> new OwnedAction(side, true, 100, 1, OWNER_POOL.get(0)));
+
+        Arbitrary<OwnedAction> action = Arbitraries.frequencyOf(
+                net.jqwik.api.Tuple.of(6, passiveBuy),
+                net.jqwik.api.Tuple.of(6, passiveSell),
+                net.jqwik.api.Tuple.of(1, crossingBuy),
+                net.jqwik.api.Tuple.of(1, crossingSell),
+                net.jqwik.api.Tuple.of(2, cancel));
+
+        return action.list().ofMinSize(60).ofMaxSize(400);
+    }
+
+    private static Arbitrary<OwnedAction> ownedOrder(Side side, int minTick, int maxTick,
+                                                      Arbitrary<CounterpartyId> owner) {
+        return Arbitraries.integers().between(minTick, maxTick)
+                .flatMap(price -> Arbitraries.longs().between(1, 500)
+                        .flatMap(quantity -> owner.map(
+                                o -> new OwnedAction(side, false, price, quantity, o))));
+    }
+
+    /**
+     * The invariant G-2 exists to guarantee: no fill ever crosses an aggressor against a
+     * resting order with the same owner. Checked directly against an owner index built from
+     * what was actually submitted, not inferred from the absence of a complaint.
+     */
+    @Property
+    void aFillNeverCrossesTheSameOwnerWithItself(
+            @ForAll("actionSequencesWithSharedOwners") List<OwnedAction> actions) {
+        OrderBook book = new OrderBook(AAPL);
+        Map<OrderId, CounterpartyId> owners = new HashMap<>();
+        List<OrderId> live = new ArrayList<>();
+        int counter = 0;
+        boolean anySelfTradeAttempted = false;
+
+        for (OwnedAction action : actions) {
+            if (action.isCancel() && !live.isEmpty()) {
+                book.cancel(live.remove(counter % Math.max(live.size(), 1)));
+                counter++;
+                continue;
+            }
+            OrderId id = OrderId.of("O-" + counter++);
+            owners.put(id, action.owner());
+            MatchResult result = book.submit(Order.limit(id, AAPL, action.side(),
+                    Price.of(BigDecimal.valueOf(action.priceTicks())), action.quantity(),
+                    action.owner()));
+
+            for (Fill fill : result.fills()) {
+                assertThat(owners.get(fill.restingOrderId()))
+                        .as("fill %s crossed %s with itself", fill, action.owner())
+                        .isNotEqualTo(owners.get(fill.aggressingOrderId()));
+            }
+            for (SelfTradePrevention prevented : result.selfTradePrevented()) {
+                assertThat(owners.get(prevented.restingOrderId()))
+                        .as("STP fired between different owners, which should never happen: %s",
+                                prevented)
+                        .isEqualTo(owners.get(prevented.aggressingOrderId()));
+            }
+            if (!result.selfTradePrevented().isEmpty()) {
+                anySelfTradeAttempted = true;
+            }
+            if (result.isResting()) {
+                live.add(id);
+            }
+        }
+
+        // A pool of three owners with plenty of crossing activity should attempt a
+        // self-trade in most sequences long enough to build real depth. If this stops
+        // holding, the generator has drifted back to never exercising G-2 at all - the
+        // same failure mode B-1 found in the original depth generator.
+        Statistics.label("self-trade attempted").collect(anySelfTradeAttempted);
+        Statistics.label("self-trade attempted").coverage(coverage ->
+                coverage.check(true).percentage(percentage -> percentage >= 50.0));
     }
 }
