@@ -6,12 +6,16 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
+import com.mercury.trade.Trade;
+import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * What the book has done: every open lot, the cash, and the profit already taken.
@@ -142,6 +146,44 @@ public final class PortfolioLedger {
         return new PortfolioLedger(id, reportingCurrency, costBasisMethod,
                 Collections.unmodifiableMap(updated), cash.with(cashFlow),
                 Collections.unmodifiableMap(updatedRealised));
+    }
+
+    /** Statuses a {@link Trade} must have reached before {@link #book} will accept it. */
+    private static final Set<TradeStatus> BOOKABLE =
+            EnumSet.of(TradeStatus.EXECUTED, TradeStatus.CONFIRMED, TradeStatus.SETTLED);
+
+    /**
+     * Books an executed {@link Trade} as a ledger fact.
+     *
+     * <p>The bridge between the trade lifecycle (M8) and the ledger that has existed since
+     * M7: {@code Trade.delta()} and {@code Trade.consideration()} are exactly the shape
+     * {@link #trade} already consumes, signed the same way, so this delegates rather than
+     * re-deriving anything. It is what makes the matching engine's fills actually reach a
+     * portfolio, rather than existing only for the order book to prove they cross.
+     *
+     * @throws IllegalStateException if {@code trade} has not reached at least
+     *                                {@link TradeStatus#EXECUTED} - a trade that never
+     *                                executed has nothing to book, and booking one anyway
+     *                                would put a phantom position into the ledger
+     */
+    public PortfolioLedger book(Trade trade) {
+        Objects.requireNonNull(trade, "trade");
+        if (!BOOKABLE.contains(trade.status())) {
+            throw new IllegalStateException(
+                    "Trade " + trade.id() + " is " + trade.status() + "; only a trade that has "
+                            + "reached EXECUTED, CONFIRMED or SETTLED can be booked to the ledger.");
+        }
+        return trade(trade.instrumentId(), trade.delta(), trade.consideration(), trade.tradeDate());
+    }
+
+    /** Books every trade in {@code trades}, in order, folding each into the next ledger. */
+    public PortfolioLedger bookAll(List<Trade> trades) {
+        Objects.requireNonNull(trades, "trades");
+        PortfolioLedger ledger = this;
+        for (Trade t : trades) {
+            ledger = ledger.book(t);
+        }
+        return ledger;
     }
 
     /**
