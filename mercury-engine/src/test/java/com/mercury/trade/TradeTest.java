@@ -22,8 +22,10 @@ class TradeTest {
     private static final LocalDate TRADE_DATE = LocalDate.of(2026, 3, 2);
     private static final SimulationClock CLOCK = SimulationClock.fixedAt(TRADE_DATE);
 
+    private static final CounterpartyId OWNER = CounterpartyId.of("CPTY-OWNER");
+
     private static Trade newBuy() {
-        return Trade.newTrade(TradeId.of("TRD-1"), AAPL, Quantity.of(100),
+        return Trade.newTrade(TradeId.of("TRD-1"), AAPL, OWNER, Quantity.of(100),
                 Money.of("19550.00", Currency.USD), TRADE_DATE, Optional.empty(), Optional.empty());
     }
 
@@ -40,7 +42,7 @@ class TradeTest {
 
         @Test
         void rejectsAZeroDelta() {
-            assertThatThrownBy(() -> Trade.newTrade(TradeId.of("TRD-1"), AAPL, Quantity.ZERO,
+            assertThatThrownBy(() -> Trade.newTrade(TradeId.of("TRD-1"), AAPL, OWNER, Quantity.ZERO,
                     Money.zero(Currency.USD), TRADE_DATE, Optional.empty(), Optional.empty()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("non-zero");

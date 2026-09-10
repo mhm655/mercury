@@ -37,6 +37,16 @@ import java.util.Optional;
  * {@code PortfolioLedger.book(Trade)} is the thin bridge that turns one of these into a
  * ledger entry once it has actually executed.
  *
+ * <h2>{@code owner} versus {@code counterparty}</h2>
+ * {@code owner} is whose book this trade affects - always present, because every trade
+ * belongs to somebody's ledger. {@code counterparty} is the other side, when it is known:
+ * present for an OTC trade, where the design is bilateral and the counterparty is named by
+ * construction; empty for a CLOB trade, where the exchange is anonymous by design - see
+ * {@code TradabilityProfile}. A single fill on an order book produces two {@code Trade}s,
+ * one per side, each with the matching participant as {@code owner} and an empty
+ * {@code counterparty} - exactly what a real member firm sees, since anonymity means each
+ * side only ever receives its own execution report.
+ *
  * <h2>{@code settlementDate}</h2>
  * Carried now even though nothing schedules a trade to {@code SETTLED} automatically yet -
  * the same "cheap to add now, invasive to retrofit" reasoning
@@ -49,6 +59,7 @@ import java.util.Optional;
 public record Trade(
         TradeId id,
         InstrumentId instrumentId,
+        CounterpartyId owner,
         Quantity delta,
         Money consideration,
         LocalDate tradeDate,
@@ -60,6 +71,7 @@ public record Trade(
     public Trade {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(instrumentId, "instrumentId");
+        Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(delta, "delta");
         Objects.requireNonNull(consideration, "consideration");
         Objects.requireNonNull(tradeDate, "tradeDate");
@@ -75,11 +87,11 @@ public record Trade(
     }
 
     /** A freshly created trade, in {@link TradeStatus#NEW} with no history yet. */
-    public static Trade newTrade(TradeId id, InstrumentId instrumentId, Quantity delta,
-                                 Money consideration, LocalDate tradeDate,
+    public static Trade newTrade(TradeId id, InstrumentId instrumentId, CounterpartyId owner,
+                                 Quantity delta, Money consideration, LocalDate tradeDate,
                                  Optional<LocalDate> settlementDate,
                                  Optional<CounterpartyId> counterparty) {
-        return new Trade(id, instrumentId, delta, consideration, tradeDate, settlementDate,
+        return new Trade(id, instrumentId, owner, delta, consideration, tradeDate, settlementDate,
                 counterparty, TradeStatus.NEW, List.of());
     }
 
@@ -98,7 +110,7 @@ public record Trade(
         }
         List<TradeLifecycleEvent> updated = new ArrayList<>(history);
         updated.add(new TradeLifecycleEvent(status, target, clock.now(), reason));
-        return new Trade(id, instrumentId, delta, consideration, tradeDate, settlementDate,
+        return new Trade(id, instrumentId, owner, delta, consideration, tradeDate, settlementDate,
                 counterparty, target, updated);
     }
 
