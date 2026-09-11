@@ -132,6 +132,24 @@ class LayeringRulesTest {
     }
 
     @Test
+    @DisplayName("risk, pricing and market data do not depend on simulation")
+    void simulationDependsOnRiskNotTheOtherWayAround() {
+        // MonteCarloVaRCalculator (com.mercury.simulation) judges a portfolio by generating
+        // scenarios and handing them to HistoricalVaRCalculator (com.mercury.risk);
+        // MonteCarloOptionModel (com.mercury.simulation) is a PricingModel for
+        // EuropeanOption (com.mercury.pricing / com.mercury.marketdata). So the dependency
+        // runs simulation -> risk/pricing/marketdata, never back - the same direction named
+        // explicitly for risk/execution vs trade/marketdata above, for the same reason.
+        noClasses()
+                .that().resideInAnyPackage(
+                        "com.mercury.risk..", "com.mercury.pricing..", "com.mercury.marketdata..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.mercury.simulation..")
+                .because("a simulation consumes risk, pricing and market data to produce a "
+                        + "result - none of the three should need to know a simulation exists")
+                .check(engineClasses);
+    }
+
+    @Test
     @DisplayName("core value types do not print to the console")
     void noConsoleOutputFromTheDomain() {
         noClasses()
