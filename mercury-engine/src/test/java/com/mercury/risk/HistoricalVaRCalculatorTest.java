@@ -147,4 +147,57 @@ class HistoricalVaRCalculatorTest {
                 .valueAtRisk(book(1_000), oneDay, market(), VALUATION, 0.0))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void expectedShortfallAveragesTheWorstScenariosBeyondVar() {
+        // 100 scenarios, evenly spaced factors 0.80..1.196 in steps of 0.004, at 95%
+        // confidence: rank 5 selects the five worst (indices 0-4: 0.80, 0.804, 0.808, 0.812,
+        // 0.816), which average to a factor of 0.808 -> a 19.2% loss on 100,000 = 19,200.00,
+        // an exact, hand-checkable number rather than a loose bound.
+        double[] factors = new double[100];
+        for (int i = 0; i < 100; i++) {
+            factors[i] = 0.80 + i * 0.004;
+        }
+        Portfolio portfolio = book(1_000);
+
+        Money expectedShortfall = calculator().expectedShortfall(
+                portfolio, scenariosFromDailyFactors(factors), market(), VALUATION, 0.95);
+
+        assertThat(expectedShortfall.amount().doubleValue())
+                .isCloseTo(19_200.00, org.assertj.core.api.Assertions.within(0.5));
+    }
+
+    @Test
+    void expectedShortfallIsNeverSmallerThanValueAtRisk() {
+        // The tail average can only be as mild as its boundary observation, never milder -
+        // this must hold for any scenario set, not just a hand-picked one.
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = scenariosFromDailyFactors(
+                0.85, 0.90, 0.93, 0.97, 0.99, 1.00, 1.02, 1.04, 1.06, 1.09);
+
+        Money var = calculator().valueAtRisk(portfolio, days, market(), VALUATION, 0.90);
+        Money expectedShortfall = calculator().expectedShortfall(
+                portfolio, days, market(), VALUATION, 0.90);
+
+        assertThat(expectedShortfall.isGreaterThan(var) || expectedShortfall.equals(var)).isTrue();
+    }
+
+    @Test
+    void allGainsReportZeroExpectedShortfall() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> allUp = scenariosFromDailyFactors(1.01, 1.02, 1.03, 1.04, 1.05);
+
+        Money expectedShortfall = calculator().expectedShortfall(
+                portfolio, allUp, market(), VALUATION, 0.90);
+
+        assertThat(expectedShortfall).isEqualTo(Money.zero(Currency.USD));
+    }
+
+    @Test
+    void expectedShortfallRejectsAnEmptyScenarioList() {
+        assertThatThrownBy(() -> calculator()
+                .expectedShortfall(book(1_000), List.of(), market(), VALUATION, 0.95))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one");
+    }
 }

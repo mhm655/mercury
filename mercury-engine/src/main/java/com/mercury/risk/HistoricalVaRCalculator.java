@@ -5,21 +5,25 @@ import com.mercury.core.money.Money;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
 import com.mercury.portfolio.Portfolio;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Value at Risk by historical simulation: revalue the portfolio under each of a set of
- * actual historical daily moves, and report a percentile of the resulting P&amp;L
- * distribution as the loss.
+ * Value at Risk and Expected Shortfall by historical simulation: revalue the portfolio under
+ * each of a set of actual historical daily moves, and report a percentile of the resulting
+ * P&amp;L distribution as the loss.
  *
  * <h2>One mechanism, another feature</h2>
  * {@link SensitivityCalculator#valueChangeUnder} already does "shock the market, revalue,
  * report the difference" - the primitive {@code docs/DESIGN_PROPOSAL.md} section 5.3 built
  * for stress testing and Greeks. Historical VaR is a third use of exactly that primitive,
  * repeated over many shocks instead of one: no new revaluation machinery, only a percentile
- * over the results.
+ * over the results. M12's {@code com.mercury.simulation.MonteCarloVaRCalculator} is a fourth:
+ * it generates its scenario list by simulation instead of supplying historical ones, and
+ * delegates the percentile math here rather than reimplementing it - Monte Carlo VaR and
+ * historical VaR differ only in where the scenario list comes from.
  *
  * <h2>Historical, not Monte Carlo</h2>
  * This is a genuinely different technique from the Monte Carlo VaR arriving at M12, not an
@@ -46,6 +50,15 @@ import java.util.Objects;
  * positive loss, {@code max(0, -thatPnL)}: if even the worst-at-that-confidence outcome was a
  * gain, there is no loss to report at that confidence level.
  *
+ * <h2>Expected Shortfall, M12</h2>
+ * Also called Conditional VaR: the average of every scenario at least as bad as the VaR
+ * threshold (ranks {@code 1..k}), rather than just the threshold observation itself. Two
+ * facts fall out of that definition rather than needing separate proof: Expected Shortfall
+ * is always at least as large as VaR at the same confidence (an average of a tail that
+ * includes the boundary observation cannot be milder than the boundary alone), and it is
+ * more sensitive to the shape of the tail beyond the threshold, which is precisely the
+ * "how bad is the plausible worst case" question VaR alone does not answer.
+ *
  * <p>Stateless and thread-safe, given a thread-safe {@link SensitivityCalculator}.
  */
 public final class HistoricalVaRCalculator {
@@ -69,6 +82,42 @@ public final class HistoricalVaRCalculator {
      */
     public Money valueAtRisk(Portfolio portfolio, List<MarketShock> historicalScenarios,
                              MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
+        RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
+        Money worstAtConfidence = ranked.sorted().get(ranked.rank() - 1);
+        return lossOrZero(worstAtConfidence);
+    }
+
+    /**
+     * The average loss across every scenario at least as bad as the {@link #valueAtRisk}
+     * threshold - see the class javadoc for why this is always at least as large as VaR.
+     *
+     * @param historicalScenarios one shock per historical day; order does not matter, it is
+     *                            sorted internally
+     * @param confidenceLevel strictly between 0 and 1, e.g. {@code 0.95} for 95%
+     * @throws IllegalArgumentException if {@code historicalScenarios} is empty or
+     *                                  {@code confidenceLevel} is not strictly between 0 and 1
+     */
+    public Money expectedShortfall(Portfolio portfolio, List<MarketShock> historicalScenarios,
+                                   MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
+        RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
+        List<Money> tail = ranked.sorted().subList(0, ranked.rank());
+        Money sum = tail.stream().reduce(Money.zero(tail.get(0).currency()), Money::plus);
+        Money average = sum.dividedBy(BigDecimal.valueOf(tail.size()));
+        return lossOrZero(average);
+    }
+
+    private static Money lossOrZero(Money profitOrLoss) {
+        return profitOrLoss.isNegative() ? profitOrLoss.negated() : Money.zero(profitOrLoss.currency());
+    }
+
+    /**
+     * Validates, revalues every scenario, sorts the resulting P&amp;Ls ascending, and
+     * computes the rank both {@link #valueAtRisk} and {@link #expectedShortfall} read from -
+     * shared so the two cannot drift into disagreeing about which observations the
+     * confidence level actually selects.
+     */
+    private RankedScenarios rank(Portfolio portfolio, List<MarketShock> historicalScenarios,
+                                 MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
         Objects.requireNonNull(portfolio, "portfolio");
         Objects.requireNonNull(historicalScenarios, "historicalScenarios");
         Objects.requireNonNull(market, "market");
@@ -96,9 +145,11 @@ public final class HistoricalVaRCalculator {
         // would not have caught without a rank that happened to land exactly on an integer.
         int rank = (int) Math.ceil((1.0 - confidenceLevel) * n - 1e-9);
         rank = Math.max(1, Math.min(rank, n));
-        Money worstAtConfidence = profitAndLosses.get(rank - 1);
 
-        Currency currency = worstAtConfidence.currency();
-        return worstAtConfidence.isNegative() ? worstAtConfidence.negated() : Money.zero(currency);
+        return new RankedScenarios(profitAndLosses, rank);
+    }
+
+    /** The sorted P&amp;L distribution and the rank the confidence level selects within it. */
+    private record RankedScenarios(List<Money> sorted, int rank) {
     }
 }
