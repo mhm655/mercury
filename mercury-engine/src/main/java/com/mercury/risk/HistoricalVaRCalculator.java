@@ -26,13 +26,13 @@ import java.util.Objects;
  * historical VaR differ only in where the scenario list comes from.
  *
  * <h2>Historical, not Monte Carlo</h2>
- * This is a genuinely different technique from the Monte Carlo VaR arriving at M12, not an
- * early duplicate of it. Historical simulation uses moves that actually happened - each
- * {@link MarketShock} here should represent one real historical day's observed change - so
- * it needs no distributional assumption about returns at all, at the cost of only ever
- * seeing scenarios that occurred in the sampled history. Monte Carlo instead simulates paths
- * from an assumed process, which can explore combinations of moves history never happened to
- * produce.
+ * This class is a genuinely different technique from Monte Carlo simulation, not an early
+ * duplicate of it - only the percentile statistic is shared (see above). Historical
+ * simulation uses moves that actually happened - each {@link MarketShock} here should
+ * represent one real historical day's observed change - so it needs no distributional
+ * assumption about returns at all, at the cost of only ever seeing scenarios that occurred
+ * in the sampled history. Monte Carlo instead simulates paths from an assumed process, which
+ * can explore combinations of moves history never happened to produce.
  *
  * <h2>No historical-data loader</h2>
  * Scenarios are supplied by the caller as {@link MarketShock}s, not fetched from anywhere.
