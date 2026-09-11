@@ -26,15 +26,27 @@ import java.util.Objects;
  * samples each discount curve for display. It lives here because it answers the same question
  * as the others - what should this report show - and a second parameter object holding one
  * list would be ceremony.
+ *
+ * <h2>{@code volatilitySpots}, M10</h2>
+ * Deliberately a separate list from {@code spots}, not a filter applied to it. Delta and
+ * Gamma are well-defined for any underlying a portfolio holds spot exposure to - a stock has
+ * a Gamma of exactly zero, which is itself informative. Vega is different: it needs a quoted
+ * volatility, which only an underlying with a traded option actually has, and
+ * {@code SensitivityCalculator.vega} fails loudly rather than reporting zero for one that
+ * does not. Reusing {@code spots} for Vega would mean the report's shape depends on which
+ * underlyings the market snapshot happens to quote a volatility for - the same "inferred list"
+ * problem this record's own design already rejects for the others.
  */
 public record RiskFactors(
         List<InstrumentId> spots,
+        List<InstrumentId> volatilitySpots,
         List<CurrencyPair> fxPairs,
         List<Currency> rateCurrencies,
         List<Tenor> curveTenors) {
 
     public RiskFactors {
         spots = List.copyOf(Objects.requireNonNull(spots, "spots"));
+        volatilitySpots = List.copyOf(Objects.requireNonNull(volatilitySpots, "volatilitySpots"));
         fxPairs = List.copyOf(Objects.requireNonNull(fxPairs, "fxPairs"));
         rateCurrencies = List.copyOf(Objects.requireNonNull(rateCurrencies, "rateCurrencies"));
         curveTenors = List.copyOf(Objects.requireNonNull(curveTenors, "curveTenors"));

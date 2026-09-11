@@ -48,6 +48,12 @@ import java.util.Objects;
  * third of it. The exposure was already in the engine - the stress line moved with it - so
  * the gap was in what was printed, which is the harder kind to notice.
  *
+ * <p>M10 adds Gamma and Vega for the same reason: the book has held options with real
+ * curvature and volatility sensitivity since M4, and neither number was ever printed. Gamma
+ * is reported for every spot factor - it is well-defined, and zero, for a pure stock -
+ * while Vega is reported only for {@link RiskFactors#volatilitySpots()}, since it needs a
+ * quoted volatility that not every underlying has.
+ *
  * <p>The same applies to the accrued-interest block. A bond's unit value here is its full
  * present value, which is the dirty price, and bond markets quote clean. Printing 998.9954
  * under the same heading as a share price, with nothing to say the two are different kinds of
@@ -263,6 +269,20 @@ public final class ValuationReport {
         for (InstrumentId factor : riskFactors.spots()) {
             line(out, "    %-16s %16.4f",
                     factor, sensitivities.delta(portfolio, factor, market, asOf));
+        }
+
+        line(out, "  GAMMA  (value change per unit^2, the curvature delta alone misses)");
+        for (InstrumentId factor : riskFactors.spots()) {
+            line(out, "    %-16s %16.4f",
+                    factor, sensitivities.gamma(portfolio, factor, market, asOf));
+        }
+
+        if (!riskFactors.volatilitySpots().isEmpty()) {
+            line(out, "  VEGA  (value change per 1 vol point rise)");
+            for (InstrumentId factor : riskFactors.volatilitySpots()) {
+                line(out, "    %-16s %16.4f",
+                        factor, sensitivities.vega(portfolio, factor, market, asOf));
+            }
         }
 
         if (!riskFactors.fxPairs().isEmpty()) {

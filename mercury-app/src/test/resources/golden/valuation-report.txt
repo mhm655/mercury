@@ -46,6 +46,11 @@ RISK
   DELTA  (value change per unit rise in spot)
     AAPL                     487.9941
     MSFT                     250.0000
+  GAMMA  (value change per unit^2, the curvature delta alone misses)
+    AAPL                       1.3024
+    MSFT                       0.0000
+  VEGA  (value change per 1 vol point rise)
+    AAPL                     136.2162
   FX DELTA  (value change per unit rise in the rate)
     EUR/USD               680985.3499
   DV01  (value change per +1bp on the discount rate)

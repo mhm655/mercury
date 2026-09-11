@@ -300,6 +300,7 @@ public final class DemoScenario {
     public static RiskFactors riskFactors() {
         return new RiskFactors(
                 List.of(AAPL, MSFT),
+                List.of(AAPL),
                 List.of(EURUSD),
                 List.of(Currency.USD, Currency.EUR),
                 List.of(Tenor.years(1), Tenor.years(2), Tenor.years(5), Tenor.years(10)));
