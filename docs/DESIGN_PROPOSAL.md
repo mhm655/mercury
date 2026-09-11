@@ -562,8 +562,9 @@ Each entry states the *problem*, not just the pattern name.
 | **Registry / typed factory** | `PricingService`, `InstrumentFactory` | Open-closed dispatch on instrument type without `instanceof` (§5.1) |
 | **Observer** | `EventBus` | Pricing, portfolio, risk and alerting must react to market events without knowing about each other |
 | **Command** | `SubmitOrder`, `CancelOrder`, `BookTrade` | Gives an audit log, replay capability, and a natural async queue boundary for the single-writer matching engine — three real benefits, not one |
-| **Builder** | `InterestRateSwap`, `Scenario`, `Bond` | Genuinely many-parameter, many-optional construction. *Not* used for `Stock`, which has three fields |
+| **Builder** | `InterestRateSwap`, `Bond` | Genuinely many-parameter, many-optional construction. *Not* used for `Stock`, which has three fields, nor for `Scenario` (M11) — see correction below |
 | ~~**Template Method**~~ | ~~discounted-cashflow pricing base~~ | **Not used — see correction below.** Bond and FX forward turned out to differ in *nothing* the discounting cares about, so there was no varying step to override |
+| ~~**Builder**~~ | ~~`Scenario`~~ | **Not used — see correction below.** Only one field (`description`) turned out to be genuinely optional; a varargs factory says the same thing in a third of the code |
 | **Adapter** | market data feeds | Isolates external formats from the domain (matters in Phase 2) |
 | **State machine** | trade lifecycle | See below — with a caveat |
 
@@ -597,6 +598,18 @@ Each entry states the *problem*, not just the pattern name.
 > case did not vindicate the pattern the design predicted — it showed the pattern was never the
 > right shape. What the two pricers genuinely had in common was four lines of arithmetic, and
 > that is what they now share.
+
+> **Corrected at M11.** Builder was listed above as justified for `Scenario`, on the same
+> "genuinely many-parameter, many-optional" reasoning that holds for `Bond` and
+> `InterestRateSwap`. Building it showed the reasoning does not transfer: a `Scenario` has
+> exactly one optional field (`description`) and a repeated shock list, not several
+> independently-defaultable knobs. `Scenario.of(name, description, MarketShock...)` says
+> everything the Builder said, at every call site, in a third of the code.
+>
+> The same lesson Template Method taught above applies again: a pattern justified by a
+> *predicted* shape has to be checked against the shape that actually gets built, not
+> assumed from the prediction. If a second genuinely optional field arrives later, Builder is
+> cheap to add back then — which is the whole argument for not reaching for it in advance.
 
 **Deliberately rejected, and the README will say why:**
 
