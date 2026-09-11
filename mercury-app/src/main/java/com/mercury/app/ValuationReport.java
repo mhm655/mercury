@@ -320,10 +320,16 @@ public final class ValuationReport {
     private static void scenarios(StringBuilder out, Portfolio portfolio, MarketDataSnapshot market,
                                   SensitivityCalculator sensitivities, List<Scenario> scenarios,
                                   LocalDate asOf) {
+        if (scenarios.isEmpty()) {
+            return;
+        }
         line(out, "SCENARIOS");
         for (Scenario scenario : scenarios) {
             Money impact = sensitivities.valueChangeUnder(portfolio, scenario.shock(), market, asOf);
-            line(out, "  %s  (%s)", scenario.name(), scenario.description());
+            String label = scenario.description().isBlank()
+                    ? scenario.name()
+                    : scenario.name() + "  (" + scenario.description() + ")";
+            line(out, "  %s", label);
             line(out, "    %-40s %16s", "P&L impact", impact.amount().toPlainString());
         }
     }

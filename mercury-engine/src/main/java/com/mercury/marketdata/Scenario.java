@@ -59,7 +59,7 @@ public final class Scenario {
 
     @Override
     public String toString() {
-        return name + " (" + description + ")";
+        return description.isBlank() ? name : name + " (" + description + ")";
     }
 
     /** Accumulates shock components, combining them into one on {@link #build()}. */

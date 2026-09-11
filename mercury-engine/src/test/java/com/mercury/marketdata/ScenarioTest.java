@@ -76,4 +76,15 @@ class ScenarioTest {
 
         assertThat(scenario.toString()).isEqualTo("Market Crash (equities -30%)");
     }
+
+    @Test
+    void toStringOmitsEmptyParensWhenThereIsNoDescription() {
+        // A blank description is a supported path (descriptionDefaultsToEmpty above), so
+        // toString() must not print a dangling "Name ()" for it.
+        Scenario scenario = Scenario.builder("Unlabelled")
+                .shock(MarketShock.scaleAllSpots(0.70))
+                .build();
+
+        assertThat(scenario.toString()).isEqualTo("Unlabelled");
+    }
 }
