@@ -45,19 +45,29 @@ public final class GeometricBrownianMotion {
      * @param volatility annualised volatility {@code sigma}; must be non-negative
      * @param years      time horizon in years; must be non-negative
      * @param rng        the source of randomness for this one draw
-     * @throws IllegalArgumentException if {@code spot} is not positive, or {@code volatility}
-     *                                  or {@code years} is negative
+     * @throws IllegalArgumentException if any argument is {@code NaN} or infinite, {@code spot}
+     *                                  is not positive, or {@code volatility} or {@code years}
+     *                                  is negative
      */
     public static double terminalValue(double spot, double drift, double volatility,
                                        double years, RandomGenerator rng) {
-        if (!(spot > 0.0)) {
-            throw new IllegalArgumentException("spot must be positive, but was " + spot);
+        // Checked as !(x >= lowerBound), not x < lowerBound: a NaN argument fails every
+        // ordinary comparison, including x < lowerBound, and would otherwise flow silently
+        // through Math.sqrt and Math.exp into a NaN result rather than being rejected here.
+        // Double.isFinite additionally catches +/-Infinity, which passes a bare ">= 0" check
+        // but is exactly as useless a result once it reaches Math.exp.
+        if (!Double.isFinite(spot) || !(spot > 0.0)) {
+            throw new IllegalArgumentException("spot must be finite and positive, but was " + spot);
         }
-        if (volatility < 0.0) {
-            throw new IllegalArgumentException("volatility must not be negative, but was " + volatility);
+        if (!Double.isFinite(drift)) {
+            throw new IllegalArgumentException("drift must be finite, but was " + drift);
         }
-        if (years < 0.0) {
-            throw new IllegalArgumentException("years must not be negative, but was " + years);
+        if (!Double.isFinite(volatility) || !(volatility >= 0.0)) {
+            throw new IllegalArgumentException(
+                    "volatility must be finite and non-negative, but was " + volatility);
+        }
+        if (!Double.isFinite(years) || !(years >= 0.0)) {
+            throw new IllegalArgumentException("years must be finite and non-negative, but was " + years);
         }
         Objects.requireNonNull(rng, "rng");
 

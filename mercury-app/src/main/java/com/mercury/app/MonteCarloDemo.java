@@ -43,7 +43,7 @@ public final class MonteCarloDemo {
         convergeToClosedForm();
 
         System.out.println();
-        System.out.println("2. MONTE CARLO VALUE AT RISK AND EXPECTED SHORTFALL");
+        System.out.println("2. MONTE CARLO VALUE AT RISK AND EXPECTED SHORTFALL - AAPL EXPOSURE ONLY");
         System.out.println("-".repeat(78));
         monteCarloValueAtRisk();
     }
@@ -80,9 +80,16 @@ public final class MonteCarloDemo {
     }
 
     /**
-     * The AAPL exposure in the full demo book, risked by Monte Carlo instead of historical
-     * scenarios - {@code RiskEngineDemo} showed the same book's historical VaR; this is the
-     * "same question, different technique" comparison the roadmap draws between M10 and M12.
+     * The AAPL exposure <em>alone</em> in the full demo book, risked by Monte Carlo.
+     *
+     * <p>Deliberately not the same comparison as {@code RiskEngineDemo}'s historical VaR: that
+     * one shocks spot, volatility <em>and</em> rates together across the whole book, because
+     * {@code MarketShock} composes; {@link MonteCarloVaRCalculator} simulates one risk factor
+     * at a time (see its own javadoc and {@code docs/KNOWN_GAPS.md}), so this number is
+     * strictly narrower - AAPL's own contribution, not the book's aggregate risk. Printing it
+     * without saying so would be exactly the silently-incomplete-risk-number mistake this
+     * project's own history (C-2, D-1 in {@code docs/KNOWN_GAPS.md}) treats as worth avoiding,
+     * not repeating it here for a new calculator.
      */
     private static void monteCarloValueAtRisk() {
         var aaplId = DemoScenario.AAPL;
@@ -100,7 +107,9 @@ public final class MonteCarloDemo {
                 DemoScenario.market(), DemoScenario.VALUATION_DATE, 0.99);
 
         System.out.println("  200,000 simulated 1-day paths on AAPL spot, vol "
-                + String.format("%.0f%%", volatility * 100));
+                + String.format("%.0f%%", volatility * 100)
+                + " - AAPL's contribution only, not the whole book's risk (single risk factor "
+                + "at a time; see docs/KNOWN_GAPS.md)");
         System.out.println("  99% Monte Carlo VaR:               " + result.valueAtRisk());
         System.out.println("  99% Monte Carlo Expected Shortfall: " + result.expectedShortfall());
         System.out.println("  Expected Shortfall is never smaller than VaR: it averages every "

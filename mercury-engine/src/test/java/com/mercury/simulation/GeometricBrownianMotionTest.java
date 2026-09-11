@@ -92,4 +92,67 @@ class GeometricBrownianMotionTest {
                 100.0, 0.05, 0.20, -1.0, new SplittableRandom(1)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    // A NaN argument fails every ordinary comparison, including "< 0" - so a check phrased
+    // that way silently lets it through into Math.sqrt/Math.exp rather than rejecting it here.
+    // These are regression tests for exactly that gap, found by re-reading the validation
+    // after it shipped rather than by a test catching it first.
+
+    @Test
+    void rejectsNaNSpot() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                Double.NaN, 0.05, 0.20, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNaNDrift() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, Double.NaN, 0.20, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNaNVolatility() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, 0.05, Double.NaN, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNaNYears() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, 0.05, 0.20, Double.NaN, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsInfiniteVolatility() {
+        // Infinity passes a bare ">= 0" check but is exactly as useless as NaN once it
+        // reaches Math.exp - Double.isFinite closes that gap alongside the NaN one.
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, 0.05, Double.POSITIVE_INFINITY, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsInfiniteYears() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, 0.05, 0.20, Double.POSITIVE_INFINITY, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsInfiniteDrift() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                100.0, Double.POSITIVE_INFINITY, 0.20, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsInfiniteSpot() {
+        assertThatThrownBy(() -> GeometricBrownianMotion.terminalValue(
+                Double.POSITIVE_INFINITY, 0.05, 0.20, 1.0, new SplittableRandom(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
