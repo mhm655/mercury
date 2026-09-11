@@ -31,6 +31,7 @@ public final class Main {
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),
                 DemoScenario.riskFactors(),
+                DemoScenario.scenarios(),
                 DemoScenario.VALUATION_DATE);
 
         // print, not println: the report already ends with a newline, and println would append

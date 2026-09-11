@@ -287,6 +287,7 @@ class GoldenMasterTest {
                 DemoScenario.market(),
                 DemoScenario.sensitivityCalculator(),
                 DemoScenario.riskFactors(),
+                DemoScenario.scenarios(),
                 DemoScenario.VALUATION_DATE);
     }
 

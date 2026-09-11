@@ -1,7 +1,6 @@
 package com.mercury.app;
 
 import com.mercury.core.id.InstrumentId;
-import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
@@ -9,7 +8,7 @@ import com.mercury.core.time.Tenor;
 import com.mercury.instrument.AccruingInterest;
 import com.mercury.curve.YieldCurve;
 import com.mercury.marketdata.MarketDataSnapshot;
-import com.mercury.marketdata.MarketShock;
+import com.mercury.marketdata.Scenario;
 import com.mercury.portfolio.PnlStatement;
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioLedger;
@@ -67,15 +66,16 @@ public final class ValuationReport {
     private ValuationReport() {
     }
 
-    /** The whole report: positions, total, deltas, and a stress scenario. */
+    /** The whole report: positions, total, deltas, and a set of named scenarios' impact. */
     public static String render(PortfolioLedger ledger, PortfolioValuation valuation,
                                 MarketDataSnapshot market, SensitivityCalculator sensitivities,
-                                RiskFactors riskFactors, LocalDate asOf) {
+                                RiskFactors riskFactors, List<Scenario> scenarios, LocalDate asOf) {
         Objects.requireNonNull(ledger, "ledger");
         Objects.requireNonNull(valuation, "valuation");
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(sensitivities, "sensitivities");
         Objects.requireNonNull(riskFactors, "riskFactors");
+        Objects.requireNonNull(scenarios, "scenarios");
         Objects.requireNonNull(asOf, "asOf");
 
         Portfolio portfolio = ledger.toPortfolio();
@@ -87,7 +87,7 @@ public final class ValuationReport {
         accruals(out, valuation, asOf);
         curves(out, market, riskFactors, asOf);
         risk(out, portfolio, market, sensitivities, riskFactors, asOf);
-        stress(out, portfolio, market, sensitivities, asOf);
+        scenarios(out, portfolio, market, sensitivities, scenarios, asOf);
         return out.toString();
     }
 
@@ -303,25 +303,29 @@ public final class ValuationReport {
         line(out, "");
     }
 
-    private static void stress(StringBuilder out, Portfolio portfolio, MarketDataSnapshot market,
-                               SensitivityCalculator sensitivities, LocalDate asOf) {
-        // The same shock mechanism the deltas above use, applied at scenario scale rather than
-        // as an infinitesimal bump - which is the point of DESIGN_PROPOSAL.md section 5.3.
-        //
-        // The rates leg was missing until M6. The design document had specified this scenario
-        // as equities down, volatility up, FX down AND rates up 150bp from the start, and the
-        // implementation quietly dropped the last one - which nobody noticed while the book
-        // held no material rate risk. A bond and a swap made the omission expensive: the
-        // headline stress number was describing three quarters of a market crash.
-        MarketShock crash = MarketShock.scaleAllSpots(0.70)
-                .and(MarketShock.scaleAllVolatilities(1.50))
-                .and(MarketShock.scaleAllFxRates(0.90))
-                .and(MarketShock.bumpAllRates(BasisPoints.of(150)));
-
-        Money impact = sensitivities.valueChangeUnder(portfolio, crash, market, asOf);
-
-        line(out, "STRESS  (equities -30%%, volatility +50%%, FX -10%%, rates +150bp)");
-        line(out, "  %-42s %16s", "P&L impact", impact.amount().toPlainString());
+    /**
+     * Every named scenario's impact, each measured the same way: shock, revalue, difference -
+     * {@link Scenario} composes the shock, {@code SensitivityCalculator.valueChangeUnder}
+     * does the rest, at scenario scale rather than as an infinitesimal bump, which is the
+     * point of {@code DESIGN_PROPOSAL.md} section 5.3.
+     *
+     * <p>M11 replaced the single hardcoded "Market Crash" this section used to be with
+     * whichever named scenarios the caller supplies - see {@link DemoScenario#scenarios()}.
+     * Market Crash's own shock is unchanged from before, so its number is unchanged too: the
+     * rates leg was missing from it until M6 (the design document had specified equities
+     * down, volatility up, FX down <em>and</em> rates up 150bp from the start, and the
+     * implementation quietly dropped the last one, which nobody noticed while the book held
+     * no material rate risk), and that fix is what the number below still reflects.
+     */
+    private static void scenarios(StringBuilder out, Portfolio portfolio, MarketDataSnapshot market,
+                                  SensitivityCalculator sensitivities, List<Scenario> scenarios,
+                                  LocalDate asOf) {
+        line(out, "SCENARIOS");
+        for (Scenario scenario : scenarios) {
+            Money impact = sensitivities.valueChangeUnder(portfolio, scenario.shock(), market, asOf);
+            line(out, "  %s  (%s)", scenario.name(), scenario.description());
+            line(out, "    %-40s %16s", "P&L impact", impact.amount().toPlainString());
+        }
     }
 
     /** Appends one formatted line, always terminated by a literal newline. */

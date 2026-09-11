@@ -57,5 +57,10 @@ RISK
     USD                      381.4940
     EUR                     -113.5839
 
-STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
-  P&L impact                                        -86093.00
+SCENARIOS
+  Market Crash  (equities -30%, volatility +50%, FX -10%, rates +150bp)
+    P&L impact                                      -86093.00
+  Rate Shock  (rates +200bp across every currency)
+    P&L impact                                       50776.17
+  Currency Crisis  (EUR/USD -20%, EUR rates +300bp)
+    P&L impact                                     -172506.57

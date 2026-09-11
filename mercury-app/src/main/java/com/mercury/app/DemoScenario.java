@@ -2,6 +2,7 @@ package com.mercury.app;
 
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.PortfolioId;
+import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
@@ -23,6 +24,8 @@ import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.InterestRateSwap;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
+import com.mercury.marketdata.MarketShock;
+import com.mercury.marketdata.Scenario;
 import com.mercury.portfolio.CashAccount;
 import com.mercury.portfolio.CostBasisMethod;
 import com.mercury.portfolio.InstrumentCatalog;
@@ -304,5 +307,39 @@ public final class DemoScenario {
                 List.of(EURUSD),
                 List.of(Currency.USD, Currency.EUR),
                 List.of(Tenor.years(1), Tenor.years(2), Tenor.years(5), Tenor.years(10)));
+    }
+
+    /**
+     * The three named scenarios M11 asks for - listed here rather than in the engine, for the
+     * same reason {@link #riskFactors()} is: which scenarios a book is reported against is a
+     * reporting decision, not an engine constant.
+     */
+    public static List<Scenario> scenarios() {
+        return List.of(
+                // Unchanged from the single hardcoded stress shock M4-M10 printed, so this
+                // scenario's golden-master number does not move - see README.md for the
+                // worked explanation of why it comes to -86,093.00.
+                Scenario.builder("Market Crash")
+                        .description("equities -30%, volatility +50%, FX -10%, rates +150bp")
+                        .shock(MarketShock.scaleAllSpots(0.70))
+                        .shock(MarketShock.scaleAllVolatilities(1.50))
+                        .shock(MarketShock.scaleAllFxRates(0.90))
+                        .shock(MarketShock.bumpAllRates(BasisPoints.of(150)))
+                        .build(),
+                // Isolates the DV01 exposure the RISK section already reports, as its own
+                // scenario instead of blended into Market Crash's four factors.
+                Scenario.builder("Rate Shock")
+                        .description("rates +200bp across every currency")
+                        .shock(MarketShock.bumpAllRates(BasisPoints.of(200)))
+                        .build(),
+                // The emerging-market pattern: a currency collapses while local rates spike to
+                // defend it. Hits both EUR-denominated positions in the book (the forward and
+                // the bond) in economically opposite-signed ways - genuinely distinct from
+                // Market Crash's blended -10% FX leg, not a smaller copy of it.
+                Scenario.builder("Currency Crisis")
+                        .description("EUR/USD -20%, EUR rates +300bp")
+                        .shock(MarketShock.scaleFxRate(EURUSD, 0.80))
+                        .shock(MarketShock.bumpRate(Currency.EUR, BasisPoints.of(300)))
+                        .build());
     }
 }
