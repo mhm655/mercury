@@ -60,6 +60,21 @@ import java.util.Objects;
  * it. An engine that computes risk it does not report is indistinguishable, to a reader, from
  * one that cannot compute it.
  *
+ * <h2>Gamma and Vega, M10</h2>
+ * Gamma is the numerically delicate one - a second-order finite difference,
+ * {@code [V(S+h) - 2V(S) + V(S-h)] / h^2} - because the numerator is a difference of
+ * nearly-equal quantities, so too small a bump loses the answer to floating-point noise
+ * amplified by {@code 1/h^2}, and too large a bump measures curvature over too wide an
+ * interval. {@code docs/DESIGN_PROPOSAL.md} section 5.3.1 calls for validating it against
+ * Black-Scholes' closed form early, for exactly this reason - see
+ * {@code SensitivityCalculatorTest}. Vega reuses the same central-difference machinery as
+ * DV01, over {@link MarketShock#bumpVolatility}: {@link #DEFAULT_VOLATILITY_BUMP} is one vol
+ * point (matching {@code docs/DESIGN_PROPOSAL.md}'s own "Vega is a {@code VolShock(+1%)}"),
+ * so the result is reported per one point, the same way DV01 is reported per one basis point
+ * because that is exactly the size of the shock applied - not per unit (100%) volatility
+ * change, which is the textbook convention {@link com.mercury.pricing.model.BlackScholesModel#vega}
+ * uses instead.
+ *
  * <p>Stateless and thread-safe.
  */
 public final class SensitivityCalculator {
@@ -69,6 +84,15 @@ public final class SensitivityCalculator {
      * floating-point noise, small enough that curvature has not yet distorted the slope.
      */
     public static final double DEFAULT_RELATIVE_BUMP = 1e-4;
+
+    /**
+     * One volatility point (1%), added and subtracted from the market's quoted volatility to
+     * estimate Vega. Matches {@code docs/DESIGN_PROPOSAL.md} section 5.3's own "Vega is a
+     * {@code VolShock(+1%)}" - an absolute bump, not a relative one, because volatility is
+     * already a small decimal (0.20, not 200) rather than a price that needs scaling to stay
+     * well conditioned across instruments.
+     */
+    public static final double DEFAULT_VOLATILITY_BUMP = 0.01;
 
     private final PortfolioValuationService valuationService;
     private final double relativeBump;
@@ -184,8 +208,69 @@ public final class SensitivityCalculator {
     }
 
     /**
+     * How much the portfolio's value changes for a rise <em>and</em> a fall in
+     * {@code underlyingId}'s spot price, beyond what {@link #delta} - the slope - already
+     * explains: the curvature, or second-order sensitivity.
+     *
+     * <p>{@code [V(S+h) - 2V(S) + V(S-h)] / h^2} with {@code h = e S}, central rather than
+     * one-sided for the same {@code O(e^2)} reason {@link #delta} is. See the class javadoc
+     * for why this estimate is more delicate than the others and how that is mitigated.
+     *
+     * @throws com.mercury.marketdata.MarketDataSnapshot.MissingMarketDataException
+     *         if the market holds no spot for {@code underlyingId}
+     */
+    public double gamma(Portfolio portfolio, InstrumentId underlyingId,
+                        MarketDataSnapshot market, LocalDate asOf) {
+        Objects.requireNonNull(portfolio, "portfolio");
+        Objects.requireNonNull(underlyingId, "underlyingId");
+        Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(asOf, "asOf");
+
+        double spot = market.spot(underlyingId);
+        double h = relativeBump * spot;
+
+        double up = revalue(portfolio, market, underlyingId, 1.0 + relativeBump, asOf);
+        double base = revalue(portfolio, market, underlyingId, 1.0, asOf);
+        double down = revalue(portfolio, market, underlyingId, 1.0 - relativeBump, asOf);
+
+        return (up - 2.0 * base + down) / (h * h);
+    }
+
+    /**
+     * How much the portfolio's value changes for a one-volatility-point rise in
+     * {@code underlyingId}'s quoted volatility.
+     *
+     * <p>Reported per {@link #DEFAULT_VOLATILITY_BUMP} - one vol point - because that is
+     * exactly the size of the shock applied, the same convention {@link #dv01} already
+     * follows for basis points. Estimated by a central difference for the same {@code O(e^2)}
+     * reason the others are.
+     *
+     * @throws com.mercury.marketdata.MarketDataSnapshot.MissingMarketDataException
+     *         if the market holds no volatility for {@code underlyingId}
+     */
+    public double vega(Portfolio portfolio, InstrumentId underlyingId,
+                       MarketDataSnapshot market, LocalDate asOf) {
+        Objects.requireNonNull(portfolio, "portfolio");
+        Objects.requireNonNull(underlyingId, "underlyingId");
+        Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(asOf, "asOf");
+
+        // Read first, for the same reason delta does: an underlying with no quoted volatility
+        // must fail rather than return zero because neither shocked market differed.
+        market.volatility(underlyingId);
+
+        double up = changeUnder(portfolio,
+                MarketShock.bumpVolatility(underlyingId, DEFAULT_VOLATILITY_BUMP), market, asOf);
+        double down = changeUnder(portfolio,
+                MarketShock.bumpVolatility(underlyingId, -DEFAULT_VOLATILITY_BUMP), market, asOf);
+
+        return (up - down) / 2.0;
+    }
+
+    /**
      * The change in portfolio value under an arbitrary shock - the building block of stress
-     * testing, exposed here because it is exactly what a scenario needs at M11.
+     * testing at M11 and historical VaR at M10 ({@link HistoricalVaRCalculator}), both of
+     * which are exactly "revalue under a shock" repeated over a set of shocks.
      *
      * <p>Returns {@link Money} rather than a raw double because a scenario result is a P&amp;L
      * figure someone reports, not a derivative someone divides by a bump. The sensitivities

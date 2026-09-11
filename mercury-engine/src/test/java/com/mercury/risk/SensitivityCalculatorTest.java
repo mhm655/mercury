@@ -16,6 +16,7 @@ import com.mercury.core.time.HolidayCalendar;
 import com.mercury.instrument.Bond;
 import com.mercury.instrument.EuropeanOption;
 import com.mercury.instrument.FxForward;
+import com.mercury.instrument.OptionType;
 import com.mercury.instrument.Stock;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.MarketShock;
@@ -25,7 +26,6 @@ import com.mercury.portfolio.PortfolioValuationService;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
 import com.mercury.pricing.model.DiscountedCashflowModel;
-import com.mercury.pricing.model.NormalDistribution;
 import com.mercury.pricing.model.SpotPriceModel;
 import java.time.LocalDate;
 import org.junit.jupiter.api.DisplayName;
@@ -118,6 +118,20 @@ class SensitivityCalculatorTest {
             assertThat(calculator().delta(portfolio, MSFT, market(), VALUATION))
                     .isCloseTo(40.0, within(1e-6));
         }
+
+        @Test
+        @DisplayName("a stock position has no gamma or vega")
+        void stockHasNoGammaOrVega() {
+            // A share price is linear in itself (no curvature) and carries no volatility
+            // sensitivity at all - the negative control, mirroring equityHasNoDv01 below.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(AAPL, 100).build();
+
+            assertThat(calculator().gamma(portfolio, AAPL, market(), VALUATION))
+                    .isCloseTo(0.0, within(1e-6));
+            assertThat(calculator().vega(portfolio, AAPL, market(), VALUATION))
+                    .isCloseTo(0.0, within(1e-6));
+        }
     }
 
     @Nested
@@ -125,20 +139,19 @@ class SensitivityCalculatorTest {
     class CrossValidation {
 
         @Test
-        @DisplayName("an option's numerical delta matches N(d1)")
+        @DisplayName("an option's numerical delta matches the closed form")
         void optionDeltaMatchesAnalytic() {
-            // The analytic delta of a call is N(d1). Two independent routes to the same
-            // number - one by revaluation, one by formula - agreeing is far stronger evidence
-            // than either on its own, and it is the check the design schedules for M10.
+            // Two independent routes to the same number - one by revaluation, one by the
+            // closed form - agreeing is far stronger evidence than either on its own, and it
+            // is the check the design schedules for M10.
             double spot = 200.0;
             double strike = 200.0;
             double volatility = 0.25;
             double rate = 0.04;
             double years = AAPL_CALL.yearsToExpiry(VALUATION);
 
-            double d1 = (Math.log(spot / strike) + (rate + 0.5 * volatility * volatility) * years)
-                    / (volatility * Math.sqrt(years));
-            double analyticDelta = NormalDistribution.cumulative(d1);
+            double analyticDelta = BlackScholesModel.delta(
+                    OptionType.CALL, spot, strike, years, rate, volatility);
 
             // 100 contracts of 100 shares each, so the portfolio delta is 10,000 x N(d1).
             Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
@@ -146,6 +159,57 @@ class SensitivityCalculatorTest {
             double numericalDelta = calculator().delta(portfolio, AAPL, market(), VALUATION);
 
             assertThat(numericalDelta).isCloseTo(10_000.0 * analyticDelta, within(1.0));
+        }
+
+        @Test
+        @DisplayName("an option's numerical gamma matches the closed form")
+        void optionGammaMatchesAnalytic() {
+            // The validation docs/DESIGN_PROPOSAL.md section 5.3.1 calls for "written early
+            // (M10)" - Gamma is the numerically delicate one (a second-order finite
+            // difference), so this is the check that the mitigations in the class javadoc
+            // actually hold rather than merely being stated.
+            double spot = 200.0;
+            double strike = 200.0;
+            double volatility = 0.25;
+            double rate = 0.04;
+            double years = AAPL_CALL.yearsToExpiry(VALUATION);
+
+            double analyticGamma = BlackScholesModel.gamma(spot, strike, years, rate, volatility);
+
+            // 100 contracts of 100 shares each, so the portfolio gamma is 10,000 x the
+            // per-share figure.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(CALL, 100).build();
+            double numericalGamma = calculator().gamma(portfolio, AAPL, market(), VALUATION);
+
+            assertThat(numericalGamma).isCloseTo(10_000.0 * analyticGamma, within(0.05));
+        }
+
+        @Test
+        @DisplayName("an option's numerical vega matches the closed form")
+        void optionVegaMatchesAnalytic() {
+            // BlackScholesModel.vega is per unit (100%) volatility change; the numerical
+            // vega is per one vol point (1%), matching the size of the shock it actually
+            // applies - see SensitivityCalculator's class javadoc. Scaling explicitly here,
+            // rather than silently inside either method, is what keeps the mismatch visible.
+            double spot = 200.0;
+            double strike = 200.0;
+            double volatility = 0.25;
+            double rate = 0.04;
+            double years = AAPL_CALL.yearsToExpiry(VALUATION);
+
+            double analyticVegaPerPoint = BlackScholesModel.vega(spot, strike, years, rate, volatility)
+                    * SensitivityCalculator.DEFAULT_VOLATILITY_BUMP;
+
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(CALL, 100).build();
+            double numericalVega = calculator().vega(portfolio, AAPL, market(), VALUATION);
+
+            // A full vol point is not an infinitesimal, so the central-difference estimate
+            // and the linear analytic slope differ by a term proportional to Vega's own
+            // curvature (volga) over that point - the same tolerance scale optionDeltaMatchesAnalytic
+            // already uses for a comparably sized number, not evidence of a smaller error.
+            assertThat(numericalVega).isCloseTo(10_000.0 * analyticVegaPerPoint, within(1.0));
         }
 
         @Test
@@ -207,6 +271,32 @@ class SensitivityCalculatorTest {
 
             assertThat(middle).isCloseTo(coarse, within(0.05));
             assertThat(fine).isCloseTo(middle, within(0.05));
+        }
+
+        @Test
+        @DisplayName("gamma stays stable across a range of sensible bump sizes")
+        void gammaStableAcrossBumpSizes() {
+            // The check docs/DESIGN_PROPOSAL.md section 5.3.1 asks be written "early": Gamma
+            // is a second-order difference, so a badly chosen bump shows up as instability
+            // here far more readily than it does for Delta. If this test were flaky, the
+            // whole "every Greek for free" story would be weaker than advertised.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(CALL, 100).build();
+            PortfolioValuationService valuation = new PortfolioValuationService(
+                    PricingService.builder()
+                            .register(new SpotPriceModel())
+                            .register(new BlackScholesModel()).build(),
+                    InstrumentCatalog.of(AAPL_STOCK, MSFT_STOCK, AAPL_CALL));
+
+            double coarse = new SensitivityCalculator(valuation, 1e-3)
+                    .gamma(portfolio, AAPL, market(), VALUATION);
+            double middle = new SensitivityCalculator(valuation, 1e-4)
+                    .gamma(portfolio, AAPL, market(), VALUATION);
+            double fine = new SensitivityCalculator(valuation, 1e-5)
+                    .gamma(portfolio, AAPL, market(), VALUATION);
+
+            assertThat(middle).isCloseTo(coarse, within(0.1));
+            assertThat(fine).isCloseTo(middle, within(0.1));
         }
 
         @Test
