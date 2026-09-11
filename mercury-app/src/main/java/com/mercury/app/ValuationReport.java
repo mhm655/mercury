@@ -20,7 +20,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Renders a valuation, its risk and a stress scenario as plain text.
+ * Renders a valuation, its risk and a set of named scenarios' impact as plain text.
  *
  * <h2>A String, not a print</h2>
  * This builds and returns the report rather than writing it to the console. That is what lets

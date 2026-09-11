@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  *
  * <h2>What this catches that unit tests cannot</h2>
  * Every layer is exercised at once - market data, the pricing registry, both models,
- * portfolio valuation, the numeric boundary, sensitivities and a stress scenario - and a
+ * portfolio valuation, the numeric boundary, sensitivities and every named scenario - and a
  * change anywhere in that chain moves a number here. That is precisely the class of defect
  * the pre-M4 audit found: {@code Bond} and {@code Schedule} were each individually correct
  * and well tested, and disagreed with each other, because nothing looked at the seam between
@@ -200,12 +200,14 @@ class GoldenMasterTest {
     }
 
     @Test
-    @DisplayName("the stress scenario shocks every risk factor the book carries")
+    @DisplayName("the Market Crash scenario shocks every risk factor the book carries")
     void stressCoversRates() {
         // The rates leg of this scenario was specified in the design document and missing from
         // the implementation until M6, which nobody noticed while the book held no material
         // rate risk. A stress test that silently omits a factor is worse than one that is
-        // absent, because it produces a number people act on.
+        // absent, because it produces a number people act on. M11 split the report's one
+        // hardcoded scenario into three named ones; this still checks specifically Market
+        // Crash, the one this regression was originally about.
         assertThat(runScenario())
                 .contains("equities -30%")
                 .contains("volatility +50%")
