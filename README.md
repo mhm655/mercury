@@ -14,6 +14,19 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
+**M11 complete** — the single hardcoded stress scenario the RISK section used to end with is
+now three **named scenarios**: `Scenario` (Composite over `MarketShock`, Builder-constructed
+- both patterns `docs/DESIGN_PROPOSAL.md` §6 named for it before M8 existed) wraps a name, a
+description and a composed shock. Market Crash is the old scenario verbatim, so its
+-86,093.00 is unchanged; Rate Shock (+200bp across every currency) isolates the DV01 exposure
+the report already prints instead of blending it into four factors at once; Currency Crisis
+(EUR/USD -20% and EUR rates +300bp) is the emerging-market pattern of a currency collapsing
+while local rates spike to defend it, and is the first scenario in this report to move the
+book's two EUR positions in opposite directions at once rather than the same one. Which
+scenarios a report is measured against is demo-supplied data (`DemoScenario.scenarios()`),
+not an engine constant - the same "listed, not inferred" reasoning `RiskFactors` already
+states for risk factors, applied to scenarios for the first time here.
+
 **M10 complete** — the risk engine reports **Gamma and Vega** alongside the Delta, FX delta
 and DV01 it already had, and adds a **historical VaR** calculator. Gamma and Vega are
 computed the same way every other Greek here is - shock, revalue, difference - and both are
@@ -125,8 +138,13 @@ RISK
     USD                      381.4940
     EUR                     -113.5839
 
-STRESS  (equities -30%, volatility +50%, FX -10%, rates +150bp)
-  P&L impact                                        -86093.00
+SCENARIOS
+  Market Crash  (equities -30%, volatility +50%, FX -10%, rates +150bp)
+    P&L impact                                      -86093.00
+  Rate Shock  (rates +200bp across every currency)
+    P&L impact                                       50776.17
+  Currency Crisis  (EUR/USD -20%, EUR rates +300bp)
+    P&L impact                                     -172506.57
 ```
 
 Five instrument types, four models, three kinds of risk, two currencies, and no `instanceof`
@@ -197,6 +215,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M8 — Trade lifecycle, venues, counterparties | ✅ complete |
 | M9 — Risk limits | ✅ complete |
 | M10 — Risk engine: Gamma, Vega, analytic cross-validation, historical VaR | ✅ complete |
+| M11 — Scenarios / stress: named scenarios, impact report | ✅ complete |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
