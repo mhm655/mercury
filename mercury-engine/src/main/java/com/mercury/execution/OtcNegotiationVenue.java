@@ -80,6 +80,15 @@ import java.util.Set;
  * anything resembling live credit exposure - every counterparty would eventually exhaust it
  * permanently regardless of how healthy the relationship actually is.
  *
+ * <p>{@link #release} trusts its own records, not the {@link Trade} it is handed. Every
+ * {@code negotiate} that executes records exactly what it added to
+ * {@code exposureByCounterparty}, keyed by the {@code TradeId} it minted, in
+ * {@code exposureAdded}. {@code release} looks a trade up there rather than recomputing an
+ * amount from the caller-supplied {@code Trade}'s own {@code consideration} - a {@code Trade}
+ * is a public value type that any code in the process can construct and walk to
+ * {@code SETTLED} by hand, so trusting its fields directly would let a trade this venue never
+ * actually booked subtract from - or wipe out - another counterparty's real exposure.
+ *
  * <p>A breach does not throw. {@link #negotiate} returns a {@link NegotiationResult} carrying
  * either the executed trade or the breaches that stopped it - {@code MercuryException}'s own
  * javadoc names this as the shape a risk-limit breach should take, an expected business outcome
@@ -99,6 +108,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     private final RiskLimit riskLimit;
 
     private final Map<CounterpartyId, Money> exposureByCounterparty = new HashMap<>();
+    private final Map<TradeId, RecordedExposure> exposureAdded = new HashMap<>();
     private final Set<TradeId> releasedTrades = new HashSet<>();
 
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
@@ -172,8 +182,8 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
         // does not change which side of a credit limit a trade lands on.
         double exposureInLimitCurrency =
                 consideration.abs().amount().doubleValue() * market.fxRate(currency, limitCurrency);
-        Money projectedExposure = existingExposure.plus(
-                Money.fromModelValue(exposureInLimitCurrency, limitCurrency));
+        Money tradeExposure = Money.fromModelValue(exposureInLimitCurrency, limitCurrency);
+        Money projectedExposure = existingExposure.plus(tradeExposure);
 
         LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
         if (check.isBreached()) {
@@ -189,6 +199,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                 .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
 
         exposureByCounterparty.put(counterparty.id(), projectedExposure);
+        exposureAdded.put(trade.id(), new RecordedExposure(counterparty.id(), tradeExposure));
         return NegotiationResult.executed(trade);
     }
 
@@ -211,19 +222,18 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     }
 
     /**
-     * Takes {@code trade}'s consideration back out of the running exposure it added when it
-     * executed - see the class javadoc on why exposure must be released rather than held
-     * forever.
+     * Takes {@code trade}'s recorded contribution back out of the running exposure it added
+     * when it executed - see the class javadoc on why exposure must be released rather than
+     * held forever, and on why the amount released comes from this venue's own records rather
+     * than from {@code trade.consideration()}.
      *
-     * <p>Floored at zero rather than going negative: a trade released against a running total
-     * smaller than its own contribution (this venue's exposure map was reset, or the trade
-     * predates this venue instance) means the total was already wrong, and negative exposure
-     * is a worse wrong number than zero.
+     * <p>Every check that can fail is resolved before anything is mutated: a thrown exception
+     * here always leaves {@code exposureByCounterparty} and the released-trades record exactly
+     * as they were before the call.
      *
-     * @throws IllegalArgumentException if {@code trade} is not {@link TradeStatus#SETTLED}, has
-     *         no counterparty, or has already been released
-     * @throws CounterpartyDirectory.UnknownCounterpartyException if this venue does not know
-     *         {@code trade}'s counterparty
+     * @throws IllegalArgumentException if {@code trade} is not {@link TradeStatus#SETTLED}, was
+     *         never recorded as exposure by this venue's own {@link #negotiate}, or has already
+     *         been released
      */
     public void release(Trade trade) {
         Objects.requireNonNull(trade, "trade");
@@ -232,23 +242,43 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                     "Only a SETTLED trade releases exposure, but " + trade.id() + " is "
                             + trade.status());
         }
-        CounterpartyId counterpartyId = trade.counterparty().orElseThrow(() -> new IllegalArgumentException(
-                "Trade " + trade.id() + " has no counterparty, so it never added to counterparty "
-                        + "exposure and there is nothing to release"));
-        if (!releasedTrades.add(trade.id())) {
+        RecordedExposure recorded = exposureAdded.get(trade.id());
+        if (recorded == null) {
+            throw new IllegalArgumentException(
+                    "Trade " + trade.id() + " was never recorded as counterparty exposure by this "
+                            + "venue's own negotiate() - only a trade this venue actually produced "
+                            + "can be released, so a caller-constructed or foreign Trade cannot be "
+                            + "used to subtract from another counterparty's real exposure");
+        }
+        if (releasedTrades.contains(trade.id())) {
             throw new IllegalArgumentException(
                     "Trade " + trade.id() + " has already been released; releasing it twice would "
                             + "understate the book's real exposure");
         }
 
-        Currency limitCurrency = counterparties.require(counterpartyId).creditLimit().maximum().currency();
-        double amountInLimitCurrency = trade.consideration().abs().amount().doubleValue()
-                * market.fxRate(trade.consideration().currency(), limitCurrency);
-        Money toRelease = Money.fromModelValue(amountInLimitCurrency, limitCurrency);
+        Money existing = exposureTo(recorded.counterparty());
+        if (existing.isLessThan(recorded.amount())) {
+            // Unreachable under correct bookkeeping: exposureByCounterparty is an exact sum of
+            // exactly what negotiate() recorded, and a trade id can only reach this point once
+            // (guarded above). Throwing rather than flooring at zero - a running total smaller
+            // than a trade's own recorded contribution means the bookkeeping is already wrong,
+            // and a plausible-looking recovered number would hide that. Loud beats plausible,
+            // the same rule MarketDataSnapshot and this class's own SpreadHadNoEffectException
+            // already follow.
+            throw new IllegalStateException(
+                    "Exposure to " + recorded.counterparty() + " (" + existing + ") is smaller than "
+                            + "trade " + trade.id() + "'s own recorded contribution (" + recorded.amount()
+                            + "). This venue's exposure bookkeeping is inconsistent.");
+        }
 
-        Money existing = exposureTo(counterpartyId);
-        Money updated = existing.isGreaterThan(toRelease) ? existing.minus(toRelease) : Money.zero(limitCurrency);
-        exposureByCounterparty.put(counterpartyId, updated);
+        releasedTrades.add(trade.id());
+        exposureByCounterparty.put(recorded.counterparty(), existing.minus(recorded.amount()));
+    }
+
+    /** What one executed trade added to {@code exposureByCounterparty}, recorded so {@link
+     * #release} can undo exactly that amount rather than trusting a caller-supplied {@link
+     * Trade}'s own fields. */
+    private record RecordedExposure(CounterpartyId counterparty, Money amount) {
     }
 
     /**

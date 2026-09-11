@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
+import com.mercury.core.id.TradeId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
@@ -29,6 +30,7 @@ import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class OtcNegotiationVenueTest {
@@ -360,5 +362,51 @@ class OtcNegotiationVenueTest {
         assertThatThrownBy(() -> venue.release(settled))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("already been released");
+    }
+
+    @Test
+    void releaseRejectsATradeThisVenueNeverProduced() {
+        // A Trade this venue never negotiated - built and walked to SETTLED entirely by hand,
+        // the way any other code in the process legitimately could. Must not be able to
+        // subtract from real exposure: negotiate() never recorded this trade id, so release()
+        // has no basis to release anything for it.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("10000.00", Currency.USD)));
+        Trade phantom = Trade.newTrade(TradeId.of("FORGED-1"), INSTRUMENT.id(), OWN_BOOK,
+                        Quantity.of(1), Money.of("999999.00", Currency.USD), VALUATION_DATE,
+                        Optional.empty(), Optional.of(COUNTERPARTY))
+                .transitionTo(TradeStatus.VALIDATED, "forged", CLOCK)
+                .transitionTo(TradeStatus.BOOKED, "forged", CLOCK)
+                .transitionTo(TradeStatus.EXECUTED, "forged", CLOCK)
+                .transitionTo(TradeStatus.CONFIRMED, "forged", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "forged", CLOCK);
+
+        assertThatThrownBy(() -> venue.release(phantom))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("never recorded");
+
+        // And critically: a real trade's exposure must be untouched by the attempt.
+        venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(50),
+                COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("5000.00", Currency.USD));
+    }
+
+    @Test
+    void releaseLeavesStateUntouchedWhenItThrows() {
+        // A trade that is genuinely this venue's own, but not yet SETTLED: release() must
+        // throw without marking it as released, so a later legitimate release (once it
+        // actually settles) still succeeds.
+        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        Trade executed = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK).trades().get(0);
+        Money exposureBeforeAttempt = venue.exposureTo(COUNTERPARTY);
+
+        assertThatThrownBy(() -> venue.release(executed)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(exposureBeforeAttempt);
+
+        Trade settled = executed.transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
+        venue.release(settled);
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
     }
 }
