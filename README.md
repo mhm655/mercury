@@ -14,6 +14,27 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
+**M10 complete** — the risk engine reports **Gamma and Vega** alongside the Delta, FX delta
+and DV01 it already had, and adds a **historical VaR** calculator. Gamma and Vega are
+computed the same way every other Greek here is - shock, revalue, difference - and both are
+cross-validated against `BlackScholesModel`'s closed form rather than trusted on their own:
+Gamma especially, since a second-order finite difference is the delicate one
+(`docs/DESIGN_PROPOSAL.md` §5.3.1), and the validation the design doc asks be "written early"
+now runs on every build. No new capability interface was added for this - the working
+precedent already in the codebase (a hand-rolled analytic check in
+`SensitivityCalculatorTest`) was static formulas plus a test, so that is what M10 built on,
+rather than a runtime "prefer analytic" dispatch with nothing yet to prefer it for.
+Historical VaR reuses the same `valueChangeUnder` primitive a third way (stress testing and
+Greeks were the first two): revalue under each of a set of historical daily moves, and
+report a percentile of the resulting P&L distribution as the loss - a genuinely different
+technique from the Monte Carlo VaR arriving at M12, not an early duplicate of it.
+
+Unlike M8 and M9, this one **does** touch `Main`'s report: Gamma and Vega are risk numbers
+the book has actually carried since M4 and never printed, the same gap C-2 found for rate
+and FX risk at M5, so they belong in the RISK section that already exists rather than a
+side demo. The golden master was re-recorded and diffed by hand - five new lines, nothing
+else moved.
+
 **M9 complete** — OTC negotiations are now checked against a **risk limit** before they
 execute: `RiskLimit` (a Composite, the same shape `MarketShock` already established) judges
 a counterparty's projected exposure — the running gross notional traded against it, plus
@@ -40,12 +61,14 @@ self-trade prevention now blocks — and records — a same-owner crossing. CI g
 push.
 
 The report below is still M7's book — `Main`'s golden-master output is untouched by M8 or
-M9 on purpose (see "Built so far"). Both milestones' own evidence is a separate runnable:
+M9 on purpose (see "Built so far"), and carries only the Gamma/Vega lines from M10. All
+three milestones' fuller evidence is a separate runnable each:
 
 ```bash
 mvn -q -DskipTests package
 java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.Main
 java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.TradeLifecycleDemo
+java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.RiskEngineDemo
 ```
 
 ```
@@ -91,6 +114,11 @@ RISK
   DELTA  (value change per unit rise in spot)
     AAPL                     487.9941
     MSFT                     250.0000
+  GAMMA  (value change per unit^2, the curvature delta alone misses)
+    AAPL                       1.3024
+    MSFT                       0.0000
+  VEGA  (value change per 1 vol point rise)
+    AAPL                     136.2162
   FX DELTA  (value change per unit rise in the rate)
     EUR/USD               680985.3499
   DV01  (value change per +1bp on the discount rate)
@@ -168,6 +196,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M7 — Full portfolio: multi-currency, cash, cost basis, P&L | ✅ complete |
 | M8 — Trade lifecycle, venues, counterparties | ✅ complete |
 | M9 — Risk limits | ✅ complete |
+| M10 — Risk engine: Gamma, Vega, analytic cross-validation, historical VaR | ✅ complete |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -183,6 +212,7 @@ Three artifacts, each checkable in about a minute:
 | **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
 | **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
 | **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ running from M8, extended at M9 | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped — runnable in one command |
+| **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ running from M10 | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios — runnable in one command |
 
 ### Measured so far
 
