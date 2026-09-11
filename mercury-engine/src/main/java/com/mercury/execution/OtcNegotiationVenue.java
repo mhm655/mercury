@@ -2,6 +2,7 @@ package com.mercury.execution;
 
 import com.mercury.core.MercuryException;
 import com.mercury.core.id.CounterpartyId;
+import com.mercury.core.id.TradeId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
@@ -18,10 +19,12 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The OTC {@link ExecutionVenue}: prices an instrument, applies a spread, and books a
@@ -66,6 +69,17 @@ import java.util.Optional;
  * <p>Only OTC trades are checked. A CLOB fill has no named counterparty to check - see
  * {@code TradabilityProfile} - so a counterparty exposure limit has nothing to apply to there.
  *
+ * <h2>Exposure is released on settlement, not held forever</h2>
+ * The running total is gross notional, not a netted mark-to-market figure (see
+ * {@code docs/KNOWN_GAPS.md}) - but a trade that has actually settled is no longer a
+ * counterparty risk this venue carries, so {@link #release} exists to take it back out.
+ * Nothing calls it automatically: {@code docs/KNOWN_GAPS.md}'s "Settlement scheduling" entry
+ * already establishes that driving a trade to {@code SETTLED} is a caller's explicit action,
+ * and releasing the exposure it created follows the same rule rather than inventing a
+ * different one. Without this, the limit would be a lifetime trading-volume cap rather than
+ * anything resembling live credit exposure - every counterparty would eventually exhaust it
+ * permanently regardless of how healthy the relationship actually is.
+ *
  * <p>A breach does not throw. {@link #negotiate} returns a {@link NegotiationResult} carrying
  * either the executed trade or the breaches that stopped it - {@code MercuryException}'s own
  * javadoc names this as the shape a risk-limit breach should take, an expected business outcome
@@ -85,6 +99,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     private final RiskLimit riskLimit;
 
     private final Map<CounterpartyId, Money> exposureByCounterparty = new HashMap<>();
+    private final Set<TradeId> releasedTrades = new HashSet<>();
 
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
@@ -193,6 +208,47 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
         Objects.requireNonNull(counterparty, "counterparty");
         Currency limitCurrency = counterparties.require(counterparty).creditLimit().maximum().currency();
         return exposureByCounterparty.getOrDefault(counterparty, Money.zero(limitCurrency));
+    }
+
+    /**
+     * Takes {@code trade}'s consideration back out of the running exposure it added when it
+     * executed - see the class javadoc on why exposure must be released rather than held
+     * forever.
+     *
+     * <p>Floored at zero rather than going negative: a trade released against a running total
+     * smaller than its own contribution (this venue's exposure map was reset, or the trade
+     * predates this venue instance) means the total was already wrong, and negative exposure
+     * is a worse wrong number than zero.
+     *
+     * @throws IllegalArgumentException if {@code trade} is not {@link TradeStatus#SETTLED}, has
+     *         no counterparty, or has already been released
+     * @throws CounterpartyDirectory.UnknownCounterpartyException if this venue does not know
+     *         {@code trade}'s counterparty
+     */
+    public void release(Trade trade) {
+        Objects.requireNonNull(trade, "trade");
+        if (trade.status() != TradeStatus.SETTLED) {
+            throw new IllegalArgumentException(
+                    "Only a SETTLED trade releases exposure, but " + trade.id() + " is "
+                            + trade.status());
+        }
+        CounterpartyId counterpartyId = trade.counterparty().orElseThrow(() -> new IllegalArgumentException(
+                "Trade " + trade.id() + " has no counterparty, so it never added to counterparty "
+                        + "exposure and there is nothing to release"));
+        if (!releasedTrades.add(trade.id())) {
+            throw new IllegalArgumentException(
+                    "Trade " + trade.id() + " has already been released; releasing it twice would "
+                            + "understate the book's real exposure");
+        }
+
+        Currency limitCurrency = counterparties.require(counterpartyId).creditLimit().maximum().currency();
+        double amountInLimitCurrency = trade.consideration().abs().amount().doubleValue()
+                * market.fxRate(trade.consideration().currency(), limitCurrency);
+        Money toRelease = Money.fromModelValue(amountInLimitCurrency, limitCurrency);
+
+        Money existing = exposureTo(counterpartyId);
+        Money updated = existing.isGreaterThan(toRelease) ? existing.minus(toRelease) : Money.zero(limitCurrency);
+        exposureByCounterparty.put(counterpartyId, updated);
     }
 
     /**

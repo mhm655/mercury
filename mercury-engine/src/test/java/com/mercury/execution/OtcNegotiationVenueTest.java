@@ -315,4 +315,50 @@ class OtcNegotiationVenueTest {
         assertThat(result.breaches().get(0).projectedExposure().currency()).isEqualTo(Currency.EUR);
         assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.EUR));
     }
+
+    @Test
+    void releasingASettledTradeFreesUpRoomForAnotherOne() {
+        // Limit 10,000: one trade of 10,000 fills it exactly. A second identical trade must
+        // be rejected until the first is released by settlement, then must fit again.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("10000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Trade first = venue.negotiate(instruction, CLOCK).trades().get(0);
+        assertThat(venue.negotiate(instruction, CLOCK).isRejected()).isTrue();
+
+        Trade settled = first.transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
+        venue.release(settled);
+
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+        assertThat(venue.negotiate(instruction, CLOCK).isRejected()).isFalse();
+    }
+
+    @Test
+    void releasingATradeThatIsNotSettledIsRejected() {
+        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Trade executed = venue.negotiate(instruction, CLOCK).trades().get(0);
+
+        assertThatThrownBy(() -> venue.release(executed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("SETTLED");
+    }
+
+    @Test
+    void releasingTheSameTradeTwiceIsRejected() {
+        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Trade settled = venue.negotiate(instruction, CLOCK).trades().get(0)
+                .transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
+        venue.release(settled);
+
+        assertThatThrownBy(() -> venue.release(settled))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("already been released");
+    }
 }
