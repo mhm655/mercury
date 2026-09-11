@@ -344,6 +344,46 @@ class SensitivityCalculatorTest {
             assertThatThrownBy(() -> new SensitivityCalculator(valuation, 0.0))
                     .isInstanceOf(IllegalArgumentException.class);
         }
+
+        @Test
+        @DisplayName("vega refuses a volatility too close to bumpVolatility's zero floor")
+        void vegaRejectsVolatilityBelowTheBump() {
+            // MarketShock.bumpVolatility floors the shocked value at zero. A quoted volatility
+            // below one vol point means the down-shock lands at exactly 0.0 instead of
+            // volatility - 0.01, so the two shocks are no longer symmetric around the base and
+            // a central difference over them would be a silently biased one-sided estimate.
+            // Caught here rather than producing a plausible, wrong number.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(CALL, 1).build();
+            MarketDataSnapshot lowVolMarket = MarketDataSnapshot.builder(VALUATION)
+                    .spot(AAPL, 200.0)
+                    .volatility(AAPL, 0.005)
+                    .discountRate(Currency.USD, 0.04)
+                    .build();
+
+            assertThatThrownBy(() -> calculator().vega(portfolio, AAPL, lowVolMarket, VALUATION))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("zero floor");
+        }
+
+        @Test
+        @DisplayName("vega is fine at a volatility exactly on the boundary")
+        void vegaAcceptsVolatilityExactlyAtTheBump() {
+            // At exactly DEFAULT_VOLATILITY_BUMP, the down-shock lands at exactly 0.0 too - the
+            // floor triggers, but that IS volatility - bump, so it is symmetric and correct
+            // rather than biased. The guard must not reject this boundary case along with the
+            // genuinely broken one below it.
+            Portfolio portfolio = Portfolio.builder(BOOK, Currency.USD)
+                    .position(CALL, 1).build();
+            MarketDataSnapshot boundaryMarket = MarketDataSnapshot.builder(VALUATION)
+                    .spot(AAPL, 200.0)
+                    .volatility(AAPL, SensitivityCalculator.DEFAULT_VOLATILITY_BUMP)
+                    .discountRate(Currency.USD, 0.04)
+                    .build();
+
+            assertThat(calculator().vega(portfolio, AAPL, boundaryMarket, VALUATION))
+                    .isNotNaN();
+        }
     }
 
     @Nested

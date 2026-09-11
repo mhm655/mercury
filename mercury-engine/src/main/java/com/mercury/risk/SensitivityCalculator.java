@@ -23,9 +23,12 @@ import java.util.Objects;
  * pricer and it has a delta immediately, with nothing written here.
  *
  * <p>That is the payoff of {@link MarketShock}: one mechanism serving stress testing, Greeks
- * and Monte Carlo. Analytic Greeks arrive at M10 as an <em>optimisation</em> with the
- * numerical result as its cross-check - two independent implementations agreeing is far
- * stronger evidence than either alone.
+ * and Monte Carlo. {@code BlackScholesModel} exposes analytic Delta/Gamma/Vega too, but only
+ * as a cross-check this class's numerical result is validated against in tests - two
+ * independent implementations agreeing is far stronger evidence than either alone. Nothing
+ * here switches to the analytic route at runtime: that would need per-position dispatch
+ * inside what is currently a uniform portfolio-level shock-and-revalue, for an optimisation
+ * with no measured need behind it. See {@code docs/KNOWN_GAPS.md}.
  *
  * <h2>Central differences, and why the bump size matters</h2>
  * Delta is estimated as
@@ -46,7 +49,7 @@ import java.util.Objects;
  * floating-point noise, and dividing that noise by a tiny denominator amplifies it. The
  * default {@value #DEFAULT_RELATIVE_BUMP} sits in the flat region between those failures for
  * double-precision pricing. Second-order Greeks are far more delicate again - see
- * {@code DESIGN_PROPOSAL.md} section 5.3.1, which is why gamma is deliberately not here yet.
+ * {@code DESIGN_PROPOSAL.md} section 5.3.1 and {@link #gamma}.
  *
  * <h2>Three risk factors, one mechanism</h2>
  * Spot, rates and FX are computed by the same two lines - shock, revalue, difference - with
@@ -257,7 +260,24 @@ public final class SensitivityCalculator {
 
         // Read first, for the same reason delta does: an underlying with no quoted volatility
         // must fail rather than return zero because neither shocked market differed.
-        market.volatility(underlyingId);
+        double volatility = market.volatility(underlyingId);
+
+        // MarketShock.bumpVolatility floors the shocked value at zero - a real market
+        // invariant, since a negative volatility is meaningless. Below one bump's worth of
+        // quoted volatility, that floor makes the down-shock land at exactly 0.0 rather than
+        // volatility - DEFAULT_VOLATILITY_BUMP: the two shocks are no longer symmetric around
+        // the base, and the central difference below would silently be a biased one-sided
+        // estimate instead. Loud beats plausible, the same rule this class's own dv01 and
+        // delta already follow for missing market data - here for a market value close enough
+        // to a hard boundary to make the estimate itself untrustworthy.
+        if (volatility < DEFAULT_VOLATILITY_BUMP) {
+            throw new IllegalArgumentException(
+                    "Vega needs " + underlyingId + "'s volatility to be at least "
+                            + DEFAULT_VOLATILITY_BUMP + " to bump symmetrically without the "
+                            + "down-shock hitting MarketShock.bumpVolatility's zero floor, but it "
+                            + "is quoted at " + volatility + ". A central difference computed "
+                            + "against an asymmetric pair of shocks would be silently biased.");
+        }
 
         double up = changeUnder(portfolio,
                 MarketShock.bumpVolatility(underlyingId, DEFAULT_VOLATILITY_BUMP), market, asOf);
