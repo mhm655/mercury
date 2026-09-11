@@ -319,27 +319,24 @@ public final class DemoScenario {
                 // Unchanged from the single hardcoded stress shock M4-M10 printed, so this
                 // scenario's golden-master number does not move - see README.md for the
                 // worked explanation of why it comes to -86,093.00.
-                Scenario.builder("Market Crash")
-                        .description("equities -30%, volatility +50%, FX -10%, rates +150bp")
-                        .shock(MarketShock.scaleAllSpots(0.70))
-                        .shock(MarketShock.scaleAllVolatilities(1.50))
-                        .shock(MarketShock.scaleAllFxRates(0.90))
-                        .shock(MarketShock.bumpAllRates(BasisPoints.of(150)))
-                        .build(),
+                Scenario.of("Market Crash",
+                        "equities -30%, volatility +50%, FX -10%, rates +150bp",
+                        MarketShock.scaleAllSpots(0.70),
+                        MarketShock.scaleAllVolatilities(1.50),
+                        MarketShock.scaleAllFxRates(0.90),
+                        MarketShock.bumpAllRates(BasisPoints.of(150))),
                 // Isolates the DV01 exposure the RISK section already reports, as its own
                 // scenario instead of blended into Market Crash's four factors.
-                Scenario.builder("Rate Shock")
-                        .description("rates +200bp across every currency")
-                        .shock(MarketShock.bumpAllRates(BasisPoints.of(200)))
-                        .build(),
+                Scenario.of("Rate Shock",
+                        "rates +200bp across every currency",
+                        MarketShock.bumpAllRates(BasisPoints.of(200))),
                 // The emerging-market pattern: a currency collapses while local rates spike to
                 // defend it. Hits both EUR-denominated positions in the book (the forward and
                 // the bond) in economically opposite-signed ways - genuinely distinct from
                 // Market Crash's blended -10% FX leg, not a smaller copy of it.
-                Scenario.builder("Currency Crisis")
-                        .description("EUR/USD -20%, EUR rates +300bp")
-                        .shock(MarketShock.scaleFxRate(EURUSD, 0.80))
-                        .shock(MarketShock.bumpRate(Currency.EUR, BasisPoints.of(300)))
-                        .build());
+                Scenario.of("Currency Crisis",
+                        "EUR/USD -20%, EUR rates +300bp",
+                        MarketShock.scaleFxRate(EURUSD, 0.80),
+                        MarketShock.bumpRate(Currency.EUR, BasisPoints.of(300))));
     }
 }

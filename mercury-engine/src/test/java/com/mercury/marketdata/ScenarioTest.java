@@ -13,20 +13,16 @@ class ScenarioTest {
 
     @Test
     void nameAndDescriptionRoundTrip() {
-        Scenario scenario = Scenario.builder("Market Crash")
-                .description("equities -30%")
-                .shock(MarketShock.scaleAllSpots(0.70))
-                .build();
+        Scenario scenario = Scenario.of("Market Crash", "equities -30%",
+                MarketShock.scaleAllSpots(0.70));
 
         assertThat(scenario.name()).isEqualTo("Market Crash");
         assertThat(scenario.description()).isEqualTo("equities -30%");
     }
 
     @Test
-    void descriptionDefaultsToEmpty() {
-        Scenario scenario = Scenario.builder("Unlabelled")
-                .shock(MarketShock.scaleAllSpots(0.70))
-                .build();
+    void descriptionDefaultsToEmptyWhenGivenAnEmptyString() {
+        Scenario scenario = Scenario.of("Unlabelled", "", MarketShock.scaleAllSpots(0.70));
 
         assertThat(scenario.description()).isEmpty();
     }
@@ -34,7 +30,7 @@ class ScenarioTest {
     @Test
     void oneComponentComposesToItself() {
         MarketShock component = MarketShock.scaleAllSpots(0.70);
-        Scenario scenario = Scenario.builder("Crash").shock(component).build();
+        Scenario scenario = Scenario.of("Crash", "", component);
 
         assertThat(scenario.shock().shockFor(AAPL_SPOT, 100.0))
                 .isEqualTo(component.shockFor(AAPL_SPOT, 100.0));
@@ -43,47 +39,47 @@ class ScenarioTest {
     @Test
     void multipleComponentsComposeInOrder() {
         // Each halves the value: 100 -> 50 -> 25, exactly what MarketShock.composite already
-        // guarantees - this asserts the Builder actually delegates to it rather than
+        // guarantees - this asserts the factory actually delegates to it rather than
         // reimplementing composition.
-        Scenario scenario = Scenario.builder("Double halving")
-                .shock(MarketShock.scaleAllSpots(0.5))
-                .shock(MarketShock.scaleAllSpots(0.5))
-                .build();
+        Scenario scenario = Scenario.of("Double halving", "",
+                MarketShock.scaleAllSpots(0.5), MarketShock.scaleAllSpots(0.5));
 
         assertThat(scenario.shock().shockFor(AAPL_SPOT, 100.0)).isEqualTo(25.0);
     }
 
     @Test
     void rejectsABlankName() {
-        assertThatThrownBy(() -> Scenario.builder(" "))
+        assertThatThrownBy(() -> Scenario.of(" ", "", MarketShock.scaleAllSpots(0.70)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("name");
     }
 
     @Test
-    void rejectsBuildingWithNoShocks() {
-        assertThatThrownBy(() -> Scenario.builder("Empty").build())
-                .isInstanceOf(IllegalStateException.class)
+    void rejectsNoShocks() {
+        assertThatThrownBy(() -> Scenario.of("Empty", ""))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("no shocks");
     }
 
     @Test
+    void rejectsANullShockAmongOthers() {
+        assertThatThrownBy(() -> Scenario.of("Bad", "", MarketShock.scaleAllSpots(0.70), null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     void toStringNamesAndDescribesIt() {
-        Scenario scenario = Scenario.builder("Market Crash")
-                .description("equities -30%")
-                .shock(MarketShock.scaleAllSpots(0.70))
-                .build();
+        Scenario scenario = Scenario.of("Market Crash", "equities -30%",
+                MarketShock.scaleAllSpots(0.70));
 
         assertThat(scenario.toString()).isEqualTo("Market Crash (equities -30%)");
     }
 
     @Test
     void toStringOmitsEmptyParensWhenThereIsNoDescription() {
-        // A blank description is a supported path (descriptionDefaultsToEmpty above), so
-        // toString() must not print a dangling "Name ()" for it.
-        Scenario scenario = Scenario.builder("Unlabelled")
-                .shock(MarketShock.scaleAllSpots(0.70))
-                .build();
+        // A blank description is a supported path (descriptionDefaultsToEmptyWhenGivenAnEmptyString
+        // above), so toString() must not print a dangling "Name ()" for it.
+        Scenario scenario = Scenario.of("Unlabelled", "", MarketShock.scaleAllSpots(0.70));
 
         assertThat(scenario.toString()).isEqualTo("Unlabelled");
     }
