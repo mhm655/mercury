@@ -146,6 +146,18 @@ public final class TradeLifecycleDemo {
         System.out.println("  4 more units: " + (rejected.isRejected() ? "rejected" : "executed")
                 + " (no trade produced, not a silent no-op)");
         rejected.breaches().forEach(breach -> System.out.println("  " + breach));
+
+        System.out.println("  exposure to " + TINY_LIMIT + ": " + otcVenue.exposureTo(TINY_LIMIT)
+                + " (queryable without attempting a trade)");
+        Trade firstBondTradeSettled = approved.trades().get(0)
+                .transitionTo(TradeStatus.CONFIRMED, "confirmation sent", clock)
+                .transitionTo(TradeStatus.SETTLED, "cash and securities exchanged", clock);
+        otcVenue.release(firstBondTradeSettled);
+        System.out.println("  " + firstBondTradeSettled.id() + " settled and released: exposure to "
+                + TINY_LIMIT + " now " + otcVenue.exposureTo(TINY_LIMIT));
+        NegotiationResult retried = otcVenue.negotiate(breachesTheLimit, clock);
+        System.out.println("  same 4 units, retried: " + (retried.isRejected() ? "rejected" : "executed")
+                + " - exposure is released on settlement, not held forever");
     }
 
     private static com.mercury.instrument.FinancialInstrument instrument(InstrumentCatalog catalog) {

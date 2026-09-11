@@ -22,6 +22,15 @@ exception; it is a value (`LimitCheckResult`, carrying every `LimitBreach`), and
 negotiation produces no trade and mutates nothing, exactly as the M8 audit insisted
 self-trade prevention must be an auditable fact rather than a silent skip.
 
+A post-ship review of M9 found the first cut worth tightening twice more, both now done:
+`OtcNegotiationVenue.exposureTo` lets a caller ask how much room is left against a
+counterparty without attempting a trade first, and `OtcNegotiationVenue.release` takes a
+settled trade's consideration back out of the running total. Without the second one, the
+limit would have been a lifetime trading-volume cap rather than anything resembling live
+credit exposure — every counterparty would eventually exhaust it permanently no matter how
+healthy the relationship, since nothing ever gave exposure back. It still is not a
+mark-to-market figure (see `docs/KNOWN_GAPS.md`), but it no longer only grows.
+
 **M8 complete** — trades now have a **lifecycle**: an explicit state machine
 (`NEW → VALIDATED → BOOKED → EXECUTED → CONFIRMED → SETTLED`) with an append-only audit
 trail, two execution venues (a CLOB order book and an OTC negotiation, routed by instrument
