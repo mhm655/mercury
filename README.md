@@ -14,10 +14,33 @@ computes risk — including parallel Monte Carlo VaR.
 
 ## Status
 
+**M12 complete** — single-threaded Monte Carlo: a second, independent pricer for
+`EuropeanOption` (`MonteCarloOptionModel`, registered through `PricingService` exactly the
+way the registry exists to enable - `PricingModel`'s own javadoc names "priceable by
+Black-Scholes and by a binomial tree, so the two can be cross-checked" as the reason pricing
+is a registry at all), and Monte Carlo Value at Risk with **Expected Shortfall**. GBM has a
+closed-form terminal distribution, so `GeometricBrownianMotion.terminalValue` is an exact
+draw - no Euler-Maruyama time-stepping error, only genuine Monte Carlo sampling error, which
+the convergence tests show actually shrinking (195, then 32, then ~1 dollar of error at
+100 / 10,000 / 1,000,000 paths on the same option) rather than asserting a single lucky
+agreement. Monte Carlo VaR turned out to need no new percentile machinery at all: it
+generates a scenario per simulated path and hands the list to `HistoricalVaRCalculator`
+(M10), the same class now also carrying Expected Shortfall - historical and Monte Carlo VaR
+differ only in where the scenario list comes from, never in how the statistic is computed
+from it. Randomness is injected and reseeded fresh on every call, never held as mutable
+state, so `MonteCarloOptionModel.price(...)` stays exactly as pure a function of its market
+snapshot as `BlackScholesModel.price(...)` is - the same discipline `SimulationClock`
+already enforces for time, applied to randomness. `SplittableRandom` chosen specifically
+because M13's parallel Monte Carlo needs a generator that splits deterministically per
+task; M12 never calls `.split()`, but the type costs nothing to have chosen early.
+
 **M11 complete** — the single hardcoded stress scenario the RISK section used to end with is
-now three **named scenarios**: `Scenario` (Composite over `MarketShock`, Builder-constructed
-- both patterns `docs/DESIGN_PROPOSAL.md` §6 named for it before M8 existed) wraps a name, a
-description and a composed shock. Market Crash is the old scenario verbatim, so its
+now three **named scenarios**: `Scenario` (Composite over `MarketShock`, the pattern
+`docs/DESIGN_PROPOSAL.md` §6 named for it before M8 existed) wraps a name, a description and
+a composed shock, built by a plain factory - `Scenario.of(name, description, MarketShock...)`
+- rather than the Builder the design doc also predicted: that reasoning held for `Bond` and
+`InterestRateSwap`'s genuinely many optional fields and did not transfer to a type with only
+one (see the struck-through correction in §6). Market Crash is the old scenario verbatim, so its
 -86,093.00 is unchanged; Rate Shock (+200bp across every currency) isolates the DV01 exposure
 the report already prints instead of blending it into four factors at once; Currency Crisis
 (EUR/USD -20% and EUR rates +300bp) is the emerging-market pattern of a currency collapsing
@@ -216,6 +239,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M9 — Risk limits | ✅ complete |
 | M10 — Risk engine: Gamma, Vega, analytic cross-validation, historical VaR | ✅ complete |
 | M11 — Scenarios / stress: named scenarios, impact report | ✅ complete |
+| M12 — Monte Carlo, single-threaded: GBM paths, VaR + Expected Shortfall, convergence tests | ✅ complete |
 
 Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
@@ -232,6 +256,7 @@ Three artifacts, each checkable in about a minute:
 | **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
 | **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ running from M8, extended at M9 | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped — runnable in one command |
 | **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ running from M10 | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios — runnable in one command |
+| **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ running from M12 | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (195 → 32 → ~1 dollar of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure — runnable in one command |
 
 ### Measured so far
 
