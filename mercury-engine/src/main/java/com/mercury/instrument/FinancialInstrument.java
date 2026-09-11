@@ -63,19 +63,6 @@ import com.mercury.core.money.Currency;
 public interface FinancialInstrument {
 
     /** Unique identity. Also the key positions and market data are held under. */
-    /**
-     * <h2>Two of these have no reader yet</h2>
-     * {@link #assetClass()} and {@link #tradability()} are implemented by every instrument
-     * and read by no production code at M7. They are not speculative in the sense of being
-     * unplanned - the OTC-versus-order-book split is a settled design decision and
-     * {@code tradability} is what will route a trade to a venue at M8 - but "built ahead of
-     * its consumer" and "justified" are different things, and a reader hunting for the caller
-     * deserves to be told there isn't one.
-     *
-     * <p>If M8 arrives and does not read them, they should go. The cost of keeping them is
-     * paid by every new instrument, which is exactly the tax the extensibility proof was
-     * supposed to be measuring.
-     */
     InstrumentId id();
 
     /**
@@ -87,7 +74,20 @@ public interface FinancialInstrument {
      */
     Currency currency();
 
-    /** Asset class, for exposure aggregation and risk bucketing. */
+    /**
+     * Asset class, for exposure aggregation and risk bucketing.
+     *
+     * <h2>No reader yet</h2>
+     * Implemented by every instrument and read by no production code. Not speculative in the
+     * sense of being unplanned - exposure-by-asset-class is a settled reporting requirement -
+     * but "built ahead of its consumer" and "justified" are different things, and a reader
+     * hunting for the caller deserves to be told there isn't one. {@link #tradability()} sat
+     * in the same position through M7 and connected at M8 ({@code ExecutionRouter} routes by
+     * it); this one has not yet found its consumer. If it goes on not finding one, it should
+     * go - the cost of keeping it is paid by every new instrument, which is exactly the tax
+     * the extensibility proof is supposed to be measuring. See README.md "Dead weight, looked
+     * for on purpose".
+     */
     AssetClass assetClass();
 
     /**
