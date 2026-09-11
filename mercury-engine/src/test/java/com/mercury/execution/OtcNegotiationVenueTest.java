@@ -7,6 +7,7 @@ import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
@@ -271,5 +272,47 @@ class OtcNegotiationVenueTest {
         NegotiationResult third = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
                 Quantity.of(50), COUNTERPARTY, BasisPoints.ZERO), CLOCK);
         assertThat(third.isRejected()).isFalse();
+    }
+
+    @Test
+    void exposureToReportsTheRunningTotalWithoutTradingAndIsUnaffectedByARejection() {
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("15000.00", Currency.USD)));
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+
+        venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("10000.00", Currency.USD));
+
+        venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+        assertThat(venue.exposureTo(COUNTERPARTY))
+                .as("a rejected negotiation must not move the running total")
+                .isEqualTo(Money.of("10000.00", Currency.USD));
+    }
+
+    @Test
+    void projectedExposureIsConvertedIntoTheCreditLimitsOwnCurrency() {
+        // Instrument prices in USD; the counterparty's credit limit is stated in EUR. The
+        // check must convert the USD consideration into EUR before comparing it to the limit -
+        // this is the one path in OtcNegotiationVenue that reads MarketDataSnapshot.fxRate.
+        PricingService pricingService = PricingService.builder().register(new FixedPriceModel()).build();
+        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE)
+                .fxRate(CurrencyPair.of(Currency.EUR, Currency.USD), 1.10)
+                .build();
+        InstrumentCatalog catalog = InstrumentCatalog.of(INSTRUMENT);
+        // mid 100.00, x 100 units = 10,000.00 USD = 9,090.91 EUR at 1.10 - over an 8,000 EUR limit.
+        Counterparty counterparty = new Counterparty(COUNTERPARTY, "Acme Capital",
+                new CreditLimit(Money.of("8000.00", Currency.EUR)));
+        CounterpartyDirectory counterparties = CounterpartyDirectory.of(counterparty);
+        OtcNegotiationVenue venue = new OtcNegotiationVenue(pricingService, market, catalog,
+                new TradeIdGenerator("TRD-"), OWN_BOOK, counterparties, new CounterpartyExposureLimit());
+
+        NegotiationResult result = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK);
+
+        assertThat(result.isRejected()).isTrue();
+        assertThat(result.breaches().get(0).projectedExposure().currency()).isEqualTo(Currency.EUR);
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.EUR));
     }
 }

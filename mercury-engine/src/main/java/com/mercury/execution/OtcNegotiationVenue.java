@@ -150,8 +150,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
 
         Counterparty counterparty = counterparties.require(otc.counterparty());
         Currency limitCurrency = counterparty.creditLimit().maximum().currency();
-        Money existingExposure = exposureByCounterparty.getOrDefault(
-                counterparty.id(), Money.zero(limitCurrency));
+        Money existingExposure = exposureTo(counterparty.id());
         // A risk check, not a ledger fact: converting an already-rounded consideration into
         // the limit's currency here (rather than forming the product once, as
         // PortfolioValuationService does for the ledger) is fine - a cent of double-rounding
@@ -176,6 +175,24 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
 
         exposureByCounterparty.put(counterparty.id(), projectedExposure);
         return NegotiationResult.executed(trade);
+    }
+
+    /**
+     * The running gross notional traded against {@code counterparty} so far, in that
+     * counterparty's own {@code CreditLimit} currency - zero if nothing has executed against
+     * it yet.
+     *
+     * <p>Exists so a caller can ask "how much room is left" without attempting a trade first.
+     * Read-only: this never itself checks or mutates anything, so calling it has no effect on
+     * a later {@link #negotiate}.
+     *
+     * @throws CounterpartyDirectory.UnknownCounterpartyException if this venue does not know
+     *         {@code counterparty}
+     */
+    public Money exposureTo(CounterpartyId counterparty) {
+        Objects.requireNonNull(counterparty, "counterparty");
+        Currency limitCurrency = counterparties.require(counterparty).creditLimit().maximum().currency();
+        return exposureByCounterparty.getOrDefault(counterparty, Money.zero(limitCurrency));
     }
 
     /**
