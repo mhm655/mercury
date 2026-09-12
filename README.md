@@ -34,6 +34,17 @@ already enforces for time, applied to randomness. `SplittableRandom` chosen spec
 because M13's parallel Monte Carlo needs a generator that splits deterministically per
 task; M12 never calls `.split()`, but the type costs nothing to have chosen early.
 
+A post-ship review found a VaR figure with no attached precision indicator - equally
+trustworthy-looking whether it came from 10 historical days or 200,000 simulated paths.
+`HistoricalVaRCalculator.valueAtRiskConfidenceInterval` closes that, and costs nothing extra
+to compute: VaR is one order statistic, and large-sample theory treats the count of
+scenarios at or below the true quantile as Binomial - approximately Normal - so the
+plausible band of *ranks* around the point estimate maps straight onto two more positions in
+the P&L list already sorted for the point estimate itself. No bootstrap, no repeated
+revaluation. `MonteCarloDemo`'s 200,000-path band comes out tight; `RiskEngineDemo`'s
+10-day historical one comes out genuinely wide for the same statistic - which is the honest
+answer, not a defect in either.
+
 **M11 complete** — the single hardcoded stress scenario the RISK section used to end with is
 now three **named scenarios**: `Scenario` (Composite over `MarketShock`, the pattern
 `docs/DESIGN_PROPOSAL.md` §6 named for it before M8 existed) wraps a name, a description and
