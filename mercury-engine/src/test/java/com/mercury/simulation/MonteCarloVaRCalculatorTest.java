@@ -15,6 +15,7 @@ import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuationService;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.SpotPriceModel;
+import com.mercury.risk.QuantileConfidenceInterval;
 import com.mercury.risk.SensitivityCalculator;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,31 @@ class MonteCarloVaRCalculatorTest {
                 book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 1_000, market(), VALUATION, 0.95);
 
         assertThat(result.seed()).isEqualTo(123);
+    }
+
+    @Test
+    void theConfidenceIntervalBracketsTheValueAtRisk() {
+        MonteCarloRiskResult result = calculator(1).simulate(
+                book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 50_000, market(), VALUATION, 0.99);
+
+        assertThat(result.valueAtRiskConfidenceInterval().lowerBound()
+                .isGreaterThan(result.valueAtRisk())).isFalse();
+        assertThat(result.valueAtRiskConfidenceInterval().upperBound()
+                .isLessThan(result.valueAtRisk())).isFalse();
+    }
+
+    @Test
+    void theConfidenceIntervalNarrowsWithMorePaths() {
+        QuantileConfidenceInterval coarse = calculator(1).simulate(
+                book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 1_000, market(), VALUATION, 0.99)
+                .valueAtRiskConfidenceInterval();
+        QuantileConfidenceInterval fine = calculator(1).simulate(
+                book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 200_000, market(), VALUATION, 0.99)
+                .valueAtRiskConfidenceInterval();
+
+        Money coarseWidth = coarse.upperBound().minus(coarse.lowerBound());
+        Money fineWidth = fine.upperBound().minus(fine.lowerBound());
+        assertThat(fineWidth.isLessThan(coarseWidth)).isTrue();
     }
 
     @Test

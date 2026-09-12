@@ -111,10 +111,14 @@ public final class MonteCarloDemo {
                 + " - AAPL's contribution only, not the whole book's risk (single risk factor "
                 + "at a time; see docs/KNOWN_GAPS.md)");
         System.out.println("  99% Monte Carlo VaR:               " + result.valueAtRisk());
+        System.out.println("  95% confidence interval on that VaR: "
+                + result.valueAtRiskConfidenceInterval());
         System.out.println("  99% Monte Carlo Expected Shortfall: " + result.expectedShortfall());
         System.out.println("  seed=" + result.seed() + " - a specific figure is only reproducible "
                 + "later if the seed that produced it travels with it, not just with whoever ran it.");
         System.out.println("  Expected Shortfall is never smaller than VaR: it averages every "
-                + "scenario at least as bad as the VaR threshold, not just the threshold itself.");
+                + "scenario at least as bad as the VaR threshold, not just the threshold itself. The "
+                + "confidence interval is a different '95%' from the VaR's own '99%' - see "
+                + "HistoricalVaRCalculator's javadoc for why the two must not be conflated.");
     }
 }

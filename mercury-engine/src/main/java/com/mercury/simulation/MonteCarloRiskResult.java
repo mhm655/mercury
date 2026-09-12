@@ -1,6 +1,7 @@
 package com.mercury.simulation;
 
 import com.mercury.core.money.Money;
+import com.mercury.risk.QuantileConfidenceInterval;
 import java.util.Objects;
 
 /**
@@ -17,13 +18,23 @@ import java.util.Objects;
  * {@link MonteCarloVaRCalculator} does not actually deliver that: this record carries it so
  * the figure is self-describing rather than depending on someone's memory of how it was run.
  *
+ * <h2>{@code valueAtRiskConfidenceInterval}</h2>
+ * How much {@link #valueAtRisk} would move if a different, equally-sized batch of paths had
+ * been drawn - see {@code HistoricalVaRCalculator.valueAtRiskConfidenceInterval}'s javadoc for
+ * the method. Costs nothing extra to compute here: it reads two more positions from the same
+ * sorted P&amp;L list {@link MonteCarloVaRCalculator} already built for {@code valueAtRisk}
+ * and {@code expectedShortfall}, not a second simulation.
+ *
  * <p>Immutable and thread-safe.
  */
-public record MonteCarloRiskResult(Money valueAtRisk, Money expectedShortfall, int pathCount, long seed) {
+public record MonteCarloRiskResult(Money valueAtRisk, Money expectedShortfall,
+                                    QuantileConfidenceInterval valueAtRiskConfidenceInterval,
+                                    int pathCount, long seed) {
 
     public MonteCarloRiskResult {
         Objects.requireNonNull(valueAtRisk, "valueAtRisk");
         Objects.requireNonNull(expectedShortfall, "expectedShortfall");
+        Objects.requireNonNull(valueAtRiskConfidenceInterval, "valueAtRiskConfidenceInterval");
         if (pathCount <= 0) {
             throw new IllegalArgumentException("pathCount must be positive, but was " + pathCount);
         }

@@ -13,9 +13,9 @@ import java.util.Objects;
 import java.util.SplittableRandom;
 
 /**
- * Value at Risk and Expected Shortfall by Monte Carlo simulation - {@code pathCount} GBM
- * terminal values stand in for {@code pathCount} "historical" days, and
- * {@link HistoricalVaRCalculator} does the rest.
+ * Value at Risk, Expected Shortfall, and a confidence interval on the VaR estimate itself, by
+ * Monte Carlo simulation - {@code pathCount} GBM terminal values stand in for
+ * {@code pathCount} "historical" days, and {@link HistoricalVaRCalculator} does the rest.
  *
  * <h2>This is historical VaR wearing a different scenario source</h2>
  * Not a coincidence, and not a separate statistic reimplemented here: historical and Monte
@@ -84,7 +84,9 @@ public final class MonteCarloVaRCalculator {
 
         var valueAtRisk = delegate.valueAtRisk(portfolio, scenarios, market, asOf, confidenceLevel);
         var expectedShortfall = delegate.expectedShortfall(portfolio, scenarios, market, asOf, confidenceLevel);
-        return new MonteCarloRiskResult(valueAtRisk, expectedShortfall, pathCount, seed);
+        var confidenceInterval = delegate.valueAtRiskConfidenceInterval(
+                portfolio, scenarios, market, asOf, confidenceLevel);
+        return new MonteCarloRiskResult(valueAtRisk, expectedShortfall, confidenceInterval, pathCount, seed);
     }
 
     private List<MarketShock> simulatedScenarios(InstrumentId underlyingId, double drift,
