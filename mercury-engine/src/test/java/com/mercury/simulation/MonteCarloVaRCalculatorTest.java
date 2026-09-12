@@ -59,6 +59,17 @@ class MonteCarloVaRCalculatorTest {
     }
 
     @Test
+    void reportsTheSeedItRan() {
+        // The point of an injected seed is that a specific figure can be defended and
+        // reproduced later - which only works if the result says which seed produced it,
+        // rather than depending on whoever called simulate() to remember.
+        MonteCarloRiskResult result = calculator(123).simulate(
+                book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 1_000, market(), VALUATION, 0.95);
+
+        assertThat(result.seed()).isEqualTo(123);
+    }
+
+    @Test
     void sameSeedGivesTheSameResult() {
         MonteCarloRiskResult first = calculator(42).simulate(
                 book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 10_000, market(), VALUATION, 0.95);

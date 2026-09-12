@@ -84,7 +84,7 @@ public final class MonteCarloVaRCalculator {
 
         var valueAtRisk = delegate.valueAtRisk(portfolio, scenarios, market, asOf, confidenceLevel);
         var expectedShortfall = delegate.expectedShortfall(portfolio, scenarios, market, asOf, confidenceLevel);
-        return new MonteCarloRiskResult(valueAtRisk, expectedShortfall, pathCount);
+        return new MonteCarloRiskResult(valueAtRisk, expectedShortfall, pathCount, seed);
     }
 
     private List<MarketShock> simulatedScenarios(InstrumentId underlyingId, double drift,

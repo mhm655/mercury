@@ -112,6 +112,8 @@ public final class MonteCarloDemo {
                 + "at a time; see docs/KNOWN_GAPS.md)");
         System.out.println("  99% Monte Carlo VaR:               " + result.valueAtRisk());
         System.out.println("  99% Monte Carlo Expected Shortfall: " + result.expectedShortfall());
+        System.out.println("  seed=" + result.seed() + " - a specific figure is only reproducible "
+                + "later if the seed that produced it travels with it, not just with whoever ran it.");
         System.out.println("  Expected Shortfall is never smaller than VaR: it averages every "
                 + "scenario at least as bad as the VaR threshold, not just the threshold itself.");
     }
