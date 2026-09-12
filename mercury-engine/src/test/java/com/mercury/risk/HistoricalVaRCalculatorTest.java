@@ -200,4 +200,64 @@ class HistoricalVaRCalculatorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at least one");
     }
+
+    @Test
+    void theConfidenceIntervalBracketsThePointEstimate() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(100);
+
+        Money var = calculator().valueAtRisk(portfolio, days, market(), VALUATION, 0.95);
+        QuantileConfidenceInterval interval = calculator()
+                .valueAtRiskConfidenceInterval(portfolio, days, market(), VALUATION, 0.95);
+
+        assertThat(interval.lowerBound().isGreaterThan(var)).isFalse();
+        assertThat(interval.upperBound().isLessThan(var)).isFalse();
+    }
+
+    @Test
+    void theConfidenceIntervalNarrowsAsScenarioCountGrows() {
+        // Same underlying spread of factors (uniform on [0.80, 1.20]), sampled at two
+        // resolutions - more scenarios should pin the same quantile down more tightly, even
+        // though the rank band's raw width (sqrt(n p (1-p))) grows with n; what shrinks is the
+        // P&L distance between neighbouring ranks.
+        Portfolio portfolio = book(1_000);
+
+        QuantileConfidenceInterval coarse = calculator().valueAtRiskConfidenceInterval(
+                portfolio, uniformScenarios(100), market(), VALUATION, 0.95);
+        QuantileConfidenceInterval fine = calculator().valueAtRiskConfidenceInterval(
+                portfolio, uniformScenarios(5_000), market(), VALUATION, 0.95);
+
+        Money coarseWidth = coarse.upperBound().minus(coarse.lowerBound());
+        Money fineWidth = fine.upperBound().minus(fine.lowerBound());
+        assertThat(fineWidth.isLessThan(coarseWidth)).isTrue();
+    }
+
+    @Test
+    void theConfidenceIntervalCollapsesToAPointWithOnlyOneScenario() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> oneDay = scenariosFromDailyFactors(0.90);
+
+        QuantileConfidenceInterval interval = calculator()
+                .valueAtRiskConfidenceInterval(portfolio, oneDay, market(), VALUATION, 0.95);
+
+        assertThat(interval.lowerBound()).isEqualTo(interval.upperBound());
+    }
+
+    @Test
+    void confidenceIntervalRejectsAnEmptyScenarioList() {
+        assertThatThrownBy(() -> calculator()
+                .valueAtRiskConfidenceInterval(book(1_000), List.of(), market(), VALUATION, 0.95))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one");
+    }
+
+    /** {@code count} factors evenly spaced across [0.80, 1.20] - a fixed spread, varying resolution. */
+    private static List<MarketShock> uniformScenarios(int count) {
+        double[] factors = new double[count];
+        double step = 0.40 / (count - 1);
+        for (int i = 0; i < count; i++) {
+            factors[i] = 0.80 + i * step;
+        }
+        return scenariosFromDailyFactors(factors);
+    }
 }

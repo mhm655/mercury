@@ -59,9 +59,27 @@ import java.util.Objects;
  * more sensitive to the shape of the tail beyond the threshold, which is precisely the
  * "how bad is the plausible worst case" question VaR alone does not answer.
  *
+ * <h2>How precise is the VaR estimate itself?</h2>
+ * {@link #valueAtRiskConfidenceInterval} answers a question {@link #valueAtRisk} alone
+ * cannot: how much would this same figure have moved if a different, equally-sized sample of
+ * scenarios had been drawn? A VaR computed from 30 historical days carries a much wider band
+ * than one computed from 2,000 Monte Carlo paths, and a bare point estimate does not say so.
+ * See that method's javadoc for the technique and why it costs nothing extra to compute.
+ *
  * <p>Stateless and thread-safe, given a thread-safe {@link SensitivityCalculator}.
  */
 public final class HistoricalVaRCalculator {
+
+    /**
+     * The confidence level {@link #valueAtRiskConfidenceInterval} brackets - a separate
+     * question from a caller's own VaR {@code confidenceLevel} parameter, fixed rather than
+     * configurable to keep the two from ever being confused for the same knob. See
+     * {@link QuantileConfidenceInterval}'s javadoc for why they mean different things.
+     */
+    public static final double CONFIDENCE_INTERVAL_LEVEL = 0.95;
+
+    /** The two-sided z-score for {@link #CONFIDENCE_INTERVAL_LEVEL}. */
+    private static final double CONFIDENCE_INTERVAL_Z = 1.959964;
 
     private final SensitivityCalculator sensitivities;
 
@@ -106,6 +124,60 @@ public final class HistoricalVaRCalculator {
         return lossOrZero(average);
     }
 
+    /**
+     * A {@value #CONFIDENCE_INTERVAL_LEVEL}-confidence band around {@link #valueAtRisk}'s own
+     * estimate - not a second, more precise number, but a statement of how much the first one
+     * should be trusted.
+     *
+     * <h2>The method: rank uncertainty, not resampling</h2>
+     * {@code valueAtRisk} is one order statistic - the {@code k}-th smallest of {@code n}
+     * scenarios. Standard large-sample theory treats the <em>count</em> of scenarios at or
+     * below the true population quantile as Binomial({@code n}, {@code p}) where
+     * {@code p = k / n}, which is approximately Normal with standard deviation
+     * {@code sqrt(n p (1 - p))}. That gives a band of plausible <em>ranks</em> around
+     * {@code k} directly - {@code k +/- z * sqrt(n p (1 - p))} - which this maps straight onto
+     * two more positions in the P&amp;L list already sorted for {@code valueAtRisk}. No
+     * resampling loop, no bootstrap, no repeated revaluation: the expensive part
+     * ({@code valueChangeUnder} per scenario) already happened once for the point estimate,
+     * and this reads two more entries from a list that already exists.
+     *
+     * <p>Distribution-free, matching the rest of this class: nothing here assumes returns are
+     * Normal, only that a count of successes among many trials is - a much weaker and more
+     * defensible assumption, and the reason a bootstrap (which needs no distributional
+     * assumption at all, at the cost of genuinely repeating the ranking {@code B} times) was
+     * considered and set aside here. See {@code docs/KNOWN_GAPS.md}.
+     *
+     * <p>Narrower with more scenarios, as it should be: relative to the loss scale, more data
+     * pins the quantile down more tightly, even though the absolute rank band
+     * ({@code sqrt(n p (1-p))}) grows with {@code n} - what shrinks is how far apart two
+     * neighbouring ranks are in P&amp;L terms, not the rank count itself.
+     *
+     * @throws IllegalArgumentException if {@code historicalScenarios} is empty or
+     *                                  {@code confidenceLevel} is not strictly between 0 and 1
+     */
+    public QuantileConfidenceInterval valueAtRiskConfidenceInterval(
+            Portfolio portfolio, List<MarketShock> historicalScenarios, MarketDataSnapshot market,
+            LocalDate asOf, double confidenceLevel) {
+        RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
+        int n = ranked.sorted().size();
+        double p = (double) ranked.rank() / n;
+        double rankStandardError = Math.sqrt(n * p * (1.0 - p));
+
+        int lowerRank = clampRank((int) Math.round(ranked.rank() - CONFIDENCE_INTERVAL_Z * rankStandardError), n);
+        int upperRank = clampRank((int) Math.round(ranked.rank() + CONFIDENCE_INTERVAL_Z * rankStandardError), n);
+
+        // Ascending sort: a smaller rank is a worse (more negative) P&L, so it is the larger
+        // loss and the upper bound of the interval; a larger rank is milder and the lower
+        // bound. Not swapped - the names refer to the loss magnitude, not the rank order.
+        Money milder = lossOrZero(ranked.sorted().get(upperRank - 1));
+        Money worse = lossOrZero(ranked.sorted().get(lowerRank - 1));
+        return new QuantileConfidenceInterval(milder, worse);
+    }
+
+    private static int clampRank(int rank, int n) {
+        return Math.max(1, Math.min(rank, n));
+    }
+
     private static Money lossOrZero(Money profitOrLoss) {
         return profitOrLoss.isNegative() ? profitOrLoss.negated() : Money.zero(profitOrLoss.currency());
     }
@@ -143,8 +215,7 @@ public final class HistoricalVaRCalculator {
         // 5 - silently taking the sixth-worst scenario instead of the fifth. The same class
         // of error C-1 and E-1 found elsewhere in this codebase, here in a place a test alone
         // would not have caught without a rank that happened to land exactly on an integer.
-        int rank = (int) Math.ceil((1.0 - confidenceLevel) * n - 1e-9);
-        rank = Math.max(1, Math.min(rank, n));
+        int rank = clampRank((int) Math.ceil((1.0 - confidenceLevel) * n - 1e-9), n);
 
         return new RankedScenarios(profitAndLosses, rank);
     }
