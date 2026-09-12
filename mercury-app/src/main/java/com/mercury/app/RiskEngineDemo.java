@@ -127,9 +127,15 @@ public final class RiskEngineDemo {
                 MarketShock.scaleAllSpots(1.04));
 
         Money var90 = var.valueAtRisk(portfolio, tenDays, market, DemoScenario.VALUATION_DATE, 0.90);
+        var confidenceInterval = var.valueAtRiskConfidenceInterval(
+                portfolio, tenDays, market, DemoScenario.VALUATION_DATE, 0.90);
 
         System.out.println("  10 historical daily scenarios (equity spot and volatility moves)");
         System.out.println("  90% 1-day historical VaR: " + var90);
-        System.out.println("  The worst 10% of the sampled days lost no more than this.");
+        System.out.println("  95% confidence interval on that VaR: " + confidenceInterval);
+        System.out.println("  The worst 10% of the sampled days lost no more than this - but with");
+        System.out.println("  only 10 days sampled, that interval is wide: this is the same statistic");
+        System.out.println("  MonteCarloDemo reports from 200,000 paths, where it comes out far");
+        System.out.println("  tighter. Ten historical days simply cannot pin a 90% VaR down closely.");
     }
 }
