@@ -90,3 +90,13 @@ a real distinction visible, rather than the distinction existing anyway and bein
 make the M15 extensibility proof impossible. `InstrumentPolymorphismTest` asserts it is not,
 as the deliberate counterpart to `DomainIdTest` asserting that `DomainId` *is* sealed.
 Identifiers are a closed set; instruments are the open set the architecture is built around.
+
+## Amendment - `assetClass` removed (2026-09-13)
+
+The decision above lists `assetClass` among the four properties every instrument has. It was
+implemented by all six instruments and read by nothing but their own tests for eight
+milestones; the README's "dead weight" table had said since M7 that it should go if no
+consumer arrived. None did, so it went - and with it the one test that bucketed exposure by it,
+a sketch of an `ExposureCalculator` that was never built. `FinancialInstrument` is now `id`,
+`currency`, `tradability` and `description`. Exposure by asset class can return with the
+calculator that needs it, as a capability or a property, decided then against a real caller.

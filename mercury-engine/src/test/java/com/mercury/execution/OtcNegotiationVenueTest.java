@@ -12,7 +12,6 @@ import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
-import com.mercury.instrument.AssetClass;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.TradabilityProfile;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -46,11 +45,6 @@ class OtcNegotiationVenueTest {
 
     /** A minimal OTC instrument, priced at a fixed 100.00 - just enough to exercise the venue. */
     private record TestOtcInstrument(InstrumentId id, Currency currency) implements FinancialInstrument {
-        @Override
-        public AssetClass assetClass() {
-            return AssetClass.RATES;
-        }
-
         @Override
         public TradabilityProfile tradability() {
             return TradabilityProfile.OVER_THE_COUNTER;

@@ -83,11 +83,6 @@ public final class Bond
     }
 
     @Override
-    public AssetClass assetClass() {
-        return AssetClass.RATES;
-    }
-
-    @Override
     public TradabilityProfile tradability() {
         return TradabilityProfile.EXCHANGE_TRADED;
     }

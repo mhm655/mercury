@@ -276,15 +276,16 @@ ahead of any consumer — and label the ones being kept:
 
 | | Standing |
 |---|---|
-| `assetClass()` | Implemented six times, read only by tests - no production caller. `tradability()` was the same row at M7; it connected at M8 (`ExecutionRouter` routes by it - see that class's own javadoc) and was removed from here. `assetClass()` never has |
 | `HasUnderlying`, `OptionTerms` | One implementor each, and callers use the concrete type. Kept for a second option type, deleted if one doesn't arrive |
 | `RiskLimit.and()` / `.composite()` | Composite machinery, real and tested (`RiskLimitTest`), but only one leaf (`CounterpartyExposureLimit`) exists in production wiring - nothing actually composes two limits together yet. Kept for the reason `MarketShock`'s composite shape was kept before M11 gave it a second real user: a second `RiskLimit` type is an expected addition, not a hypothetical one |
 
-Two rows this table used to carry are gone because they stopped being true, not because they
-were deleted unread: the `matching` package (979 lines with no production caller, at M7) was
-connected at M8, and `SimulationClock` ("unused until the M14 harness", at M7) has been
-production infrastructure since M8 - every `Trade` transition and both execution venues take
-one. Leaving either row in place after the code caught up would itself have been the exact
+Three rows this table used to carry are gone. Two because they stopped being true, not
+because they were deleted unread: the `matching` package (979 lines with no production
+caller, at M7) was connected at M8, and `SimulationClock` ("unused until the M14 harness",
+at M7) has been production infrastructure since M8 - every `Trade` transition and both
+execution venues take one. The third, `assetClass()`, went the other way: implemented by all
+six instruments and read by nothing but tests through M12, it was deleted as this table said
+it would be (see the amendment to [ADR 0004](docs/adr/0004-capability-interfaces-and-the-cashflow-boundary.md)). Leaving either row in place after the code caught up would itself have been the exact
 failure this table exists to prevent: a claim about the code that stopped being checked
 against it.
 

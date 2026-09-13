@@ -104,11 +104,6 @@ public record FxForward(
     }
 
     @Override
-    public AssetClass assetClass() {
-        return AssetClass.FX;
-    }
-
-    @Override
     public TradabilityProfile tradability() {
         return TradabilityProfile.OVER_THE_COUNTER;
     }

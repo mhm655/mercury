@@ -59,7 +59,6 @@ class InterestRateSwapTest {
         void classification() {
             InterestRateSwap swap = payerSwap();
 
-            assertThat(swap.assetClass()).isEqualTo(AssetClass.RATES);
             assertThat(swap.tradability()).isEqualTo(TradabilityProfile.OVER_THE_COUNTER);
             assertThat(swap.currency()).isEqualTo(Currency.USD);
             assertThat(swap.maturityDate()).isEqualTo(MATURITY);

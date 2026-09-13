@@ -11,7 +11,6 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
-import com.mercury.instrument.AssetClass;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.Stock;
 import com.mercury.instrument.TradabilityProfile;
@@ -42,11 +41,6 @@ class ExecutionRouterTest {
 
     /** A minimal OTC instrument, priced at a fixed 100.00 - just enough to prove routing. */
     private record TestOtcInstrument(InstrumentId id, Currency currency) implements FinancialInstrument {
-        @Override
-        public AssetClass assetClass() {
-            return AssetClass.RATES;
-        }
-
         @Override
         public TradabilityProfile tradability() {
             return TradabilityProfile.OVER_THE_COUNTER;

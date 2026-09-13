@@ -9,9 +9,7 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.time.HolidayCalendar;
 import java.time.LocalDate;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -55,25 +53,9 @@ class InstrumentPolymorphismTest {
         for (FinancialInstrument instrument : allInstruments()) {
             assertThat(instrument.id()).isNotNull();
             assertThat(instrument.currency()).isNotNull();
-            assertThat(instrument.assetClass()).isNotNull();
             assertThat(instrument.tradability()).isNotNull();
             assertThat(instrument.description()).isNotBlank();
         }
-    }
-
-    @Test
-    @DisplayName("exposure buckets by asset class with no knowledge of concrete types")
-    void bucketsByAssetClassPolymorphically() {
-        // A sketch of what ExposureCalculator does at M7. Note there is no instanceof and
-        // no switch on instrument type - only a property every instrument declares.
-        Map<AssetClass, Integer> countByClass = new EnumMap<>(AssetClass.class);
-        for (FinancialInstrument instrument : allInstruments()) {
-            countByClass.merge(instrument.assetClass(), 1, Integer::sum);
-        }
-
-        assertThat(countByClass).containsEntry(AssetClass.EQUITY, 2)  // stock + option
-                .containsEntry(AssetClass.RATES, 2)                    // bond + swap
-                .containsEntry(AssetClass.FX, 1);                      // forward
     }
 
     @Test
@@ -178,11 +160,6 @@ class InstrumentPolymorphismTest {
             }
 
             @Override
-            public AssetClass assetClass() {
-                return AssetClass.EQUITY;
-            }
-
-            @Override
             public TradabilityProfile tradability() {
                 return TradabilityProfile.EXCHANGE_TRADED;
             }
@@ -196,7 +173,6 @@ class InstrumentPolymorphismTest {
         FinancialInstrument gold = new Commodity(InstrumentId.of("XAU"), "Gold");
 
         assertThat(gold.tradability().isExchangeTraded()).isTrue();
-        assertThat(gold.assetClass()).isEqualTo(AssetClass.EQUITY);
         assertThat(gold).isNotInstanceOf(Maturing.class);
         assertThat(gold).isNotInstanceOf(CashflowGenerating.class);
     }

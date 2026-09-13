@@ -7,7 +7,6 @@ import static org.assertj.core.api.Assertions.within;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.Price;
-import com.mercury.instrument.AssetClass;
 import com.mercury.instrument.EuropeanOption;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.Stock;
@@ -228,11 +227,6 @@ class PricingServiceTest {
 
         /** A sixth instrument type, declared here rather than in the engine. */
         private record Commodity(InstrumentId id, Currency currency) implements FinancialInstrument {
-            @Override
-            public AssetClass assetClass() {
-                return AssetClass.EQUITY;
-            }
-
             @Override
             public TradabilityProfile tradability() {
                 return TradabilityProfile.EXCHANGE_TRADED;

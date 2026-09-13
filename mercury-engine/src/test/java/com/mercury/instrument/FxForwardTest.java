@@ -33,7 +33,6 @@ class FxForwardTest {
         void classification() {
             FxForward forward = buyEuro();
 
-            assertThat(forward.assetClass()).isEqualTo(AssetClass.FX);
             assertThat(forward.tradability()).isEqualTo(TradabilityProfile.OVER_THE_COUNTER);
             assertThat(forward.tradability().hasCounterpartyRisk()).isTrue();
             assertThat(forward.tradability().isExchangeTraded()).isFalse();

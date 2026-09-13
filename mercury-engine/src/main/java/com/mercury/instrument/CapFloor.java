@@ -83,11 +83,6 @@ public final class CapFloor implements FinancialInstrument, Maturing {
     }
 
     @Override
-    public AssetClass assetClass() {
-        return AssetClass.RATES;
-    }
-
-    @Override
     public TradabilityProfile tradability() {
         return TradabilityProfile.OVER_THE_COUNTER;
     }

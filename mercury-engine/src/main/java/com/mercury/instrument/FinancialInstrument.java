@@ -14,7 +14,6 @@ import com.mercury.core.money.Currency;
  *   <li>{@link #id()} - identity, and the key positions are held under.</li>
  *   <li>{@link #currency()} - the currency its value is naturally expressed in, needed to
  *       build {@code Money} and to bucket FX exposure.</li>
- *   <li>{@link #assetClass()} - exposure reporting by asset class.</li>
  *   <li>{@link #tradability()} - which execution venue the instrument routes to.</li>
  * </ul>
  *
@@ -73,22 +72,6 @@ public interface FinancialInstrument {
      * portfolio's reporting currency is the portfolio layer's job, not the instrument's.
      */
     Currency currency();
-
-    /**
-     * Asset class, for exposure aggregation and risk bucketing.
-     *
-     * <h2>No reader yet</h2>
-     * Implemented by every instrument and read by no production code. Not speculative in the
-     * sense of being unplanned - exposure-by-asset-class is a settled reporting requirement -
-     * but "built ahead of its consumer" and "justified" are different things, and a reader
-     * hunting for the caller deserves to be told there isn't one. {@link #tradability()} sat
-     * in the same position through M7 and connected at M8 ({@code ExecutionRouter} routes by
-     * it); this one has not yet found its consumer. If it goes on not finding one, it should
-     * go - the cost of keeping it is paid by every new instrument, which is exactly the tax
-     * the extensibility proof is supposed to be measuring. See README.md "Dead weight, looked
-     * for on purpose".
-     */
-    AssetClass assetClass();
 
     /**
      * Whether this instrument trades on an order book or is negotiated bilaterally.

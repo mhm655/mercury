@@ -49,7 +49,6 @@ class BondTest {
         void classification() {
             Bond bond = fivePercentBond();
 
-            assertThat(bond.assetClass()).isEqualTo(AssetClass.RATES);
             assertThat(bond.tradability()).isEqualTo(TradabilityProfile.EXCHANGE_TRADED);
             assertThat(bond.currency()).isEqualTo(Currency.USD);
             assertThat(bond.maturityDate()).isEqualTo(MATURITY);

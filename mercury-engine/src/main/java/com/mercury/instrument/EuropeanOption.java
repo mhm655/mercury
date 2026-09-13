@@ -78,11 +78,6 @@ public record EuropeanOption(
     // ------------------------------------------------------------ instrument
 
     @Override
-    public AssetClass assetClass() {
-        return AssetClass.EQUITY;
-    }
-
-    @Override
     public TradabilityProfile tradability() {
         return TradabilityProfile.OVER_THE_COUNTER;
     }

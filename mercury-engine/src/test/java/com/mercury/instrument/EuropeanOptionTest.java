@@ -36,7 +36,6 @@ class EuropeanOptionTest {
         void classification() {
             EuropeanOption option = call();
 
-            assertThat(option.assetClass()).isEqualTo(AssetClass.EQUITY);
             assertThat(option.tradability()).isEqualTo(TradabilityProfile.OVER_THE_COUNTER);
             assertThat(option.currency()).isEqualTo(Currency.USD);
         }

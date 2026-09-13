@@ -37,11 +37,6 @@ public record Stock(InstrumentId id, String ticker, Currency currency) implement
     }
 
     @Override
-    public AssetClass assetClass() {
-        return AssetClass.EQUITY;
-    }
-
-    @Override
     public TradabilityProfile tradability() {
         return TradabilityProfile.EXCHANGE_TRADED;
     }
