@@ -88,13 +88,6 @@ class ValueTypesTest {
         }
 
         @Test
-        @DisplayName("min gives the fill size when two orders meet")
-        void minIsTheFillSize() {
-            assertThat(Quantity.of(100).min(Quantity.of(40))).isEqualTo(Quantity.of(40));
-            assertThat(Quantity.of(40).min(Quantity.of(100))).isEqualTo(Quantity.of(40));
-        }
-
-        @Test
         @DisplayName("times computes consideration, rounding once")
         void timesComputesConsideration() {
             assertThat(Quantity.of(100).times(Money.of("10.01", Currency.USD)))

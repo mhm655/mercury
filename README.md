@@ -118,6 +118,8 @@ java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.
 java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.RiskEngineDemo
 ```
 
+On Windows the classpath separator is `;`, not `:` - in any shell, Git Bash included.
+
 ```
 POSITIONS
   INSTRUMENT         QUANTITY   CCY     UNIT VALUE     MARKET VALUE  MODEL
@@ -195,8 +197,9 @@ right at once.
 
 Every number is explainable, which is the check that the pieces agree with each other. The
 covered call and protective put cut AAPL delta from 1000 to 488. The bond prices above par
-because five-year discounting at 4.18% is below its 4.5% coupon. The FX delta of 484,092 is
-exactly the euro notional discounted on the euro curve. The swap is worth 11,109 because it
+because five-year discounting at 4.18% is below its 4.5% coupon. The FX delta of 680,985 is
+exactly the book's euro exposure: the forward's euro notional discounted on the euro curve
+(484,092) plus the Bund's euro value (200 × 984.4650 = 196,893). The swap is worth 11,109 because it
 pays 4.00% fixed when the five-year par rate is 4.25%, over an annuity of 4.44.
 
 **The USD DV01 is positive.** Every other position in the book — the bond, both option legs,

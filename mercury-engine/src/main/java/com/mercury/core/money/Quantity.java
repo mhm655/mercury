@@ -19,10 +19,9 @@ import java.util.Objects;
  * notional), and fractional share trading is now routine, so a {@code long} count would
  * not cover the domain.
  *
- * <p><b>Known follow-up (M3):</b> the order book's matching loop must not allocate, so
- * it will store quantities as primitive {@code long} internally and expose
- * {@code Quantity} only at its API boundary. That is a deliberate hot-path/API split
- * rather than a change to this type. Flagged here so it is not a surprise later.
+ * <p><b>Not used by the order book.</b> Exchange-traded quantities are whole units, so
+ * {@code Order} and the matching loop use a primitive {@code long} and never allocate one of
+ * these; see {@code Order}'s javadoc. This type is for positions, ledgers and OTC notionals.
  *
  * <p>Instances are immutable and thread-safe.
  */
@@ -57,11 +56,6 @@ public record Quantity(BigDecimal value) implements Comparable<Quantity> {
 
     public Quantity plus(Quantity other) {
         return new Quantity(value.add(other.value));
-    }
-
-    /** The smaller of two quantities - the fill size when an order meets a resting order. */
-    public Quantity min(Quantity other) {
-        return compareTo(other) <= 0 ? this : other;
     }
 
     public boolean isZero() {

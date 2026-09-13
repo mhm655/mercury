@@ -21,10 +21,7 @@ public enum AssetClass {
     RATES("Rates"),
 
     /** Foreign exchange: spot, forwards, swaps. */
-    FX("FX"),
-
-    /** Credit-sensitive products. Reserved; no instrument uses it yet. */
-    CREDIT("Credit");
+    FX("FX");
 
     private final String displayName;
 

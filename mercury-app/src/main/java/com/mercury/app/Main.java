@@ -6,9 +6,10 @@ import com.mercury.portfolio.PortfolioValuation;
 /**
  * Runs the demo scenario and prints the report.
  *
- * <p>The only class in the project that knows a console exists. Everything above it returns
- * values; presentation stops here, which is why the engine can be driven equally well by a
- * test, a benchmark, or the Spring module that arrives later.
+ * <p>Only this and the three milestone demos beside it ({@code TradeLifecycleDemo},
+ * {@code RiskEngineDemo}, {@code MonteCarloDemo}) know a console exists. Everything in the
+ * engine returns values; presentation stops in this module, which is why the engine can be
+ * driven equally well by a test, a benchmark, or the Spring module that arrives later.
  *
  * <pre>
  *   mvn -q -pl mercury-app -am package
