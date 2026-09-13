@@ -17,6 +17,7 @@ import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.SpotPriceModel;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -27,11 +28,14 @@ class HistoricalVaRCalculatorTest {
     private static final PortfolioId BOOK = PortfolioId.of("BOOK");
     private static final Stock AAPL_STOCK = Stock.of("AAPL", Currency.USD);
 
-    private static HistoricalVaRCalculator calculator() {
-        SensitivityCalculator sensitivities = new SensitivityCalculator(new PortfolioValuationService(
+    private static SensitivityCalculator sensitivities() {
+        return new SensitivityCalculator(new PortfolioValuationService(
                 PricingService.builder().register(new SpotPriceModel()).build(),
                 InstrumentCatalog.of(AAPL_STOCK)));
-        return new HistoricalVaRCalculator(sensitivities);
+    }
+
+    private static HistoricalVaRCalculator calculator() {
+        return new HistoricalVaRCalculator(sensitivities());
     }
 
     private static MarketDataSnapshot market() {
@@ -267,6 +271,29 @@ class HistoricalVaRCalculatorTest {
                 .isEqualTo(calculator().expectedShortfall(portfolio, days, market(), VALUATION, 0.95));
         assertThat(measures.valueAtRiskConfidenceInterval()).isEqualTo(
                 calculator().valueAtRiskConfidenceInterval(portfolio, days, market(), VALUATION, 0.95));
+    }
+
+    @Test
+    void measuringPrecomputedProfitAndLossesAgreesWithMeasuringTheScenarios() {
+        // The overload parallel Monte Carlo uses must rank exactly as the scenario overload
+        // does - handed the P&Ls in reverse, to show order is not what makes them agree.
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(100);
+        List<Money> profitAndLosses = new ArrayList<>(
+                sensitivities().valueChangesUnder(portfolio, days, market(), VALUATION));
+        Collections.reverse(profitAndLosses);
+
+        assertThat(calculator().measure(profitAndLosses, 0.95))
+                .isEqualTo(calculator().measure(portfolio, days, market(), VALUATION, 0.95));
+    }
+
+    @Test
+    void measuringPrecomputedProfitAndLossesRejectsAnEmptyListAndABadConfidenceLevel() {
+        assertThatThrownBy(() -> calculator().measure(List.of(), 0.95))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one");
+        assertThatThrownBy(() -> calculator().measure(List.of(Money.zero(Currency.USD)), 0.0))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     /** {@code count} factors evenly spaced across [0.80, 1.20] - a fixed spread, varying resolution. */

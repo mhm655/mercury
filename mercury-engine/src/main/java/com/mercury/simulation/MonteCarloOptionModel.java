@@ -7,8 +7,11 @@ import com.mercury.pricing.ModelName;
 import com.mercury.pricing.PricingModel;
 import com.mercury.pricing.ValuationResult;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.SplittableRandom;
+import java.util.function.Supplier;
 
 /**
  * Prices a European option by simulating {@code pathCount} risk-neutral GBM terminal values
@@ -31,17 +34,18 @@ import java.util.SplittableRandom;
  * against an unchanged market, the same way {@code BlackScholesModel} does. A field holding
  * a live, mutating {@code RandomGenerator} would break that: the second call would draw from
  * wherever the first left off. So nothing here is mutable - {@code seed} is a fixed
- * constructor value, and {@link #price} creates a fresh {@code SplittableRandom(seed)} on
- * every call. Same market, same date, same answer, always - injected-seed reproducibility,
+ * constructor value, and {@link #price} splits fresh generators from it on every call. Same market, same date, same answer, always - injected-seed reproducibility,
  * not read-once state, the same discipline {@code SimulationClock} enforces for time.
  *
- * <p>{@code SplittableRandom} specifically because M13's parallel Monte Carlo needs a
- * generator that splits deterministically per task; choosing it now means M13 costs no
- * rework here, even though M12 itself is single-threaded and never calls {@code split()}.
+ * <h2>Parallel, M13</h2>
+ * The paths are cut into {@link PathBlocks}, each drawing from its own stream split from the
+ * seed, and the blocks run on whatever {@link SimulationWorkers} this model was given. Block
+ * sums are added in block order, not completion order, so the price is bit-identical on one
+ * worker or twelve - see {@code PathBlocks} for why the split is per block and not per worker.
  *
- * <p>Stateless (the seed and path count are configuration, not mutable state) and
- * thread-safe: concurrent calls to {@link #price} each construct their own generator, so
- * there is nothing to contend over.
+ * <p>Stateless (the seed, path count and workers are configuration, not mutable state) and
+ * thread-safe: concurrent calls to {@link #price} each split their own generators, so there
+ * is nothing to contend over.
  */
 public final class MonteCarloOptionModel implements PricingModel<EuropeanOption> {
 
@@ -49,13 +53,24 @@ public final class MonteCarloOptionModel implements PricingModel<EuropeanOption>
 
     private final long seed;
     private final int pathCount;
+    private final SimulationWorkers workers;
 
+    /** Runs every path on the calling thread - see {@link SimulationWorkers#sequential()}. */
     public MonteCarloOptionModel(long seed, int pathCount) {
+        this(seed, pathCount, SimulationWorkers.sequential());
+    }
+
+    /**
+     * @param workers where the paths run; the caller owns them and closes them. Changes how
+     *                long {@link #price} takes, never what it returns.
+     */
+    public MonteCarloOptionModel(long seed, int pathCount, SimulationWorkers workers) {
         if (pathCount <= 0) {
             throw new IllegalArgumentException("pathCount must be positive, but was " + pathCount);
         }
         this.seed = seed;
         this.pathCount = pathCount;
+        this.workers = Objects.requireNonNull(workers, "workers");
     }
 
     @Override
@@ -104,20 +119,36 @@ public final class MonteCarloOptionModel implements PricingModel<EuropeanOption>
     public double priceOneShare(OptionType type, double spot, double strike, double years,
                                 double rate, double volatility) {
         double horizon = Math.max(years, 0.0);
-        SplittableRandom rng = new SplittableRandom(seed);
 
+        List<Supplier<Double>> blocks = new ArrayList<>();
+        for (PathBlocks.Block block : PathBlocks.of(pathCount, seed)) {
+            blocks.add(() -> payoffSum(type, spot, strike, horizon, rate, volatility, block));
+        }
+
+        // Summed in block order: floating-point addition is not associative, so summing in
+        // completion order would make the last bits depend on thread scheduling.
         double payoffSum = 0.0;
-        for (int i = 0; i < pathCount; i++) {
+        for (double blockSum : workers.run(blocks)) {
+            payoffSum += blockSum;
+        }
+        double averagePayoff = payoffSum / pathCount;
+        return averagePayoff * Math.exp(-rate * horizon);
+    }
+
+    private static double payoffSum(OptionType type, double spot, double strike, double horizon,
+                                     double rate, double volatility, PathBlocks.Block block) {
+        SplittableRandom rng = block.rng();
+        double sum = 0.0;
+        for (int i = 0; i < block.size(); i++) {
             // Risk-neutral drift: the whole point of pricing under the risk-neutral measure
             // is that the expected discounted payoff equals today's price, which is exactly
             // what Black-Scholes computes in closed form - the fact this converges to it is
             // the cross-validation, not an assumption baked in to make it converge.
             double terminal = GeometricBrownianMotion.terminalValue(spot, rate, volatility, horizon, rng);
-            payoffSum += type == OptionType.CALL
+            sum += type == OptionType.CALL
                     ? Math.max(terminal - strike, 0.0)
                     : Math.max(strike - terminal, 0.0);
         }
-        double averagePayoff = payoffSum / pathCount;
-        return averagePayoff * Math.exp(-rate * horizon);
+        return sum;
     }
 }

@@ -27,11 +27,14 @@ class MonteCarloVaRCalculatorTest {
     private static final PortfolioId BOOK = PortfolioId.of("BOOK");
     private static final Stock AAPL_STOCK = Stock.of("AAPL", Currency.USD);
 
-    private static MonteCarloVaRCalculator calculator(long seed) {
-        SensitivityCalculator sensitivities = new SensitivityCalculator(new PortfolioValuationService(
+    private static SensitivityCalculator sensitivities() {
+        return new SensitivityCalculator(new PortfolioValuationService(
                 PricingService.builder().register(new SpotPriceModel()).build(),
                 InstrumentCatalog.of(AAPL_STOCK)));
-        return new MonteCarloVaRCalculator(sensitivities, seed);
+    }
+
+    private static MonteCarloVaRCalculator calculator(long seed) {
+        return new MonteCarloVaRCalculator(sensitivities(), seed);
     }
 
     private static MarketDataSnapshot market() {
@@ -103,6 +106,46 @@ class MonteCarloVaRCalculatorTest {
                 book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, 10_000, market(), VALUATION, 0.95);
 
         assertThat(first).isEqualTo(second);
+    }
+
+    @Test
+    void sameSeedGivesTheSameResultOnOneWorkerOrEight() {
+        // The reproducibility test docs/DESIGN_PROPOSAL.md section 8 names: "same seed ->
+        // identical VaR across 1 and 8 workers". Exact equality, not a tolerance - a path
+        // count that is not a multiple of the block size, so the short last block is covered.
+        int pathCount = 3 * PathBlocks.BLOCK_SIZE + 17;
+        SensitivityCalculator sensitivities = sensitivities();
+
+        MonteCarloRiskResult sequential = new MonteCarloVaRCalculator(sensitivities, 42)
+                .simulate(book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, pathCount, market(), VALUATION, 0.99);
+        try (SimulationWorkers one = SimulationWorkers.parallel(1);
+             SimulationWorkers eight = SimulationWorkers.parallel(8)) {
+            MonteCarloRiskResult onOne = new MonteCarloVaRCalculator(sensitivities, 42, one)
+                    .simulate(book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, pathCount, market(), VALUATION, 0.99);
+            MonteCarloRiskResult onEight = new MonteCarloVaRCalculator(sensitivities, 42, eight)
+                    .simulate(book(1_000), AAPL, 0.0, 0.25, 1.0 / 365, pathCount, market(), VALUATION, 0.99);
+
+            assertThat(onOne).isEqualTo(sequential);
+            assertThat(onEight).isEqualTo(sequential);
+        }
+    }
+
+    @Test
+    void aMissingSpotRaisedOnAWorkerReachesTheCallerAsItself() {
+        // The spot is read up front, so this book holds a second instrument the market does
+        // not price - the failure then happens during revaluation, on a worker thread.
+        Stock msft = Stock.of("MSFT", Currency.USD);
+        SensitivityCalculator sensitivities = new SensitivityCalculator(new PortfolioValuationService(
+                PricingService.builder().register(new SpotPriceModel()).build(),
+                InstrumentCatalog.of(AAPL_STOCK, msft)));
+        Portfolio twoStocks = Portfolio.builder(BOOK, Currency.USD)
+                .position(AAPL, 1_000).position(msft.id(), 10).build();
+
+        try (SimulationWorkers workers = SimulationWorkers.parallel(4)) {
+            assertThatThrownBy(() -> new MonteCarloVaRCalculator(sensitivities, 1, workers).simulate(
+                    twoStocks, AAPL, 0.0, 0.25, 1.0 / 365, 10_000, market(), VALUATION, 0.95))
+                    .isInstanceOf(MarketDataSnapshot.MissingMarketDataException.class);
+        }
     }
 
     @Test

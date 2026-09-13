@@ -120,6 +120,27 @@ public final class HistoricalVaRCalculator {
         return new Measures(valueAtRisk(ranked), expectedShortfall(ranked), confidenceInterval(ranked));
     }
 
+    /**
+     * {@link #measure} over P&amp;Ls a caller has already revalued, rather than scenarios this
+     * class revalues itself.
+     *
+     * <p>For M13's parallel Monte Carlo, which revalues its paths across worker threads and
+     * needs only the statistics from here. Taking the finished P&amp;Ls keeps the percentile
+     * math in this one class while the revaluation happens wherever it is fastest - this class
+     * stays single-threaded and knows nothing about workers.
+     *
+     * @param profitAndLosses one P&amp;L per scenario, all in one currency; order does not
+     *                        matter, it is sorted internally
+     * @throws IllegalArgumentException if {@code profitAndLosses} is empty or
+     *                                  {@code confidenceLevel} is not strictly between 0 and 1
+     */
+    public Measures measure(List<Money> profitAndLosses, double confidenceLevel) {
+        Objects.requireNonNull(profitAndLosses, "profitAndLosses");
+        requireScenariosAndConfidence(profitAndLosses.isEmpty(), confidenceLevel);
+        RankedScenarios ranked = rank(profitAndLosses, confidenceLevel);
+        return new Measures(valueAtRisk(ranked), expectedShortfall(ranked), confidenceInterval(ranked));
+    }
+
     /** The three statistics {@link #measure} computes from one ranking. */
     public record Measures(Money valueAtRisk, Money expectedShortfall,
                            QuantileConfidenceInterval valueAtRiskConfidenceInterval) {
@@ -230,7 +251,14 @@ public final class HistoricalVaRCalculator {
         Objects.requireNonNull(historicalScenarios, "historicalScenarios");
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(asOf, "asOf");
-        if (historicalScenarios.isEmpty()) {
+        requireScenariosAndConfidence(historicalScenarios.isEmpty(), confidenceLevel);
+
+        return rank(sensitivities.valueChangesUnder(portfolio, historicalScenarios, market, asOf),
+                confidenceLevel);
+    }
+
+    private static void requireScenariosAndConfidence(boolean noScenarios, double confidenceLevel) {
+        if (noScenarios) {
             throw new IllegalArgumentException(
                     "Historical VaR needs at least one historical scenario, but none were given");
         }
@@ -238,12 +266,10 @@ public final class HistoricalVaRCalculator {
             throw new IllegalArgumentException(
                     "Confidence level must be strictly between 0 and 1, but was " + confidenceLevel);
         }
+    }
 
-        List<Money> profitAndLosses = sensitivities
-                .valueChangesUnder(portfolio, historicalScenarios, market, asOf)
-                .stream()
-                .sorted()
-                .toList();
+    private static RankedScenarios rank(List<Money> unsortedProfitAndLosses, double confidenceLevel) {
+        List<Money> profitAndLosses = unsortedProfitAndLosses.stream().sorted().toList();
 
         int n = profitAndLosses.size();
         // Subtracting a tiny epsilon before ceiling guards against floating-point overshoot

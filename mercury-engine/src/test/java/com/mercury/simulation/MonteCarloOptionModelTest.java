@@ -132,6 +132,25 @@ class MonteCarloOptionModelTest {
         }
 
         @Test
+        @DisplayName("the same seed gives a bit-identical price on one worker or twelve")
+        void workerCountDoesNotChangeThePrice() {
+            // Bit-identical, not merely close: the blocks and their streams depend on the seed
+            // and path count alone, and block sums are added in block order.
+            int pathCount = 5 * PathBlocks.BLOCK_SIZE + 1;
+            double sequential = new MonteCarloOptionModel(123, pathCount)
+                    .price(CALL, market(), VALUATION).value();
+
+            for (int workerCount : new int[] {1, 2, 3, 12}) {
+                try (SimulationWorkers workers = SimulationWorkers.parallel(workerCount)) {
+                    double parallel = new MonteCarloOptionModel(123, pathCount, workers)
+                            .price(CALL, market(), VALUATION).value();
+
+                    assertThat(parallel).as("on %d workers", workerCount).isEqualTo(sequential);
+                }
+            }
+        }
+
+        @Test
         @DisplayName("a different seed generally gives a different price at a small path count")
         void differentSeedsDiffer() {
             // At a small path count the sampling error is large enough that two seeds should
