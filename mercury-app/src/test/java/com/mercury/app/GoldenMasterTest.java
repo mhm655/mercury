@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,9 +51,11 @@ import org.junit.jupiter.api.Test;
  * updated reflexively tests nothing at all.
  *
  * <pre>
- *   java -cp mercury-app/target/classes;mercury-engine/target/classes com.mercury.app.Main \
- *       &gt; mercury-app/src/test/resources/golden/valuation-report.txt
+ *   java -jar mercury-app/target/mercury.jar &gt; mercury-app/src/test/resources/golden/valuation-report.txt
  * </pre>
+ *
+ * <p>Then paste the same report, from {@code POSITIONS} on, into the README's report block -
+ * {@link #readmeReportMatchesTheEngine} fails until the two agree.
  */
 class GoldenMasterTest {
 
@@ -61,6 +65,26 @@ class GoldenMasterTest {
     @DisplayName("the demo scenario reproduces its committed report exactly")
     void reportMatchesGoldenMaster() {
         assertThat(runScenario()).isEqualTo(expectedReport());
+    }
+
+    @Test
+    @DisplayName("the report printed in the README is the report the engine prints")
+    void readmeReportMatchesTheEngine() throws IOException {
+        // The README is where most readers meet these numbers, and prose drifts: a review
+        // found it explaining an FX delta of 484,092 directly under a report printing 680,985.
+        // The block itself can at least never drift - it must be the golden report from its
+        // POSITIONS section on, character for character.
+        Path readme = Path.of("..", "README.md");
+        assertThat(readme).as("run from the mercury-app module directory").exists();
+        List<String> lines = Files.readAllLines(readme, StandardCharsets.UTF_8);
+
+        int start = lines.indexOf("POSITIONS");
+        assertThat(start).as("README has a report block starting at POSITIONS").isNotNegative();
+        int end = lines.subList(start, lines.size()).indexOf("```") + start;
+        String readmeBlock = String.join("\n", lines.subList(start, end)) + "\n";
+
+        String golden = expectedReport();
+        assertThat(readmeBlock).isEqualTo(golden.substring(golden.indexOf("POSITIONS\n")));
     }
 
     @Test

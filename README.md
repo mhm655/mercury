@@ -1,124 +1,42 @@
 # MERCURY
 
-An object-oriented financial trading and risk simulation engine, written in Java 21.
-
-Mercury simulates a simplified financial institution: it models instruments, matches
-orders, books trades through a lifecycle, maintains portfolios, prices positions, and
-computes risk — including parallel Monte Carlo VaR.
+A trading and risk engine in plain Java 21: it matches orders, books trades against credit
+limits, keeps a multi-currency ledger, prices five kinds of instrument off bootstrapped curves,
+and reports Greeks, stress scenarios and Monte Carlo VaR - all from a fixed scenario, byte for
+byte reproducible.
 
 > **Independent educational project.** Inspired by the problem space that real
 > capital-markets software operates in. Not a clone of, and not derived from, any
 > proprietary system.
 
----
+## Run it
 
-## Status
-
-**M12 complete** — single-threaded Monte Carlo: a second, independent pricer for
-`EuropeanOption` (`MonteCarloOptionModel`, registered through `PricingService` exactly the
-way the registry exists to enable - `PricingModel`'s own javadoc names "priceable by
-Black-Scholes and by a binomial tree, so the two can be cross-checked" as the reason pricing
-is a registry at all), and Monte Carlo Value at Risk with **Expected Shortfall**. GBM has a
-closed-form terminal distribution, so `GeometricBrownianMotion.terminalValue` is an exact
-draw - no Euler-Maruyama time-stepping error, only genuine Monte Carlo sampling error, which
-the convergence tests show actually shrinking (195, then 32, then ~1 dollar of error at
-100 / 10,000 / 1,000,000 paths on the same option) rather than asserting a single lucky
-agreement. Monte Carlo VaR turned out to need no new percentile machinery at all: it
-generates a scenario per simulated path and hands the list to `HistoricalVaRCalculator`
-(M10), the same class now also carrying Expected Shortfall - historical and Monte Carlo VaR
-differ only in where the scenario list comes from, never in how the statistic is computed
-from it. Randomness is injected and reseeded fresh on every call, never held as mutable
-state, so `MonteCarloOptionModel.price(...)` stays exactly as pure a function of its market
-snapshot as `BlackScholesModel.price(...)` is - the same discipline `SimulationClock`
-already enforces for time, applied to randomness. `SplittableRandom` chosen specifically
-because M13's parallel Monte Carlo needs a generator that splits deterministically per
-task; M12 never calls `.split()`, but the type costs nothing to have chosen early.
-
-A post-ship review found a VaR figure with no attached precision indicator - equally
-trustworthy-looking whether it came from 10 historical days or 200,000 simulated paths.
-`HistoricalVaRCalculator.valueAtRiskConfidenceInterval` closes that, and costs nothing extra
-to compute: VaR is one order statistic, and large-sample theory treats the count of
-scenarios at or below the true quantile as Binomial - approximately Normal - so the
-plausible band of *ranks* around the point estimate maps straight onto two more positions in
-the P&L list already sorted for the point estimate itself. No bootstrap, no repeated
-revaluation. `MonteCarloDemo`'s 200,000-path band comes out tight; `RiskEngineDemo`'s
-10-day historical one comes out genuinely wide for the same statistic - which is the honest
-answer, not a defect in either.
-
-**M11 complete** — the single hardcoded stress scenario the RISK section used to end with is
-now three **named scenarios**: `Scenario` (Composite over `MarketShock`, the pattern
-`docs/DESIGN_PROPOSAL.md` §6 named for it before M8 existed) wraps a name, a description and
-a composed shock, built by a plain factory - `Scenario.of(name, description, MarketShock...)`
-- rather than the Builder the design doc also predicted: that reasoning held for `Bond` and
-`InterestRateSwap`'s genuinely many optional fields and did not transfer to a type with only
-one (see the struck-through correction in §6). Market Crash is the old scenario verbatim, so its
--86,093.00 is unchanged; Rate Shock (+200bp across every currency) isolates the DV01 exposure
-the report already prints instead of blending it into four factors at once; Currency Crisis
-(EUR/USD -20% and EUR rates +300bp) is the emerging-market pattern of a currency collapsing
-while local rates spike to defend it, and is the first scenario in this report to move the
-book's two EUR positions in opposite directions at once rather than the same one. Which
-scenarios a report is measured against is demo-supplied data (`DemoScenario.scenarios()`),
-not an engine constant - the same "listed, not inferred" reasoning `RiskFactors` already
-states for risk factors, applied to scenarios for the first time here.
-
-**M10 complete** — the risk engine reports **Gamma and Vega** alongside the Delta, FX delta
-and DV01 it already had, and adds a **historical VaR** calculator. Gamma and Vega are
-computed the same way every other Greek here is - shock, revalue, difference - and both are
-cross-validated against `BlackScholesModel`'s closed form rather than trusted on their own:
-Gamma especially, since a second-order finite difference is the delicate one
-(`docs/DESIGN_PROPOSAL.md` §5.3.1), and the validation the design doc asks be "written early"
-now runs on every build. No new capability interface was added for this - the working
-precedent already in the codebase (a hand-rolled analytic check in
-`SensitivityCalculatorTest`) was static formulas plus a test, so that is what M10 built on,
-rather than a runtime "prefer analytic" dispatch with nothing yet to prefer it for.
-Historical VaR reuses the same `valueChangeUnder` primitive a third way (stress testing and
-Greeks were the first two): revalue under each of a set of historical daily moves, and
-report a percentile of the resulting P&L distribution as the loss - a genuinely different
-technique from the Monte Carlo VaR arriving at M12, not an early duplicate of it.
-
-Unlike M8 and M9, this one **does** touch `Main`'s report: Gamma and Vega are risk numbers
-the book has actually carried since M4 and never printed, the same gap C-2 found for rate
-and FX risk at M5, so they belong in the RISK section that already exists rather than a
-side demo. The golden master was re-recorded and diffed by hand - five new lines, nothing
-else moved.
-
-**M9 complete** — OTC negotiations are now checked against a **risk limit** before they
-execute: `RiskLimit` (a Composite, the same shape `MarketShock` already established) judges
-a counterparty's projected exposure — the running gross notional traded against it, plus
-the trade under consideration — against its stated `CreditLimit`. A breach is not an
-exception; it is a value (`LimitCheckResult`, carrying every `LimitBreach`), and a rejected
-negotiation produces no trade and mutates nothing, exactly as the M8 audit insisted
-self-trade prevention must be an auditable fact rather than a silent skip.
-
-A post-ship review of M9 found the first cut worth tightening twice more, both now done:
-`OtcNegotiationVenue.exposureTo` lets a caller ask how much room is left against a
-counterparty without attempting a trade first, and `OtcNegotiationVenue.release` takes a
-settled trade's consideration back out of the running total. Without the second one, the
-limit would have been a lifetime trading-volume cap rather than anything resembling live
-credit exposure — every counterparty would eventually exhaust it permanently no matter how
-healthy the relationship, since nothing ever gave exposure back. It still is not a
-mark-to-market figure (see `docs/KNOWN_GAPS.md`), but it no longer only grows.
-
-**M8 complete** — trades now have a **lifecycle**: an explicit state machine
-(`NEW → VALIDATED → BOOKED → EXECUTED → CONFIRMED → SETTLED`) with an append-only audit
-trail, two execution venues (a CLOB order book and an OTC negotiation, routed by instrument
-rather than by `instanceof`), and named counterparties. It also closed two gaps the M5
-audits had deliberately deferred here: order ids can no longer be reused after a fill, and
-self-trade prevention now blocks — and records — a same-owner crossing. CI green on every
-push.
-
-The report below is still M7's book — `Main`'s golden-master output is untouched by M8 or
-M9 on purpose (see "Built so far"), and carries only the Gamma/Vega lines from M10. All
-three milestones' fuller evidence is a separate runnable each:
+Requires JDK 21+ and Maven 3.9+.
 
 ```bash
 mvn -q -DskipTests package
-java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.Main
-java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.TradeLifecycleDemo
-java -cp "mercury-app/target/classes:mercury-engine/target/classes" com.mercury.app.RiskEngineDemo
 ```
 
-On Windows the classpath separator is `;`, not `:` - in any shell, Git Bash included.
+```bash
+java -jar mercury-app/target/mercury.jar
+```
+
+That prints the report below. The same jar runs the rest:
+
+| Command | What it shows |
+|---|---|
+| *(none)* or `report` | The valuation report: positions, P&L, curves, Greeks, stress scenarios |
+| `walkthrough` | The whole engine in one run: orders cross on a book, a bond is negotiated against a credit limit, the trades become a ledger, the ledger is valued and risked |
+| `lifecycle` | Trade state machine, self-trade prevention, a credit-limit breach and its release |
+| `risk` | Gamma and Vega beside their Black-Scholes closed forms; historical VaR |
+| `montecarlo` | Monte Carlo prices converging on Black-Scholes; VaR and Expected Shortfall |
+
+`mvn verify` runs everything else: unit and property tests, the ArchUnit layering rules, and a
+test that fails if the report below stops matching what the engine prints.
+
+## The report
+
+This book opened as **1,000,000 of cash**, made eight trades, and holds what they add up to.
 
 ```
 POSITIONS
@@ -255,7 +173,9 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M11 — Scenarios / stress: named scenarios, impact report | ✅ complete |
 | M12 — Monte Carlo, single-threaded: GBM paths, VaR + Expected Shortfall, convergence tests | ✅ complete |
 
-Everything from M4 on is in the [roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
+What each milestone delivered, and what its reviews found, is in the
+[milestone log](docs/MILESTONES.md). Everything from M4 on is in the
+[roadmap](docs/DESIGN_PROPOSAL.md#10-roadmap).
 
 ## Evidence, not claims
 
@@ -267,10 +187,11 @@ Three artifacts, each checkable in about a minute:
 |---|---|---|
 | **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
 | **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
-| **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written |
-| **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ running from M8, extended at M9 | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped — runnable in one command |
-| **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ running from M10 | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios — runnable in one command |
-| **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ running from M12 | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (195 → 32 → ~1 dollar of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure — runnable in one command |
+| **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written. It also fails if the report in this README drifts from what the engine prints |
+| **[End-to-end walkthrough](mercury-app/src/main/java/com/mercury/app/EndToEndDemo.java)** | ✅ `walkthrough` | Orders cross on the book, a bond is negotiated against a credit limit and a larger trade refused, only the book's own trades are booked, and that ledger is valued and risked — one run, no hand-declared positions |
+| **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ `lifecycle` | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped |
+| **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ `risk` | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios |
+| **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ `montecarlo` | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (195 → 32 → ~1 dollar of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure |
 
 ### Measured so far
 
@@ -290,11 +211,10 @@ within noise, which is direct evidence the cached-best-level invariant holds.
 - **An order book with real data structures**, now actually wired to a portfolio. M8 added
   `ExecutionVenue`/`OrderBookVenue`/`OtcNegotiationVenue` (`com.mercury.execution`) and a
   `Trade` lifecycle (`com.mercury.trade`) that turns a `Fill` into a booked ledger entry via
-  `PortfolioLedger.book(Trade)` — see `TradeLifecycleDemo` for a runnable walkthrough. The
-  curated `Main` demo above still declares its eight trades by hand rather than routing
-  through a venue; wiring the CLI/golden-master demo itself to the venues is **M14**'s job
-  ("full golden master"), not this one's, and rewriting it now would be unnecessary risk to
-  a fixed golden-master test for no M8 requirement.
+  `PortfolioLedger.book(Trade)`. The `walkthrough` command runs that whole path - venue, trade,
+  ledger, valuation, risk - in one go. The report above still declares its eight trades by
+  hand; moving the golden-master book itself onto the venues is **M14**'s job ("full golden
+  master").
   Price-time priority via a `TreeMap` of
   price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
   [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
@@ -417,14 +337,12 @@ There is deliberately **no web dashboard** on the roadmap; the reasoning is in
 
 ## Building
 
-Requires JDK 21+ and Maven 3.9+.
-
 ```bash
 mvn verify
 ```
 
 That compiles all three modules and runs the full suite: unit tests, jqwik property
-tests, and the ArchUnit layering rules. A layering violation fails the build — that is
+tests, the golden master, and the ArchUnit layering rules. A layering violation fails the build — that is
 the point of enforcing architecture in tests rather than asserting it in a README.
 
 Developed and benchmarked against Amazon Corretto 21.0.12 on Windows; CI runs Temurin 21
