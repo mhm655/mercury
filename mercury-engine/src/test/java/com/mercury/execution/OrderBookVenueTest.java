@@ -7,10 +7,12 @@ import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.instrument.FxForward;
 import com.mercury.instrument.Stock;
 import com.mercury.matching.Side;
 import com.mercury.portfolio.InstrumentCatalog;
@@ -141,6 +143,31 @@ class OrderBookVenueTest {
         Trade buyerTrade = trades.stream().filter(t -> t.owner().equals(BUYER)).findFirst()
                 .orElseThrow();
         assertThat(buyerTrade.delta()).isEqualTo(Quantity.of(40));
+    }
+
+    @Test
+    void anUnknownInstrumentIsRefusedBeforeItCanConsumeRestingLiquidity() {
+        // The currency used to be looked up only after matching, so an unknown instrument's
+        // sell rested, and the buy that crossed it threw with the sell already filled and both
+        // sides' trades lost. It is now refused before an order ever reaches a book.
+        InstrumentId unknown = InstrumentId.of("NOT-IN-CATALOG");
+        OrderBookVenue venue = newVenue();
+
+        assertThatThrownBy(() -> venue.execute(
+                OrderBookInstruction.limit(unknown, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK))
+                .isInstanceOf(InstrumentCatalog.UnknownInstrumentException.class);
+    }
+
+    @Test
+    void anOverTheCounterInstrumentIsRefused() {
+        FxForward forward = FxForward.buy("FWD-EURUSD", CurrencyPair.of(Currency.EUR, Currency.USD),
+                "1000000", "1.10", LocalDate.of(2027, 3, 2));
+        OrderBookVenue venue = new OrderBookVenue(new TradeIdGenerator("TRD-"), InstrumentCatalog.of(forward));
+
+        assertThatThrownBy(() -> venue.execute(OrderBookInstruction.limit(
+                forward.id(), Side.BUY, Price.of("100.00"), 1, BUYER), CLOCK))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not exchange traded");
     }
 
     @Test

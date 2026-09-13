@@ -114,6 +114,25 @@ class ExecutionRouterTest {
     }
 
     @Test
+    void refusesAnInstructionForADifferentInstrumentThanTheOneItRoutesBy() {
+        // Routing reads the instrument argument; the venue trades the instruction's id. If the
+        // two disagree, a swap could be sent down the exchange-traded path.
+        Stock aapl = Stock.of("AAPL", Currency.USD);
+        Stock msft = Stock.of("MSFT", Currency.USD);
+        InstrumentCatalog catalog = InstrumentCatalog.of(aapl, msft);
+        ExecutionRouter router = new ExecutionRouter(
+                new OrderBookVenue(new TradeIdGenerator("TRD-"), catalog),
+                new OtcNegotiationVenue(PricingService.builder().register(new SpotPriceModel()).build(),
+                        MarketDataSnapshot.builder(VALUATION_DATE).spot(aapl.id(), 195.50).build(),
+                        catalog, new TradeIdGenerator("TRD-"), BUYER, COUNTERPARTIES, RiskLimit.none()));
+
+        assertThatThrownBy(() -> router.execute(aapl, OrderBookInstruction.limit(
+                msft.id(), Side.BUY, Price.of("100.00"), 1, BUYER), CLOCK))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("MSFT");
+    }
+
+    @Test
     void anInstructionOfTheWrongShapeForItsVenueStillThrows() {
         Stock aapl = Stock.of("AAPL", Currency.USD);
         InstrumentCatalog catalog = InstrumentCatalog.of(aapl);

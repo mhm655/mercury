@@ -27,6 +27,12 @@ public final class ExecutionRouter {
                                SimulationClock clock) {
         Objects.requireNonNull(instrument, "instrument");
         Objects.requireNonNull(instruction, "instruction");
+        if (!instruction.instrumentId().equals(instrument.id())) {
+            throw new IllegalArgumentException(
+                    "Instruction is for " + instruction.instrumentId() + " but was routed as "
+                            + instrument.id() + "; the venue would trade the instruction's "
+                            + "instrument on the other one's venue");
+        }
         ExecutionVenue venue = instrument.tradability().isExchangeTraded()
                 ? orderBookVenue : otcNegotiationVenue;
         return venue.execute(instruction, clock);

@@ -8,6 +8,7 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.instrument.FinancialInstrument;
 import com.mercury.matching.Fill;
 import com.mercury.matching.MatchResult;
 import com.mercury.matching.Order;
@@ -78,6 +79,16 @@ public final class OrderBookVenue implements ExecutionVenue {
         }
         Objects.requireNonNull(clock, "clock");
 
+        // Resolved before the book is touched: failing after matching would leave resting
+        // orders filled with no trades returned for either side.
+        FinancialInstrument instrument = instruments.require(obi.instrumentId());
+        if (!instrument.tradability().isExchangeTraded()) {
+            throw new IllegalArgumentException(
+                    instrument.id() + " is not exchange traded (" + instrument.tradability()
+                            + "); it belongs on the OTC venue, not in a matching engine");
+        }
+        Currency currency = instrument.currency();
+
         OrderId orderId = orderIdGenerator.next();
         Order order = new Order(orderId, obi.instrumentId(), obi.side(), obi.type(),
                 obi.limitPrice(), obi.quantity(), obi.timeInForce(), obi.participant());
@@ -86,7 +97,6 @@ public final class OrderBookVenue implements ExecutionVenue {
         OrderBook book = books.computeIfAbsent(obi.instrumentId(), OrderBook::new);
         MatchResult result = book.submit(order);
 
-        Currency currency = instruments.require(obi.instrumentId()).currency();
         List<Trade> trades = new ArrayList<>();
         for (Fill fill : result.fills()) {
             trades.add(tradeFor(fill, fill.aggressorSide(), fill.aggressingOrderId(), currency, clock));
