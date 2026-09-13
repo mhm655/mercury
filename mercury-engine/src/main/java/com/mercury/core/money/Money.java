@@ -56,6 +56,7 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
     public Money {
         Objects.requireNonNull(amount, "amount");
         Objects.requireNonNull(currency, "currency");
+        DecimalBounds.requireReasonable(amount, "Money amount");
         amount = amount.setScale(currency.minorUnits(), ROUNDING);
     }
 

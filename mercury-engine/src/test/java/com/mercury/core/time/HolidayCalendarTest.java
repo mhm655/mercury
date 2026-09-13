@@ -1,6 +1,7 @@
 package com.mercury.core.time;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -32,6 +33,28 @@ class HolidayCalendarTest {
 
             assertThat(calendar.isHoliday(LocalDate.of(2024, 8, 17))).isFalse();
             assertThat(calendar.isBusinessDay(LocalDate.of(2024, 8, 18))).isTrue();
+        }
+
+        @Test
+        @DisplayName("a calendar that is never open fails instead of searching forever")
+        void neverOpenCalendarFailsFast() {
+            HolidayCalendar neverOpen = date -> true;
+            LocalDate day = LocalDate.of(2024, 8, 16);
+
+            assertThatThrownBy(() -> neverOpen.nextBusinessDay(day))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("No business day");
+            assertThatThrownBy(() -> BusinessDayConvention.MODIFIED_FOLLOWING.adjust(day, neverOpen))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("a long closure within the search limit still resolves")
+        void longClosureStillResolves() {
+            LocalDate reopens = LocalDate.of(2025, 1, 6);
+            HolidayCalendar closedUntilJanuary = date -> date.isBefore(reopens);
+
+            assertThat(closedUntilJanuary.nextBusinessDay(LocalDate.of(2024, 8, 16))).isEqualTo(reopens);
         }
     }
 

@@ -33,6 +33,7 @@ public record Price(BigDecimal value) implements Comparable<Price> {
 
     public Price {
         Objects.requireNonNull(value, "value");
+        DecimalBounds.requireReasonable(value, "Price");
         if (value.signum() <= 0) {
             throw new NonPositivePriceException(value);
         }

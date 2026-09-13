@@ -51,6 +51,37 @@ class MoneyTest {
     }
 
     @Nested
+    @DisplayName("input bounds")
+    class InputBounds {
+
+        @Test
+        @DisplayName("a short string with a huge exponent is refused instead of expanded")
+        void hugeExponentIsRefusedCheaply() {
+            // Before the bound this returned - after 7.7 seconds building a 20-million-digit
+            // number from ten characters of input.
+            long started = System.nanoTime();
+            assertThatThrownBy(() -> Money.of("1e20000000", Currency.USD))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("out of range");
+            assertThatThrownBy(() -> Money.of("1e-20000000", Currency.USD))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> Quantity.of("1e20000000"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> Price.of("1e20000000"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(System.nanoTime() - started).isLessThan(1_000_000_000L);
+        }
+
+        @Test
+        @DisplayName("realistic extremes still construct")
+        void realisticExtremesStillConstruct() {
+            assertThat(Money.of("999999999999999999999999.99", Currency.USD).isPositive()).isTrue();
+            assertThat(Money.fromModelValue(Double.MIN_VALUE, Currency.USD).isZero()).isTrue();
+            assertThat(Money.fromModelValue(1e90, Currency.USD).isPositive()).isTrue();
+        }
+    }
+
+    @Nested
     @DisplayName("rounding")
     class Rounding {
 

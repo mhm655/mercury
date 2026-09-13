@@ -40,4 +40,15 @@ class CounterpartyDirectoryTest {
                 .isInstanceOf(CounterpartyDirectory.UnknownCounterpartyException.class)
                 .hasMessageContaining("CPTY-GHOST");
     }
+
+    @Test
+    void anUnknownCounterpartyDoesNotRevealTheOnesThatAreKnown() {
+        // The message used to list every registered id. Whoever can name a wrong
+        // counterparty should not learn the firm's whole client list from the error.
+        CounterpartyDirectory directory = CounterpartyDirectory.of(acme);
+
+        assertThatThrownBy(() -> directory.require(CounterpartyId.of("CPTY-GHOST")))
+                .message()
+                .doesNotContain("CPTY-ACME");
+    }
 }

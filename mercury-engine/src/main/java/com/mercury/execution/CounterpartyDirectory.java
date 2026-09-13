@@ -56,7 +56,7 @@ public final class CounterpartyDirectory {
         Objects.requireNonNull(id, "id");
         Counterparty counterparty = counterparties.get(id);
         if (counterparty == null) {
-            throw new UnknownCounterpartyException(id, counterparties.keySet());
+            throw new UnknownCounterpartyException(id);
         }
         return counterparty;
     }
@@ -66,13 +66,18 @@ public final class CounterpartyDirectory {
         return "CounterpartyDirectory(" + counterparties.size() + " counterparties)";
     }
 
-    /** Raised when a trade names a counterparty the directory does not hold. */
+    /**
+     * Raised when a trade names a counterparty the directory does not hold.
+     *
+     * <p>Deliberately does not list the counterparties that <em>are</em> registered, unlike
+     * {@code InstrumentCatalog}'s equivalent: instrument ids are public market identifiers,
+     * but a counterparty list is a client list, and an error message is exactly what ends up
+     * in a log file or an API response.
+     */
     public static final class UnknownCounterpartyException extends MercuryException {
-        UnknownCounterpartyException(CounterpartyId id, java.util.Set<CounterpartyId> known) {
-            super("No counterparty registered as " + id + ". Known: "
-                    + known.stream().map(CounterpartyId::value).sorted().toList()
-                    + ". A trade against an unknown counterparty has no credit limit to check it "
-                    + "against.");
+        UnknownCounterpartyException(CounterpartyId id) {
+            super("No counterparty registered as " + id + ". A trade against an unknown "
+                    + "counterparty has no credit limit to check it against.");
         }
     }
 }

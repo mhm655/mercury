@@ -39,6 +39,7 @@ public record Quantity(BigDecimal value) implements Comparable<Quantity> {
 
     public Quantity {
         Objects.requireNonNull(value, "value");
+        DecimalBounds.requireReasonable(value, "Quantity");
         value = value.setScale(SCALE, RoundingMode.HALF_EVEN);
     }
 

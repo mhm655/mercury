@@ -47,19 +47,42 @@ public interface HolidayCalendar {
         return date -> self.isHoliday(date) || other.isHoliday(date);
     }
 
-    /** The next business day strictly after {@code date}. */
+    /**
+     * How far {@link #nextBusinessDay} and {@link #previousBusinessDay} search before giving up.
+     * No real centre is closed for a year; a calendar that is - a lambda returning {@code true},
+     * a bad holiday feed - would otherwise walk day by day towards the end of {@code LocalDate}.
+     */
+    int MAX_CLOSED_DAYS = 366;
+
+    /**
+     * The next business day strictly after {@code date}.
+     *
+     * @throws IllegalStateException if no business day falls within {@link #MAX_CLOSED_DAYS}
+     */
     default LocalDate nextBusinessDay(LocalDate date) {
         LocalDate d = date.plusDays(1);
-        while (isHoliday(d)) {
+        for (int searched = 1; isHoliday(d); searched++) {
+            if (searched >= MAX_CLOSED_DAYS) {
+                throw new IllegalStateException(
+                        "No business day within " + MAX_CLOSED_DAYS + " days after " + date);
+            }
             d = d.plusDays(1);
         }
         return d;
     }
 
-    /** The last business day strictly before {@code date}. */
+    /**
+     * The last business day strictly before {@code date}.
+     *
+     * @throws IllegalStateException if no business day falls within {@link #MAX_CLOSED_DAYS}
+     */
     default LocalDate previousBusinessDay(LocalDate date) {
         LocalDate d = date.minusDays(1);
-        while (isHoliday(d)) {
+        for (int searched = 1; isHoliday(d); searched++) {
+            if (searched >= MAX_CLOSED_DAYS) {
+                throw new IllegalStateException(
+                        "No business day within " + MAX_CLOSED_DAYS + " days before " + date);
+            }
             d = d.minusDays(1);
         }
         return d;
