@@ -65,11 +65,16 @@ class MarketDataSnapshotTest {
         }
 
         @Test
-        @DisplayName("the exception lists what the snapshot does hold")
-        void exceptionListsAvailableKeys() {
+        @DisplayName("the exception counts what the snapshot holds rather than listing it")
+        void exceptionCountsRatherThanListsAvailableKeys() {
+            // It used to list every observation: a message as large as the market, carrying
+            // the whole market-data footprint into logs and API responses.
             assertThatThrownBy(() -> market().volatility(MSFT))
-                    .hasMessageContaining("vol:AAPL")
-                    .hasMessageContaining("spot:MSFT");
+                    .hasMessageContaining("vol:MSFT")
+                    .hasMessageContaining("other observations")
+                    .message()
+                    .doesNotContain("vol:AAPL")
+                    .doesNotContain("spot:MSFT");
         }
 
         @Test

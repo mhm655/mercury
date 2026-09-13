@@ -335,15 +335,21 @@ public final class MarketDataSnapshot {
         }
     }
 
-    /** Raised when a pricer asks for market data the snapshot does not hold. */
+    /**
+     * Raised when a pricer asks for market data the snapshot does not hold.
+     *
+     * <p>Names the missing key and how many observations the snapshot does hold, not every one
+     * of them. The full list made the message as large as the market - hundreds of curve
+     * pillars on a real one - and put the firm's whole market-data footprint into whatever log
+     * or API response the exception reaches. {@link #key()} carries what a caller needs.
+     */
     public static final class MissingMarketDataException extends MercuryException {
 
         private final transient MarketDataKey key;
 
         MissingMarketDataException(MarketDataKey key, Set<MarketDataKey> available) {
             super("No market data for " + key.describe() + ". The snapshot holds: "
-                    + (available.isEmpty() ? "nothing"
-                            : available.stream().map(MarketDataKey::describe).sorted().toList())
+                    + (available.isEmpty() ? "nothing" : available.size() + " other observations")
                     + ". Missing data is an error rather than a zero, because a spot price read "
                     + "as zero produces a plausible but wrong valuation.");
             this.key = key;

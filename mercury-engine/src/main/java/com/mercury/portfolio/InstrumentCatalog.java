@@ -63,7 +63,7 @@ public final class InstrumentCatalog {
         Objects.requireNonNull(id, "id");
         FinancialInstrument instrument = instruments.get(id);
         if (instrument == null) {
-            throw new UnknownInstrumentException(id, instruments.keySet());
+            throw new UnknownInstrumentException(id, instruments.size());
         }
         return instrument;
     }
@@ -73,11 +73,16 @@ public final class InstrumentCatalog {
         return "InstrumentCatalog(" + instruments.size() + " instruments)";
     }
 
-    /** Raised when a position references an instrument the catalog does not hold. */
+    /**
+     * Raised when a position references an instrument the catalog does not hold.
+     *
+     * <p>Says how many instruments are registered rather than listing them - the same choice
+     * {@code CounterpartyDirectory} makes. Which instruments a firm has set up is its business,
+     * and an exception message is what reaches a log or an API response.
+     */
     public static final class UnknownInstrumentException extends MercuryException {
-        UnknownInstrumentException(InstrumentId id, java.util.Set<InstrumentId> known) {
-            super("No instrument registered as " + id + ". Known: "
-                    + known.stream().map(InstrumentId::value).sorted().toList()
+        UnknownInstrumentException(InstrumentId id, int registered) {
+            super("No instrument registered as " + id + " among the catalog's " + registered
                     + ". A position referencing an unknown instrument cannot be valued, and "
                     + "skipping it would produce a total that looks complete but is not.");
         }

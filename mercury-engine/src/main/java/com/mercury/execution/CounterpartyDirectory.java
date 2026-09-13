@@ -69,10 +69,9 @@ public final class CounterpartyDirectory {
     /**
      * Raised when a trade names a counterparty the directory does not hold.
      *
-     * <p>Deliberately does not list the counterparties that <em>are</em> registered, unlike
-     * {@code InstrumentCatalog}'s equivalent: instrument ids are public market identifiers,
-     * but a counterparty list is a client list, and an error message is exactly what ends up
-     * in a log file or an API response.
+     * <p>Deliberately does not list the counterparties that <em>are</em> registered: a
+     * counterparty list is a client list, and an error message is exactly what ends up in a
+     * log file or an API response.
      */
     public static final class UnknownCounterpartyException extends MercuryException {
         UnknownCounterpartyException(CounterpartyId id) {

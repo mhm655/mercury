@@ -178,7 +178,10 @@ class PortfolioValuationServiceTest {
 
             assertThatThrownBy(() -> service().value(portfolio, market(), VALUATION))
                     .isInstanceOf(InstrumentCatalog.UnknownInstrumentException.class)
-                    .hasMessageContaining("looks complete but is not");
+                    .hasMessageContaining("looks complete but is not")
+                    .hasMessageContaining("GOOG")
+                    .message()
+                    .doesNotContain("AAPL");
         }
 
         @Test
