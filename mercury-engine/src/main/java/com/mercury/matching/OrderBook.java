@@ -128,7 +128,7 @@ public final class OrderBook {
         long remaining = match(order, fills, selfTradePrevented);
         long filled = order.quantity() - remaining;
 
-        if (remaining > 0 && order.timeInForce().restsInBook()) {
+        if (remaining > 0 && order.timeInForce().restsInBook() && !wouldCrossAfterMatching(order)) {
             rest(order, remaining);
             return new MatchResult(order.id(),
                     filled > 0 ? OrderStatus.PARTIALLY_FILLED_RESTING : OrderStatus.RESTING,
@@ -157,7 +157,9 @@ public final class OrderBook {
      * A resting order sharing {@code order.owner()} is never filled against - see
      * {@link SelfTradePrevention}. It is left exactly where it is (still resting, still
      * first in its level's queue for anyone else) and the walk continues to the next node,
-     * then the next level, on this aggressor's behalf only. That is why this method walks
+     * then the next level, on this aggressor's behalf only. Whatever is left unfilled does
+     * not rest if resting would cross that blocked order - see
+     * {@link #wouldCrossAfterMatching}. That is why this method walks
      * price levels with an explicit iterator rather than re-reading the cached top of book on
      * every pass, as an earlier version did: a level that is blocked rather than exhausted
      * never empties, so re-reading the cache would read the same level forever.
@@ -212,6 +214,21 @@ public final class OrderBook {
             }
         }
         return remaining;
+    }
+
+    /**
+     * True if resting {@code order}'s remainder would cross the book.
+     *
+     * <p>Only reachable through self-trade prevention: after {@link #match}, any opposite
+     * level the order still accepts can hold nothing but orders it was blocked from filling
+     * against. Resting on top of them would leave the best bid at or above the best ask -
+     * the one state a book must never be in. The remainder is cancelled instead, which is the
+     * "cancel newest" STP mode venues commonly default to; fills already made against other
+     * owners stand.
+     */
+    private boolean wouldCrossAfterMatching(Order order) {
+        PriceLevel oppositeBest = order.isBuy() ? bestAsk : bestBid;
+        return oppositeBest != null && order.acceptsPrice(oppositeBest.price());
     }
 
     /** Queues the unfilled remainder, creating its price level if this is the first order there. */

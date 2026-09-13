@@ -646,10 +646,43 @@ class OrderBookTest {
                     Order.limit(nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, SAME_OWNER));
 
             assertThat(result.fills()).isEmpty();
-            assertThat(result.status()).isEqualTo(OrderStatus.RESTING);
+            // Resting the buy at 100 against the owner's own sell at 100 would cross the
+            // book, so the remainder is cancelled rather than rested.
+            assertThat(result.status()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(book.isCrossed()).isFalse();
+            assertThat(book.bestBid()).isEmpty();
             // The blocked resting order is untouched - still there for anyone else.
             assertThat(book.contains(resting)).isTrue();
             assertThat(book.bestAskQuantity()).isEqualTo(100);
+        }
+
+        @Test
+        @DisplayName("a remainder that would cross its owner's resting order is cancelled, fills stand")
+        void partialFillThenBlockedRemainderIsCancelled() {
+            book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of("100.00"), 40, DIFFERENT_OWNER));
+            book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of("101.00"), 100, SAME_OWNER));
+
+            MatchResult result = book.submit(
+                    Order.limit(nextId(), AAPL, Side.BUY, Price.of("101.00"), 100, SAME_OWNER));
+
+            assertThat(result.filledQuantity()).isEqualTo(40);
+            assertThat(result.status()).isEqualTo(OrderStatus.PARTIALLY_FILLED_CANCELLED);
+            assertThat(result.restingQuantity()).isZero();
+            assertThat(book.isCrossed()).isFalse();
+            assertThat(book.bestAsk()).contains(Price.of("101.00"));
+        }
+
+        @Test
+        @DisplayName("a remainder that does not reach the blocked order still rests")
+        void remainderBelowTheBlockedPriceRests() {
+            book.submit(Order.limit(nextId(), AAPL, Side.SELL, Price.of("101.00"), 100, SAME_OWNER));
+
+            MatchResult result = book.submit(
+                    Order.limit(nextId(), AAPL, Side.BUY, Price.of("100.00"), 100, SAME_OWNER));
+
+            assertThat(result.status()).isEqualTo(OrderStatus.RESTING);
+            assertThat(result.selfTradePrevented()).isEmpty();
+            assertThat(book.bestBid()).contains(Price.of("100.00"));
         }
 
         @Test

@@ -66,6 +66,15 @@ no visible reason. `OrderBook.match` now records the fact - instrument, both ord
 blocked quantity - and `MatchResult` carries it alongside `fills`, at the layer where it is
 actually discovered rather than bolted onto the venue interface above it.
 
+**A crossed book, found in a later review.** Skip-and-continue left one case open: the
+aggressor's unfilled remainder rested at its limit *on top of* the same-owner order it had
+been blocked from, so a sell at 100 followed by the same owner's buy at 100 left bid 100 /
+ask 100 - the one state a matching engine must never be in. `bookIsNeverCrossed` could not
+see it, because its generator gives each side a fixed owner and so never blocks a pairing.
+The remainder is now cancelled instead of rested whenever resting it would cross (the
+"cancel newest" mode venues commonly default to); fills against other owners stand, and the
+shared-owner property now asserts the book is never crossed after every submission.
+
 ---
 
 ## Fixed during a post-M8 review

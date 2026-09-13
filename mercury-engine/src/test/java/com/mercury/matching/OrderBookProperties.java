@@ -428,6 +428,12 @@ class OrderBookProperties {
             if (!result.selfTradePrevented().isEmpty()) {
                 anySelfTradeAttempted = true;
             }
+            // bookIsNeverCrossed above can never see this: its owners are fixed per side, so
+            // no pairing is ever blocked. A blocked pairing is exactly what leaves an
+            // untraded opposite order inside the aggressor's limit.
+            assertThat(book.isCrossed())
+                    .as("book crossed after %s: bid %s, ask %s", action, book.bestBid(), book.bestAsk())
+                    .isFalse();
             if (result.isResting()) {
                 live.add(id);
             }
