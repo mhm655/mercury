@@ -68,6 +68,22 @@ class PortfolioLedgerBookingTest {
     }
 
     @Test
+    void bookingTheSameTradeTwiceThrowsRatherThanDoublingThePosition() {
+        // The natural misuse: book a trade when it executes, then book it again once it has
+        // settled. Same trade, one position - not two.
+        Trade executed = executedBuy();
+        Trade settled = executed.transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
+        PortfolioLedger ledger = opening().book(executed);
+
+        assertThatThrownBy(() -> ledger.book(settled))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("TRD-1")
+                .hasMessageContaining("already");
+        assertThat(ledger.quantityOf(AAPL)).isEqualTo(Quantity.of(1_000));
+    }
+
+    @Test
     void bookingANewTradeThrows() {
         Trade fresh = Trade.newTrade(TradeId.of("TRD-1"), AAPL, OWNER, Quantity.of(1_000),
                 Money.of("180000.00", Currency.USD), TRADE_DATE, Optional.empty(), Optional.empty());

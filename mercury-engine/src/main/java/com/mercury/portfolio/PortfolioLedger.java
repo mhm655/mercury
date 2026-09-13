@@ -2,6 +2,7 @@ package com.mercury.portfolio;
 
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.PortfolioId;
+import com.mercury.core.id.TradeId;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
@@ -11,6 +12,7 @@ import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,16 +53,20 @@ public final class PortfolioLedger {
     private final CashAccount cash;
     private final Map<Currency, Money> realised;
 
+    /** Every {@link Trade} {@link #book} has accepted, so the same execution cannot land twice. */
+    private final Set<TradeId> bookedTrades;
+
     private PortfolioLedger(PortfolioId id, Currency reportingCurrency,
                             CostBasisMethod costBasisMethod,
                             Map<InstrumentId, PositionLots> positions, CashAccount cash,
-                            Map<Currency, Money> realised) {
+                            Map<Currency, Money> realised, Set<TradeId> bookedTrades) {
         this.id = id;
         this.reportingCurrency = reportingCurrency;
         this.costBasisMethod = costBasisMethod;
         this.positions = positions;
         this.cash = cash;
         this.realised = realised;
+        this.bookedTrades = bookedTrades;
     }
 
     /** A new book with an opening cash balance and nothing held. */
@@ -71,7 +77,7 @@ public final class PortfolioLedger {
         Objects.requireNonNull(costBasisMethod, "costBasisMethod");
         Objects.requireNonNull(cash, "cash");
         return new PortfolioLedger(id, reportingCurrency, costBasisMethod, Map.of(), cash,
-                Map.of());
+                Map.of(), Set.of());
     }
 
     /** Buys {@code quantity} at {@code unitPrice}. */
@@ -145,7 +151,7 @@ public final class PortfolioLedger {
 
         return new PortfolioLedger(id, reportingCurrency, costBasisMethod,
                 Collections.unmodifiableMap(updated), cash.with(cashFlow),
-                Collections.unmodifiableMap(updatedRealised));
+                Collections.unmodifiableMap(updatedRealised), bookedTrades);
     }
 
     /** Statuses a {@link Trade} must have reached before {@link #book} will accept it. */
@@ -161,10 +167,15 @@ public final class PortfolioLedger {
      * re-deriving anything. It is what makes the matching engine's fills actually reach a
      * portfolio, rather than existing only for the order book to prove they cross.
      *
+     * <p>Booking is once per trade id. A trade is accepted at any of three statuses, so the
+     * same execution can easily be offered twice - once when it executes and again when it
+     * settles - and without this each would add the position and move the cash again.
+     *
      * @throws IllegalStateException if {@code trade} has not reached at least
      *                                {@link TradeStatus#EXECUTED} - a trade that never
      *                                executed has nothing to book, and booking one anyway
-     *                                would put a phantom position into the ledger
+     *                                would put a phantom position into the ledger - or if
+     *                                this ledger has already booked a trade with its id
      */
     public PortfolioLedger book(Trade trade) {
         Objects.requireNonNull(trade, "trade");
@@ -173,7 +184,17 @@ public final class PortfolioLedger {
                     "Trade " + trade.id() + " is " + trade.status() + "; only a trade that has "
                             + "reached EXECUTED, CONFIRMED or SETTLED can be booked to the ledger.");
         }
-        return trade(trade.instrumentId(), trade.delta(), trade.consideration(), trade.tradeDate());
+        if (bookedTrades.contains(trade.id())) {
+            throw new IllegalStateException(
+                    "Trade " + trade.id() + " has already been booked to this ledger; a later "
+                            + "lifecycle status is the same execution, not a new one.");
+        }
+        PortfolioLedger after =
+                trade(trade.instrumentId(), trade.delta(), trade.consideration(), trade.tradeDate());
+        Set<TradeId> booked = new HashSet<>(bookedTrades);
+        booked.add(trade.id());
+        return new PortfolioLedger(id, reportingCurrency, costBasisMethod, after.positions,
+                after.cash, after.realised, Collections.unmodifiableSet(booked));
     }
 
     /** Books every trade in {@code trades}, in order, folding each into the next ledger. */
