@@ -21,6 +21,9 @@ out/
 .project
 nbproject/
 
+# jqwik's local record of failed samples - rewritten by any failing property run
+.jqwik-database
+
 # JMH / benchmark output
 *.jfr
 jmh-result.*

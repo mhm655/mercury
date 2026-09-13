@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# The build only reads the repository and uploads an artifact, neither of which needs a
+# write-scoped token. Without this the job inherits the repository default, which can be
+# read-write - more than a pull-request build running third-party actions should hold.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
