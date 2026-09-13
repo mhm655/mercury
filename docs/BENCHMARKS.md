@@ -143,3 +143,77 @@ comparison here is against the naive implementation, not against LMAX.
 **Single-threaded throughout.** The concurrency model is single-writer per book (§5.6), so
 these figures are the per-book ceiling. Parallelism comes from running many instruments'
 books at once, which is measured at M13.
+
+---
+
+## 5. Monte Carlo scaling, 1 to 12 workers (M13)
+
+`MonteCarloScalingBenchmark`, raw results in
+[`benchmarks/m13-monte-carlo-scaling.json`](benchmarks/m13-monte-carlo-scaling.json). Warmup
+3 × 2 s, measurement 5 × 2 s, one fork. Every row computes the **same answer to the last bit**
+(`PathBlocks` fixes the random streams by seed and path count, not by worker count), so each
+row does identical work.
+
+Two workloads, chosen because they should behave differently:
+
+- **`optionPrice`**: one million GBM draws and payoffs for a European call. Arithmetic with
+  almost no allocation.
+- **`valueAtRisk`**: 50,000 paths, each revaluing a four-position option book through
+  `PricingService`, then one serial sort of every P&L.
+
+| Workers | `optionPrice` (ms) | Speedup | `valueAtRisk` (ms) | Speedup |
+|---:|---:|---:|---:|---:|
+| 1 | 25.87 ± 0.21 | 1.00× | 156.6 ± 3.4 | 1.00× |
+| 2 | 14.89 ± 0.29 | 1.74× | 88.5 ± 5.2 | 1.77× |
+| 4 | 8.59 ± 0.17 | 3.01× | 59.0 ± 9.5 | 2.66× |
+| 6 | 6.43 ± 0.25 | 4.03× | 68.1 ± 32.5 | 2.30× |
+| 8 | 5.24 ± 0.37 | 4.94× | 60.3 ± 13.1 | 2.60× |
+| 12 | 4.36 ± 0.68 | **5.93×** | 61.1 ± 11.0 | 2.56× |
+
+### The prediction, checked
+
+§5.6 predicted near-linear scaling to about 6 workers, then a sharp knee, with hyperthreads
+adding "perhaps 15–30%". **That was half right, for one workload, and wrong for the other.**
+
+**`optionPrice` never became linear.** It scaled sub-linearly from the start (1.74× on 2
+workers, 4.03× on 6), which suggests a steady per-worker cost, not a wall at the core count.
+Hyperthreads added **47%** from 6 to 12 workers, well above the 15–30% predicted. There is a
+knee at 6, but it is gentle. That result is plausible for this workload: GBM draws are short
+and branch-light, and the working set is a few doubles per worker, so a hyperthread pair
+contends for execution resources but hardly for cache or memory.
+
+**`valueAtRisk` stopped at 4 workers, not 6.** From 4 to 12 the figure is flat within its
+error bars. The 6-worker row's ±32.5 ms interval covers every other row from 4 upward, so its
+slower mean is noise, not a regression. Amdahl's law does not explain the plateau. The serial
+work (splitting streams, concatenating block lists, one sort of 50,000 values) is far too
+small to hold a 157 ms job to 2.6×.
+
+Running again with JMH's GC profiler (`-prof gc`, workers 1 / 4 / 12) shows why:
+
+| Workers | Allocated per VaR run | Allocation rate | GC time in the run |
+|---:|---:|---:|---:|
+| 1 | 283 MB | 1.73 GB/s | 62 ms |
+| 4 | 288 MB | 4.67 GB/s | 129 ms |
+| 12 | 286 MB | 4.53 GB/s | 163 ms |
+
+Each path allocates about **5.7 KB**: a shocked `MarketDataSnapshot`, valuation lines, and
+`BigDecimal`-backed `Money` for every position. The allocation rate climbs to about 4.6 GB/s
+at 4 workers and **does not climb further**, which is exactly where throughput stops. GC
+*pauses* are not the cause: 163 ms of GC across a multi-second measurement is a few percent.
+The ceiling is consistent with memory bandwidth, meaning the rate at which one dual-channel
+desktop can zero and fill fresh memory. On that reading, more threads only queue for the same
+memory bus. This profile shows the correlation, not the mechanism. Confirming it would take
+hardware counters or a second machine with more memory channels, and neither was run.
+
+### What this means for the engine
+
+The concurrency design is not the bottleneck. The parallel structure scales to 5.9× on pure
+arithmetic, and VaR gives exactly the same result at any worker count. The limit on VaR is the
+**revaluation path's allocation profile**, which was designed for exact ledger arithmetic and
+immutability, not for 50,000 revaluations a second. The obvious fixes would be a
+`double`-domain revaluation path for risk (ADR 0001 already separates ledger from model
+arithmetic) or reusing shocked snapshots per block. Neither is built: both trade clarity for
+speed, and nothing in Mercury yet needs VaR faster than 60 ms.
+
+For a VaR run on this machine, **4 workers is the useful maximum**. A 12-thread pool buys
+nothing over it.
