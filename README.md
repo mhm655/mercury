@@ -432,4 +432,4 @@ on Ubuntu.
 
 ## License
 
-MIT
+MIT - see [LICENSE](LICENSE).
