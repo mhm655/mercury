@@ -23,8 +23,8 @@ import com.mercury.simulation.MonteCarloVaRCalculator;
  * calculators (a demo, not a RISK-section line).
  *
  * <pre>
- *   mvn -q -pl mercury-app -am package
- *   java -cp "mercury-app/target/classes;mercury-engine/target/classes" com.mercury.app.MonteCarloDemo
+ *   mvn -q -DskipTests package
+ *   java -jar mercury-app/target/mercury.jar montecarlo
  * </pre>
  */
 public final class MonteCarloDemo {

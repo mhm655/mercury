@@ -37,4 +37,36 @@
     </dependency>
   </dependencies>
 
+  <!--
+    One self-contained jar, so running any demo is `java -jar mercury-app/target/mercury.jar`
+    rather than a hand-typed classpath whose separator differs between Windows and everything
+    else. The engine has no runtime dependencies, so this is the two modules' classes and
+    nothing more.
+  -->
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <finalName>mercury</finalName>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.mercury.app.Main</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>

@@ -47,8 +47,8 @@ import java.util.List;
  * with the breach printed rather than inferred - see {@code OtcNegotiationVenue}.
  *
  * <pre>
- *   mvn -q -pl mercury-app -am package
- *   java -cp "mercury-app/target/classes;mercury-engine/target/classes" com.mercury.app.TradeLifecycleDemo
+ *   mvn -q -DskipTests package
+ *   java -jar mercury-app/target/mercury.jar lifecycle
  * </pre>
  */
 public final class TradeLifecycleDemo {

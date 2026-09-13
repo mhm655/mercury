@@ -29,8 +29,8 @@ import java.util.List;
  * Gamma/Vega lines M10 added directly to the RISK section it already had.
  *
  * <pre>
- *   mvn -q -pl mercury-app -am package
- *   java -cp "mercury-app/target/classes;mercury-engine/target/classes" com.mercury.app.RiskEngineDemo
+ *   mvn -q -DskipTests package
+ *   java -jar mercury-app/target/mercury.jar risk
  * </pre>
  */
 public final class RiskEngineDemo {
