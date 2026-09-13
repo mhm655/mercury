@@ -464,6 +464,58 @@ class OtcNegotiationVenueTest {
     }
 
     @Test
+    void concurrentNegotiationsNeverAdmitMoreThanTheLimit() throws Exception {
+        // Limit 100,000; each trade is 10 x 100.00 = 1,000. Exactly 100 fit, whatever the
+        // interleaving. Unsynchronised, two threads could both read 99,000, both pass the
+        // check, and both commit - a credit limit that holds only when nobody else is trading.
+        for (int round = 0; round < 20; round++) {
+            OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                    new CreditLimit(Money.of("100000.00", Currency.USD)));
+            OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                    Quantity.of(10), COUNTERPARTY, BasisPoints.ZERO);
+
+            int attempts = 400;
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(16);
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<NegotiationResult>> results = new java.util.ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return venue.negotiate(instruction, CLOCK);
+                }));
+            }
+            start.countDown();
+            int executed = 0;
+            for (java.util.concurrent.Future<NegotiationResult> result : results) {
+                if (!result.get().isRejected()) {
+                    executed++;
+                }
+            }
+            pool.shutdown();
+
+            assertThat(executed).as("round %d", round).isEqualTo(100);
+            assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("100000.00", Currency.USD));
+        }
+    }
+
+    @Test
+    void releasedTradesAreForgottenSoTheRecordHoldsOnlyOpenExposure() {
+        // The venue used to keep every trade it had ever executed, plus every id it had ever
+        // released, for its whole lifetime - memory proportional to all trading, not to what
+        // is still outstanding.
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.ZERO);
+        for (int i = 0; i < 1_000; i++) {
+            Trade executed = venue.negotiate(instruction, CLOCK).trades().get(0);
+            venue.release(executed.transitionTo(TradeStatus.CANCELLED, "withdrawn", CLOCK));
+        }
+
+        assertThat(venue.openExposureCount()).isZero();
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+    }
+
+    @Test
     void releaseLeavesStateUntouchedWhenItThrows() {
         // A trade that is genuinely this venue's own, but not yet SETTLED: release() must
         // throw without marking it as released, so a later legitimate release (once it

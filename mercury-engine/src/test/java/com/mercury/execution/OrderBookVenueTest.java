@@ -171,6 +171,62 @@ class OrderBookVenueTest {
     }
 
     @Test
+    void concurrentSubmissionsKeepEveryFillBalanced() throws Exception {
+        // OrderBook is single-writer by design; the venue is where concurrent callers - a web
+        // tier, say - arrive, so the venue is what has to serialise them. Every unit bought
+        // must be a unit sold, and nothing may throw from a corrupted book.
+        OrderBookVenue venue = newVenue();
+        int threads = 16;
+        int ordersPerThread = 500;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        List<java.util.concurrent.Future<List<Trade>>> results = new java.util.ArrayList<>();
+        for (int t = 0; t < threads; t++) {
+            CounterpartyId participant = CounterpartyId.of("CPTY-" + t);
+            Side side = t % 2 == 0 ? Side.BUY : Side.SELL;
+            results.add(pool.submit(() -> {
+                start.await();
+                List<Trade> mine = new java.util.ArrayList<>();
+                for (int i = 0; i < ordersPerThread; i++) {
+                    mine.addAll(venue.execute(OrderBookInstruction.limit(
+                            AAPL, side, Price.of("100.00"), 1 + i % 7, participant), CLOCK));
+                }
+                return mine;
+            }));
+        }
+        start.countDown();
+
+        java.math.BigDecimal bought = java.math.BigDecimal.ZERO;
+        java.math.BigDecimal sold = java.math.BigDecimal.ZERO;
+        for (java.util.concurrent.Future<List<Trade>> result : results) {
+            for (Trade trade : result.get()) {
+                if (trade.delta().isLong()) {
+                    bought = bought.add(trade.delta().value());
+                } else {
+                    sold = sold.add(trade.delta().value().negate());
+                }
+            }
+        }
+        pool.shutdown();
+
+        assertThat(bought).isPositive().isEqualByComparingTo(sold);
+    }
+
+    @Test
+    void ownersAreForgottenOnceTheirOrdersLeaveTheBook() {
+        // The venue remembered the owner of every order it had ever submitted, for its whole
+        // lifetime. It only needs them while an order can still be filled.
+        OrderBookVenue venue = newVenue();
+        for (int i = 0; i < 1_000; i++) {
+            venue.execute(OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 10, SELLER), CLOCK);
+            venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK);
+        }
+        venue.execute(OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("101.00"), 10, SELLER), CLOCK);
+
+        assertThat(venue.trackedOwnerCount()).isEqualTo(1);
+    }
+
+    @Test
     void rejectsAnOtcInstruction() {
         OrderBookVenue venue = newVenue();
         OtcInstruction otc = new OtcInstruction(AAPL, Side.BUY, Quantity.of(100), SELLER,

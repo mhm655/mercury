@@ -19,12 +19,10 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * The OTC {@link ExecutionVenue}: prices an instrument, applies a spread, and books a
@@ -107,9 +105,22 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     private final CounterpartyDirectory counterparties;
     private final RiskLimit riskLimit;
 
+    /**
+     * Guards the two maps below. A credit check is read-check-commit: two negotiations
+     * interleaving between the read and the commit would each see room for themselves and both
+     * execute - under test, 400 concurrent trades all went through a limit with room for 100.
+     * Pricing happens outside the lock (it is pure and can be slow); only the exposure
+     * arithmetic and the commit are serialised.
+     */
+    private final Object exposureLock = new Object();
+
     private final Map<CounterpartyId, Money> exposureByCounterparty = new HashMap<>();
+
+    /**
+     * Trades whose exposure is still counted, by id. An entry is removed when it is released,
+     * so this holds open trades only, not every trade the venue has ever done.
+     */
     private final Map<TradeId, RecordedExposure> exposureAdded = new HashMap<>();
-    private final Set<TradeId> releasedTrades = new HashSet<>();
 
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
@@ -177,7 +188,6 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
 
         Counterparty counterparty = counterparties.require(otc.counterparty());
         Currency limitCurrency = counterparty.creditLimit().maximum().currency();
-        Money existingExposure = exposureTo(counterparty.id());
         // A risk check, not a ledger fact: converting an already-rounded consideration into
         // the limit's currency here (rather than forming the product once, as
         // PortfolioValuationService does for the ledger) is fine - a cent of double-rounding
@@ -185,24 +195,25 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
         double exposureInLimitCurrency =
                 consideration.abs().amount().doubleValue() * market.fxRate(currency, limitCurrency);
         Money tradeExposure = Money.fromModelValue(exposureInLimitCurrency, limitCurrency);
-        Money projectedExposure = existingExposure.plus(tradeExposure);
-
-        LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
-        if (check.isBreached()) {
-            return NegotiationResult.rejected(check.breaches());
-        }
-
         Quantity delta = buy ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
 
-        Trade trade = Trade.newTrade(tradeIdGenerator.next(), instrument.id(), ownBook, delta,
-                consideration, clock.today(), Optional.empty(), Optional.of(otc.counterparty()));
-        trade = trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
-                .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
-                .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
+        synchronized (exposureLock) {
+            Money projectedExposure = exposureTo(counterparty.id()).plus(tradeExposure);
+            LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
+            if (check.isBreached()) {
+                return NegotiationResult.rejected(check.breaches());
+            }
 
-        exposureByCounterparty.put(counterparty.id(), projectedExposure);
-        exposureAdded.put(trade.id(), new RecordedExposure(trade, counterparty.id(), tradeExposure));
-        return NegotiationResult.executed(trade);
+            Trade trade = Trade.newTrade(tradeIdGenerator.next(), instrument.id(), ownBook, delta,
+                    consideration, clock.today(), Optional.empty(), Optional.of(otc.counterparty()));
+            trade = trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
+                    .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
+                    .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
+
+            exposureByCounterparty.put(counterparty.id(), projectedExposure);
+            exposureAdded.put(trade.id(), new RecordedExposure(trade, counterparty.id(), tradeExposure));
+            return NegotiationResult.executed(trade);
+        }
     }
 
     /**
@@ -220,7 +231,9 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     public Money exposureTo(CounterpartyId counterparty) {
         Objects.requireNonNull(counterparty, "counterparty");
         Currency limitCurrency = counterparties.require(counterparty).creditLimit().maximum().currency();
-        return exposureByCounterparty.getOrDefault(counterparty, Money.zero(limitCurrency));
+        synchronized (exposureLock) {
+            return exposureByCounterparty.getOrDefault(counterparty, Money.zero(limitCurrency));
+        }
     }
 
     /**
@@ -239,7 +252,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
      * that extends the one it was handed back - that is, be the executed trade walked forward.
      *
      * <p>Every check that can fail is resolved before anything is mutated: a thrown exception
-     * here always leaves {@code exposureByCounterparty} and the released-trades record exactly
+     * here always leaves {@code exposureByCounterparty} and the open-exposure record exactly
      * as they were before the call.
      *
      * @throws IllegalArgumentException if {@code trade} is neither {@link TradeStatus#SETTLED}
@@ -254,43 +267,49 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                     "Only a SETTLED or CANCELLED trade releases exposure, but " + trade.id() + " is "
                             + trade.status());
         }
-        RecordedExposure recorded = exposureAdded.get(trade.id());
-        if (recorded == null) {
-            throw new IllegalArgumentException(
-                    "Trade " + trade.id() + " was never recorded as counterparty exposure by this "
-                            + "venue's own negotiate() - only a trade this venue actually produced "
-                            + "can be released, so a caller-constructed or foreign Trade cannot be "
-                            + "used to subtract from another counterparty's real exposure");
-        }
-        if (!continues(recorded.executed(), trade)) {
-            throw new IllegalArgumentException(
-                    "Trade " + trade.id() + " is not the trade this venue executed under that id: "
-                            + "its terms or its lifecycle history differ from what negotiate() "
-                            + "produced, so it cannot release that trade's exposure");
-        }
-        if (releasedTrades.contains(trade.id())) {
-            throw new IllegalArgumentException(
-                    "Trade " + trade.id() + " has already been released; releasing it twice would "
-                            + "understate the book's real exposure");
-        }
+        synchronized (exposureLock) {
+            RecordedExposure recorded = exposureAdded.get(trade.id());
+            if (recorded == null) {
+                // One message for both causes: once released, a trade's record is dropped (so
+                // the map holds open trades, not all history), which makes "released already"
+                // and "never produced here" the same fact from this venue's point of view.
+                throw new IllegalArgumentException(
+                        "Trade " + trade.id() + " was never recorded as open counterparty exposure by "
+                                + "this venue's own negotiate(), or has already been released. Only a "
+                                + "trade this venue produced can be released, and only once - a foreign "
+                                + "Trade must not subtract from real exposure, and a second release "
+                                + "would understate it");
+            }
+            if (!continues(recorded.executed(), trade)) {
+                throw new IllegalArgumentException(
+                        "Trade " + trade.id() + " is not the trade this venue executed under that id: "
+                                + "its terms or its lifecycle history differ from what negotiate() "
+                                + "produced, so it cannot release that trade's exposure");
+            }
 
-        Money existing = exposureTo(recorded.counterparty());
-        if (existing.isLessThan(recorded.amount())) {
-            // Unreachable under correct bookkeeping: exposureByCounterparty is an exact sum of
-            // exactly what negotiate() recorded, and a trade id can only reach this point once
-            // (guarded above). Throwing rather than flooring at zero - a running total smaller
-            // than a trade's own recorded contribution means the bookkeeping is already wrong,
-            // and a plausible-looking recovered number would hide that. Loud beats plausible,
-            // the same rule MarketDataSnapshot and this class's own SpreadHadNoEffectException
-            // already follow.
-            throw new IllegalStateException(
-                    "Exposure to " + recorded.counterparty() + " (" + existing + ") is smaller than "
-                            + "trade " + trade.id() + "'s own recorded contribution (" + recorded.amount()
-                            + "). This venue's exposure bookkeeping is inconsistent.");
-        }
+            Money existing = exposureTo(recorded.counterparty());
+            if (existing.isLessThan(recorded.amount())) {
+                // Unreachable under correct bookkeeping: exposureByCounterparty is an exact sum
+                // of exactly what negotiate() recorded, and a record is removed the moment it
+                // is released. Throwing rather than flooring at zero - a running total smaller
+                // than a trade's own recorded contribution means the bookkeeping is already
+                // wrong, and a plausible-looking recovered number would hide that.
+                throw new IllegalStateException(
+                        "Exposure to " + recorded.counterparty() + " (" + existing + ") is smaller than "
+                                + "trade " + trade.id() + "'s own recorded contribution (" + recorded.amount()
+                                + "). This venue's exposure bookkeeping is inconsistent.");
+            }
 
-        releasedTrades.add(trade.id());
-        exposureByCounterparty.put(recorded.counterparty(), existing.minus(recorded.amount()));
+            exposureAdded.remove(trade.id());
+            exposureByCounterparty.put(recorded.counterparty(), existing.minus(recorded.amount()));
+        }
+    }
+
+    /** How many trades' exposure is still counted. Package-private, for tests of boundedness. */
+    int openExposureCount() {
+        synchronized (exposureLock) {
+            return exposureAdded.size();
+        }
     }
 
     /** True if {@code candidate} is {@code executed} with zero or more transitions appended. */

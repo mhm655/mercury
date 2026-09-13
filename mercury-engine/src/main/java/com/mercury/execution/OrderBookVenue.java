@@ -58,10 +58,9 @@ public final class OrderBookVenue implements ExecutionVenue {
     private final Map<InstrumentId, OrderBook> books = new HashMap<>();
 
     /**
-     * Every order this venue has ever submitted, by id, so a resting order's owner can
-     * still be recovered once it has filled and left the book. Bounded by how many orders
-     * a single venue instance ever submits over its lifetime - acceptable at this
-     * milestone's scale, and the same caveat {@link OrderIdGenerator} already carries.
+     * The owner of every order that can still be filled, by id, so a resting order's owner is
+     * known when a later aggressor fills it. An entry is dropped as soon as its order leaves
+     * the book, so this is bounded by resting orders, not by every order ever submitted.
      */
     private final Map<OrderId, CounterpartyId> owners = new HashMap<>();
 
@@ -70,8 +69,16 @@ public final class OrderBookVenue implements ExecutionVenue {
         this.instruments = Objects.requireNonNull(instruments, "instruments");
     }
 
+    /**
+     * Synchronized, which {@code OrderBook} itself deliberately is not. The book is
+     * single-writer by design; this is where concurrent callers actually arrive, so this is
+     * where they are put in a queue. Unserialised, two threads matching at once over-filled a
+     * resting order under test. One lock for every instrument's book is the simple correct
+     * choice at this scale - a lock per book is the refinement if one hot instrument ever
+     * starves the rest.
+     */
     @Override
-    public List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
+    public synchronized List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
         if (!(instruction instanceof OrderBookInstruction obi)) {
             throw new IllegalArgumentException(
                     "OrderBookVenue only executes OrderBookInstruction, but received "
@@ -103,7 +110,23 @@ public final class OrderBookVenue implements ExecutionVenue {
             Side restingSide = fill.aggressorSide().isBuy() ? Side.SELL : Side.BUY;
             trades.add(tradeFor(fill, restingSide, fill.restingOrderId(), currency, clock));
         }
+
+        // Owners are needed only while an order can still be filled. Checked after the trades
+        // are built, since building them reads the owners of orders that just filled.
+        for (Fill fill : result.fills()) {
+            if (!book.contains(fill.restingOrderId())) {
+                owners.remove(fill.restingOrderId());
+            }
+        }
+        if (!book.contains(orderId)) {
+            owners.remove(orderId);
+        }
         return List.copyOf(trades);
+    }
+
+    /** How many orders' owners are held. Package-private, for tests of boundedness. */
+    synchronized int trackedOwnerCount() {
+        return owners.size();
     }
 
     /**
