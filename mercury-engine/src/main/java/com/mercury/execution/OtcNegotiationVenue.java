@@ -164,7 +164,9 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
         // A spread that had no measurable effect - almost always because the priced mid was
         // zero or close enough to it that scaling it by a percentage rounds away to nothing -
         // is refused rather than silently booked. See the class javadoc.
-        if (!otc.spread().equals(BasisPoints.ZERO)) {
+        // Compared by value, not equals(BasisPoints.ZERO): record equality on a double uses
+        // Double.compare, which treats -0.0 as a different spread from 0.0.
+        if (otc.spread().value() != 0.0) {
             double unspreadNotional = priced.value() * quantity;
             Money withoutSpread = Money.fromModelValue(buy ? unspreadNotional : -unspreadNotional,
                     currency);
@@ -199,7 +201,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                 .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
 
         exposureByCounterparty.put(counterparty.id(), projectedExposure);
-        exposureAdded.put(trade.id(), new RecordedExposure(counterparty.id(), tradeExposure));
+        exposureAdded.put(trade.id(), new RecordedExposure(trade, counterparty.id(), tradeExposure));
         return NegotiationResult.executed(trade);
     }
 
@@ -227,19 +229,29 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
      * held forever, and on why the amount released comes from this venue's own records rather
      * than from {@code trade.consideration()}.
      *
+     * <p>A {@link TradeStatus#CANCELLED} trade releases too: it will never settle, so
+     * accepting only {@code SETTLED} would leave a withdrawn trade counted against the limit
+     * for good.
+     *
+     * <p>Matching the id is not enough to trust the caller's trade: ids are sequential and
+     * guessable, so a hand-built {@code Trade} reusing a live trade's id could otherwise claim
+     * it had settled. The trade must carry exactly the terms this venue executed and a history
+     * that extends the one it was handed back - that is, be the executed trade walked forward.
+     *
      * <p>Every check that can fail is resolved before anything is mutated: a thrown exception
      * here always leaves {@code exposureByCounterparty} and the released-trades record exactly
      * as they were before the call.
      *
-     * @throws IllegalArgumentException if {@code trade} is not {@link TradeStatus#SETTLED}, was
-     *         never recorded as exposure by this venue's own {@link #negotiate}, or has already
-     *         been released
+     * @throws IllegalArgumentException if {@code trade} is neither {@link TradeStatus#SETTLED}
+     *         nor {@link TradeStatus#CANCELLED}, was never recorded as exposure by this venue's
+     *         own {@link #negotiate}, is not a continuation of the trade it executed, or has
+     *         already been released
      */
     public void release(Trade trade) {
         Objects.requireNonNull(trade, "trade");
-        if (trade.status() != TradeStatus.SETTLED) {
+        if (trade.status() != TradeStatus.SETTLED && trade.status() != TradeStatus.CANCELLED) {
             throw new IllegalArgumentException(
-                    "Only a SETTLED trade releases exposure, but " + trade.id() + " is "
+                    "Only a SETTLED or CANCELLED trade releases exposure, but " + trade.id() + " is "
                             + trade.status());
         }
         RecordedExposure recorded = exposureAdded.get(trade.id());
@@ -249,6 +261,12 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
                             + "venue's own negotiate() - only a trade this venue actually produced "
                             + "can be released, so a caller-constructed or foreign Trade cannot be "
                             + "used to subtract from another counterparty's real exposure");
+        }
+        if (!continues(recorded.executed(), trade)) {
+            throw new IllegalArgumentException(
+                    "Trade " + trade.id() + " is not the trade this venue executed under that id: "
+                            + "its terms or its lifecycle history differ from what negotiate() "
+                            + "produced, so it cannot release that trade's exposure");
         }
         if (releasedTrades.contains(trade.id())) {
             throw new IllegalArgumentException(
@@ -275,10 +293,24 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
         exposureByCounterparty.put(recorded.counterparty(), existing.minus(recorded.amount()));
     }
 
+    /** True if {@code candidate} is {@code executed} with zero or more transitions appended. */
+    private static boolean continues(Trade executed, Trade candidate) {
+        List<?> history = candidate.history();
+        return candidate.instrumentId().equals(executed.instrumentId())
+                && candidate.owner().equals(executed.owner())
+                && candidate.delta().equals(executed.delta())
+                && candidate.consideration().equals(executed.consideration())
+                && candidate.tradeDate().equals(executed.tradeDate())
+                && candidate.settlementDate().equals(executed.settlementDate())
+                && candidate.counterparty().equals(executed.counterparty())
+                && history.size() >= executed.history().size()
+                && history.subList(0, executed.history().size()).equals(executed.history());
+    }
+
     /** What one executed trade added to {@code exposureByCounterparty}, recorded so {@link
      * #release} can undo exactly that amount rather than trusting a caller-supplied {@link
      * Trade}'s own fields. */
-    private record RecordedExposure(CounterpartyId counterparty, Money amount) {
+    private record RecordedExposure(Trade executed, CounterpartyId counterparty, Money amount) {
     }
 
     /**

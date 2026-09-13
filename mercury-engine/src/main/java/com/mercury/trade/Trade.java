@@ -84,6 +84,28 @@ public record Trade(
                     + "amount; a zero delta is not an execution");
         }
         history = List.copyOf(history);
+        requireHistoryLeadsTo(status, history);
+    }
+
+    /**
+     * The record constructor is public, so without this a caller could build a trade already
+     * {@code SETTLED} with no history at all, or with a history that never reaches its own
+     * status - bypassing the state machine {@link #transitionTo} exists to enforce, and
+     * anything downstream that trusts {@link #status()} along with it.
+     */
+    private static void requireHistoryLeadsTo(TradeStatus status, List<TradeLifecycleEvent> history) {
+        TradeStatus reached = TradeStatus.NEW;
+        for (TradeLifecycleEvent event : history) {
+            if (event.from() != reached || !reached.canTransitionTo(event.to())) {
+                throw new IllegalArgumentException("Trade history is not a legal chain of "
+                        + "transitions from NEW: " + event + " follows " + reached);
+            }
+            reached = event.to();
+        }
+        if (reached != status) {
+            throw new IllegalArgumentException("Trade history ends at " + reached
+                    + " but the trade claims to be " + status);
+        }
     }
 
     /** A freshly created trade, in {@link TradeStatus#NEW} with no history yet. */

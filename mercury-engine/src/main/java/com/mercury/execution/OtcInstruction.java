@@ -39,5 +39,14 @@ public record OtcInstruction(
             throw new IllegalArgumentException(
                     "Spread must not be negative, but was " + spread);
         }
+        if (spread.value() >= MAX_SPREAD_EXCLUSIVE.value()) {
+            throw new IllegalArgumentException(
+                    "Spread must be below 100%, but was " + spread + ". A seller receives mid x "
+                            + "(1 - spread), so 100% gives the instrument away and anything above "
+                            + "it has the seller paying the buyer.");
+        }
     }
+
+    /** 100%, as basis points. See the constructor for why a spread must stay below it. */
+    private static final BasisPoints MAX_SPREAD_EXCLUSIVE = BasisPoints.ofPercent(100.0);
 }

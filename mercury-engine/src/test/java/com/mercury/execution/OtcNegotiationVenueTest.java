@@ -102,7 +102,7 @@ class OtcNegotiationVenueTest {
         }
     }
 
-    private static OtcNegotiationVenue newVenue(BasisPoints ignored) {
+    private static OtcNegotiationVenue newVenue() {
         return newVenue(new FixedPriceModel(), ACME.creditLimit());
     }
 
@@ -128,7 +128,7 @@ class OtcNegotiationVenueTest {
 
     @Test
     void aBuyPaysAboveTheMid() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
                 COUNTERPARTY, BasisPoints.ofPercent(1.0));
 
@@ -146,7 +146,7 @@ class OtcNegotiationVenueTest {
 
     @Test
     void aSellReceivesBelowTheMid() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.SELL, Quantity.of(100),
                 COUNTERPARTY, BasisPoints.ofPercent(1.0));
 
@@ -160,7 +160,7 @@ class OtcNegotiationVenueTest {
 
     @Test
     void zeroSpreadTradesExactlyAtTheMid() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(10),
                 COUNTERPARTY, BasisPoints.ZERO);
 
@@ -197,8 +197,33 @@ class OtcNegotiationVenueTest {
     }
 
     @Test
+    void aSpreadOfOneHundredPercentOrMoreIsRefusedAtTheInstruction() {
+        // A sell at mid x (1 - spread): at 100% it gives the instrument away, and above 100%
+        // the seller would pay the buyer - a consideration with the wrong sign.
+        assertThatThrownBy(() -> new OtcInstruction(INSTRUMENT.id(), Side.SELL, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.ofPercent(100.0)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("100%");
+        assertThatThrownBy(() -> new OtcInstruction(INSTRUMENT.id(), Side.SELL, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.ofPercent(250.0)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void aNegativeZeroSpreadIsTreatedAsNoSpread() {
+        // BasisPoints is a record over a double, and Double.compare(-0.0, 0.0) != 0, so
+        // equals(ZERO) says -0.0 is a real spread and a zero-priced trade would be refused.
+        OtcNegotiationVenue venue = newZeroPricedVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(1),
+                COUNTERPARTY, BasisPoints.of(-0.0));
+
+        assertThat(venue.execute(instruction, CLOCK).get(0).consideration())
+                .isEqualTo(Money.zero(Currency.USD));
+    }
+
+    @Test
     void rejectsAnOrderBookInstruction() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OrderBookInstruction wrong = OrderBookInstruction.market(
                 INSTRUMENT.id(), Side.BUY, 10, COUNTERPARTY);
 
@@ -339,7 +364,7 @@ class OtcNegotiationVenueTest {
 
     @Test
     void releasingATradeThatIsNotSettledIsRejected() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
                 COUNTERPARTY, BasisPoints.ZERO);
         Trade executed = venue.negotiate(instruction, CLOCK).trades().get(0);
@@ -351,7 +376,7 @@ class OtcNegotiationVenueTest {
 
     @Test
     void releasingTheSameTradeTwiceIsRejected() {
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
                 COUNTERPARTY, BasisPoints.ZERO);
         Trade settled = venue.negotiate(instruction, CLOCK).trades().get(0)
@@ -392,11 +417,64 @@ class OtcNegotiationVenueTest {
     }
 
     @Test
+    void releaseRejectsAForgedTradeThatReusesARealTradesId() {
+        // The id check alone is not enough: TRD-1 is a real, still-EXECUTED trade, and a
+        // hand-built copy that reuses its id and claims SETTLED must not free its exposure.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("10000.00", Currency.USD)));
+        Trade real = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK).trades().get(0);
+        Trade forged = Trade.newTrade(real.id(), real.instrumentId(), real.owner(), real.delta(),
+                        real.consideration(), real.tradeDate(), real.settlementDate(), real.counterparty())
+                .transitionTo(TradeStatus.VALIDATED, "forged", CLOCK)
+                .transitionTo(TradeStatus.BOOKED, "forged", CLOCK)
+                .transitionTo(TradeStatus.EXECUTED, "forged", CLOCK)
+                .transitionTo(TradeStatus.CONFIRMED, "forged", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "forged", CLOCK);
+
+        assertThatThrownBy(() -> venue.release(forged))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not the trade this venue executed");
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("10000.00", Currency.USD));
+    }
+
+    @Test
+    void releaseRejectsATradeWhoseHistoryIsInconsistentWithItsStatus() {
+        OtcNegotiationVenue venue = newVenue();
+        Trade real = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK).trades().get(0);
+
+        // The record constructor is public, so a caller can claim SETTLED without ever
+        // making the transitions. The trade itself must refuse to exist in that state.
+        assertThatThrownBy(() -> new Trade(real.id(), real.instrumentId(), real.owner(), real.delta(),
+                real.consideration(), real.tradeDate(), real.settlementDate(), real.counterparty(),
+                TradeStatus.SETTLED, real.history()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("history");
+    }
+
+    @Test
+    void cancellingATradeReleasesItsExposureToo() {
+        // A cancelled trade will never settle, so a SETTLED-only release would leave its
+        // exposure counted against the limit forever.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("10000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Trade executed = venue.negotiate(instruction, CLOCK).trades().get(0);
+
+        venue.release(executed.transitionTo(TradeStatus.CANCELLED, "withdrawn", CLOCK));
+
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+        assertThat(venue.negotiate(instruction, CLOCK).isRejected()).isFalse();
+    }
+
+    @Test
     void releaseLeavesStateUntouchedWhenItThrows() {
         // A trade that is genuinely this venue's own, but not yet SETTLED: release() must
         // throw without marking it as released, so a later legitimate release (once it
         // actually settles) still succeeds.
-        OtcNegotiationVenue venue = newVenue(BasisPoints.ZERO);
+        OtcNegotiationVenue venue = newVenue();
         Trade executed = venue.negotiate(new OtcInstruction(INSTRUMENT.id(), Side.BUY,
                 Quantity.of(100), COUNTERPARTY, BasisPoints.ZERO), CLOCK).trades().get(0);
         Money exposureBeforeAttempt = venue.exposureTo(COUNTERPARTY);
