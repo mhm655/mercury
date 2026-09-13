@@ -100,9 +100,39 @@ public final class HistoricalVaRCalculator {
      */
     public Money valueAtRisk(Portfolio portfolio, List<MarketShock> historicalScenarios,
                              MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
+        return valueAtRisk(rank(portfolio, historicalScenarios, market, asOf, confidenceLevel));
+    }
+
+    /**
+     * {@link #valueAtRisk}, {@link #expectedShortfall} and {@link #valueAtRiskConfidenceInterval}
+     * together, from a single revaluation of every scenario.
+     *
+     * <p>Revaluation is the whole cost of this class - sorting and reading three positions is
+     * nothing beside it - so a caller wanting more than one of the three should ask here
+     * rather than calling each method and paying for the revaluation each time.
+     *
+     * @throws IllegalArgumentException if {@code historicalScenarios} is empty or
+     *                                  {@code confidenceLevel} is not strictly between 0 and 1
+     */
+    public Measures measure(Portfolio portfolio, List<MarketShock> historicalScenarios,
+                            MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
         RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
-        Money worstAtConfidence = ranked.sorted().get(ranked.rank() - 1);
-        return lossOrZero(worstAtConfidence);
+        return new Measures(valueAtRisk(ranked), expectedShortfall(ranked), confidenceInterval(ranked));
+    }
+
+    /** The three statistics {@link #measure} computes from one ranking. */
+    public record Measures(Money valueAtRisk, Money expectedShortfall,
+                           QuantileConfidenceInterval valueAtRiskConfidenceInterval) {
+
+        public Measures {
+            Objects.requireNonNull(valueAtRisk, "valueAtRisk");
+            Objects.requireNonNull(expectedShortfall, "expectedShortfall");
+            Objects.requireNonNull(valueAtRiskConfidenceInterval, "valueAtRiskConfidenceInterval");
+        }
+    }
+
+    private static Money valueAtRisk(RankedScenarios ranked) {
+        return lossOrZero(ranked.sorted().get(ranked.rank() - 1));
     }
 
     /**
@@ -117,7 +147,10 @@ public final class HistoricalVaRCalculator {
      */
     public Money expectedShortfall(Portfolio portfolio, List<MarketShock> historicalScenarios,
                                    MarketDataSnapshot market, LocalDate asOf, double confidenceLevel) {
-        RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
+        return expectedShortfall(rank(portfolio, historicalScenarios, market, asOf, confidenceLevel));
+    }
+
+    private static Money expectedShortfall(RankedScenarios ranked) {
         List<Money> tail = ranked.sorted().subList(0, ranked.rank());
         Money sum = tail.stream().reduce(Money.zero(tail.get(0).currency()), Money::plus);
         Money average = sum.dividedBy(BigDecimal.valueOf(tail.size()));
@@ -137,9 +170,9 @@ public final class HistoricalVaRCalculator {
      * {@code sqrt(n p (1 - p))}. That gives a band of plausible <em>ranks</em> around
      * {@code k} directly - {@code k +/- z * sqrt(n p (1 - p))} - which this maps straight onto
      * two more positions in the P&amp;L list already sorted for {@code valueAtRisk}. No
-     * resampling loop, no bootstrap, no repeated revaluation: the expensive part
-     * ({@code valueChangeUnder} per scenario) already happened once for the point estimate,
-     * and this reads two more entries from a list that already exists.
+     * resampling loop and no bootstrap. Called on its own this still revalues every scenario;
+     * asked for through {@link #measure} alongside the point estimate, it reads two more
+     * entries from the list the point estimate already sorted, and costs nothing further.
      *
      * <p>Distribution-free, matching the rest of this class: nothing here assumes returns are
      * Normal, only that a count of successes among many trials is - a much weaker and more
@@ -158,7 +191,10 @@ public final class HistoricalVaRCalculator {
     public QuantileConfidenceInterval valueAtRiskConfidenceInterval(
             Portfolio portfolio, List<MarketShock> historicalScenarios, MarketDataSnapshot market,
             LocalDate asOf, double confidenceLevel) {
-        RankedScenarios ranked = rank(portfolio, historicalScenarios, market, asOf, confidenceLevel);
+        return confidenceInterval(rank(portfolio, historicalScenarios, market, asOf, confidenceLevel));
+    }
+
+    private static QuantileConfidenceInterval confidenceInterval(RankedScenarios ranked) {
         int n = ranked.sorted().size();
         double p = (double) ranked.rank() / n;
         double rankStandardError = Math.sqrt(n * p * (1.0 - p));
@@ -203,8 +239,9 @@ public final class HistoricalVaRCalculator {
                     "Confidence level must be strictly between 0 and 1, but was " + confidenceLevel);
         }
 
-        List<Money> profitAndLosses = historicalScenarios.stream()
-                .map(shock -> sensitivities.valueChangeUnder(portfolio, shock, market, asOf))
+        List<Money> profitAndLosses = sensitivities
+                .valueChangesUnder(portfolio, historicalScenarios, market, asOf)
+                .stream()
                 .sorted()
                 .toList();
 

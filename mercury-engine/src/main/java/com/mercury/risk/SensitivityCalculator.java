@@ -10,6 +10,8 @@ import com.mercury.marketdata.MarketShock;
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioValuationService;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -301,9 +303,25 @@ public final class SensitivityCalculator {
     public Money valueChangeUnder(Portfolio portfolio, MarketShock shock,
                                   MarketDataSnapshot market, LocalDate asOf) {
         Objects.requireNonNull(shock, "shock");
+        return valueChangesUnder(portfolio, List.of(shock), market, asOf).get(0);
+    }
+
+    /**
+     * {@link #valueChangeUnder} for each of {@code shocks}, in order, valuing the unshocked
+     * base once rather than once per shock - the base is the same for every one of them, and a
+     * VaR over 200,000 simulated paths would otherwise value it 200,000 times.
+     */
+    public List<Money> valueChangesUnder(Portfolio portfolio, List<MarketShock> shocks,
+                                         MarketDataSnapshot market, LocalDate asOf) {
+        Objects.requireNonNull(shocks, "shocks");
         Money base = valuationService.value(portfolio, market, asOf).totalValue();
-        Money shocked = valuationService.value(portfolio, market.withShock(shock), asOf).totalValue();
-        return shocked.minus(base);
+        List<Money> changes = new ArrayList<>(shocks.size());
+        for (MarketShock shock : shocks) {
+            Objects.requireNonNull(shock, "shock");
+            Money shocked = valuationService.value(portfolio, market.withShock(shock), asOf).totalValue();
+            changes.add(shocked.minus(base));
+        }
+        return changes;
     }
 
     private double revalue(Portfolio portfolio, MarketDataSnapshot market,

@@ -251,6 +251,24 @@ class HistoricalVaRCalculatorTest {
                 .hasMessageContaining("at least one");
     }
 
+    @Test
+    void measureAgreesWithEachStatisticAskedForSeparately() {
+        // measure() exists only to revalue once instead of three times; it must not be a
+        // second implementation of any of the three answers.
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(100);
+
+        HistoricalVaRCalculator.Measures measures =
+                calculator().measure(portfolio, days, market(), VALUATION, 0.95);
+
+        assertThat(measures.valueAtRisk())
+                .isEqualTo(calculator().valueAtRisk(portfolio, days, market(), VALUATION, 0.95));
+        assertThat(measures.expectedShortfall())
+                .isEqualTo(calculator().expectedShortfall(portfolio, days, market(), VALUATION, 0.95));
+        assertThat(measures.valueAtRiskConfidenceInterval()).isEqualTo(
+                calculator().valueAtRiskConfidenceInterval(portfolio, days, market(), VALUATION, 0.95));
+    }
+
     /** {@code count} factors evenly spaced across [0.80, 1.20] - a fixed spread, varying resolution. */
     private static List<MarketShock> uniformScenarios(int count) {
         double[] factors = new double[count];

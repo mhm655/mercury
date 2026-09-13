@@ -82,11 +82,11 @@ public final class MonteCarloVaRCalculator {
         List<MarketShock> scenarios = simulatedScenarios(
                 underlyingId, drift, volatility, years, pathCount, market);
 
-        var valueAtRisk = delegate.valueAtRisk(portfolio, scenarios, market, asOf, confidenceLevel);
-        var expectedShortfall = delegate.expectedShortfall(portfolio, scenarios, market, asOf, confidenceLevel);
-        var confidenceInterval = delegate.valueAtRiskConfidenceInterval(
-                portfolio, scenarios, market, asOf, confidenceLevel);
-        return new MonteCarloRiskResult(valueAtRisk, expectedShortfall, confidenceInterval, pathCount, seed);
+        // One call, one revaluation of every path - not three, one per statistic.
+        HistoricalVaRCalculator.Measures measures =
+                delegate.measure(portfolio, scenarios, market, asOf, confidenceLevel);
+        return new MonteCarloRiskResult(measures.valueAtRisk(), measures.expectedShortfall(),
+                measures.valueAtRiskConfidenceInterval(), pathCount, seed);
     }
 
     private List<MarketShock> simulatedScenarios(InstrumentId underlyingId, double drift,

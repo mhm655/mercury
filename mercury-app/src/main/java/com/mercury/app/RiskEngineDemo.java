@@ -126,9 +126,10 @@ public final class RiskEngineDemo {
                 MarketShock.scaleAllSpots(0.97),
                 MarketShock.scaleAllSpots(1.04));
 
-        Money var90 = var.valueAtRisk(portfolio, tenDays, market, DemoScenario.VALUATION_DATE, 0.90);
-        var confidenceInterval = var.valueAtRiskConfidenceInterval(
-                portfolio, tenDays, market, DemoScenario.VALUATION_DATE, 0.90);
+        HistoricalVaRCalculator.Measures measures =
+                var.measure(portfolio, tenDays, market, DemoScenario.VALUATION_DATE, 0.90);
+        Money var90 = measures.valueAtRisk();
+        var confidenceInterval = measures.valueAtRiskConfidenceInterval();
 
         System.out.println("  10 historical daily scenarios (equity spot and volatility moves)");
         System.out.println("  90% 1-day historical VaR: " + var90);
