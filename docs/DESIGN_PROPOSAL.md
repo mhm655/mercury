@@ -517,9 +517,29 @@ strategy everywhere would be the mistake. Documented per component:
 **a) Matching engine — single-writer, no locks.**
 Each `OrderBook` is owned by exactly one thread and fed by a `BlockingQueue` of commands.
 Books for different instruments run in parallel; a single book is never contended. This
-is the LMAX-style insight: *serialize commands rather than lock the data structure.* A
-lock-per-book design would be slower and far harder to reason about. Deterministic replay
+is the LMAX-style insight: *serialize commands rather than lock the data structure.* ~~A
+lock-per-book design would be slower and far harder to reason about.~~ Deterministic replay
 from the command log falls out for free — which is what makes §7.2 possible.
+
+> **Corrected at M13, by measurement.** Both struck claims turned out to be wrong here.
+>
+> A lock-per-book design is **faster**, not slower: 3.8× the throughput at twelve books
+> (`docs/BENCHMARKS.md` §6). The reason is that `ExecutionVenue.execute` returns the trades it
+> produced, so a caller submits a command and then blocks for the result — paying an enqueue,
+> a park and a wake-up (~0.9 µs) around matching that is quicker than the handoff, while
+> twelve writer threads on top of twelve callers oversubscribe the CPU. LMAX's advantage
+> assumes fire-and-forget submission, a batching writer and a spinning queue; this paragraph
+> assumed the advantage transfers to a blocking handoff, and it does not.
+>
+> Nor was it harder to reason about. `BookConcurrency` gives both designs the same shape — a
+> lane with exclusive access to one book — and the same tests pass against each.
+>
+> Replay does not fall out for free either, because the queue is in memory and each command is
+> discarded once run: what falls out is the *structure* replay needs (one owner, one ordered
+> stream of commands), not the recording. See `docs/KNOWN_GAPS.md`.
+>
+> Both are built: `INLINE` is the default because it is faster, and `THREAD_PER_BOOK` because
+> it is what makes one-book-one-owner real.
 
 **b) Monte Carlo / risk — embarrassingly parallel, immutable inputs.**
 Scenarios are independent, snapshots are immutable, the portfolio is read-only during a
@@ -548,6 +568,20 @@ floating-point work, not 2×. Beyond that: allocation rate and GC pressure, memo
 bandwidth, and Amdahl's serial tail (the final sort/percentile for VaR). Measuring that
 knee and **explaining it honestly** is worth more than a fabricated 8× speedup — and any
 reviewer who has done this will know a claimed 8× on 6 cores is fiction.
+
+> **Measured at M13** (`docs/BENCHMARKS.md` §5). The shape of the prediction was right — no
+> 8×, a real knee, and the honest explanation is the useful part — but two specifics were
+> wrong, in opposite directions.
+>
+> Option pricing never became linear (1.74× on 2 workers) and hyperthreads then added **47%**
+> from 6 to 12 workers, well above the 15–30% predicted, ending at 5.93×. VaR bent much
+> earlier than the core count, flattening at **2.6× from 4 workers**.
+>
+> Amdahl's serial tail is not what caused it: splitting, concatenation and one sort of 50,000
+> values are far too small to hold a 157 ms job to 2.6×. A GC-profiled rerun points at
+> allocation — ~285 MB per run, with the rate pinned at ~4.6 GB/s from 4 workers upward and GC
+> pauses only a few percent of wall time. Allocation rate was on this list; GC pressure, which
+> it was listed beside, was not the binding constraint.
 
 ---
 
@@ -690,7 +724,8 @@ hidden clock reads or shared RNG state creep in.
   rejected. Cheap, complete, demonstrably rigorous.
 - **Concurrency tests**: same seed → identical VaR across 1 and 8 workers
   (reproducibility); concurrent order submission conserves quantity; randomized
-  interleavings against the book.
+  interleavings against the book. *(All three exist as of M13, plus one that watches which
+  thread announces each execution to prove a book really has a single writer.)*
 - **Golden-master test** (§7.2) for end-to-end determinism.
 - **ArchUnit** for layering, cycles, and "no framework in the core."
 - **Integration tests** for full slices: submit order → match → book trade → lifecycle →

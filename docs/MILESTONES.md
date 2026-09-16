@@ -7,6 +7,59 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M13 complete** — **concurrency, chosen per component** rather than "add threads", and
+measured rather than assumed. Three pieces, and the measurements are the interesting part.
+
+**Parallel Monte Carlo.** Paths are cut into fixed 4,096-path blocks, each drawing from a
+`SplittableRandom` split from the run seed - eagerly, in one order, on the calling thread,
+because splitting advances the parent. Block boundaries and streams depend on the seed and
+the path count and on nothing else, so the same seed produces a **bit-identical** price and
+VaR on `SimulationWorkers.sequential()`, on one worker and on twelve; the tests assert exact
+equality rather than a tolerance. Splitting per *worker* would have been reproducible only
+at a fixed worker count - a VaR computed on a laptop could not be reproduced on a server -
+and summing block results in completion order would have made the last bits depend on thread
+scheduling. For VaR the expensive part is revaluation, not the draw, so each block revalues
+its own paths on its own worker and `HistoricalVaRCalculator` gained a `measure(List<Money>,
+double)` overload: the percentile math stays in the one class that owns it and knows nothing
+about threads. Option pricing reaches **5.9× on 12 workers**; VaR plateaus at **2.6× from 4
+workers**, and a GC-profiled rerun says why - every run allocates ~285 MB and the allocation
+rate flattens at ~4.6 GB/s exactly where throughput stops, with GC pauses only a few percent.
+The limit is the revaluation path's allocation profile, not the parallel structure, and
+`docs/BENCHMARKS.md` §5 says so, including that the mechanism is inferred from a correlation
+rather than measured with hardware counters.
+
+**An event bus, with something real listening.** `EventBus` has two implementations:
+synchronous (the default everywhere - delivery on the publishing thread, in subscription
+order, and a subscriber that throws fails the publisher, so a ledger that refuses a trade
+cannot leave the execution looking successful) and asynchronous (one dispatcher thread, not a
+pool, because a pool would let a blotter see a later trade before an earlier one; subscriber
+failures isolated through a handler; `close()` drains so a caller can publish, close and
+read). §5.6 c) calls async-by-default a classic mistake and nothing here defaults to it. Both
+venues now announce every trade they mint as a `TradeExecuted`, published while the book or
+the exposure record is still exclusively held, so no subscriber can see a trade the venue has
+not yet counted; a rejected negotiation announces nothing. The consumer is real rather than
+hypothetical: `LedgerKeeper` holds the mutable cell that immutable `PortfolioLedger`
+deliberately does not, books the trades its owner made, and ignores the other side of every
+order-book fill. That owner filter had been a hand-written loop inside the walkthrough demo -
+a rule living in a demo instead of in the engine. The walkthrough now books nothing by hand,
+subscribes a keeper and a printer, and prints exactly what it printed before.
+
+**Single-writer books, opt-in, and the prediction that failed.** Each instrument's book, the
+owners of its resting orders and the lane guarding them are one object with one writer.
+`BookConcurrency` chooses who that writer is: `INLINE` matches on the calling thread under a
+per-book lock, `THREAD_PER_BOOK` gives each book a thread fed from a command queue - §5.6 a)'s
+single-writer engine, one book with one owner. Both produce identical trades, asserted by
+running one script through each. The venue-wide `synchronized` is gone, so instruments no
+longer wait for each other even inline. Then the benchmark disagreed with the design doc:
+spreading twelve callers across twelve books is **3.27×** one book, confirming that claim, but
+`THREAD_PER_BOOK` is **1.7× slower on one book and 3.8× slower on twelve**. The reason is in
+this implementation rather than in the idea - `execute` returns its trades, so every caller
+pays an enqueue, a park and a wake-up (~0.9 µs) around a matching operation faster than that,
+and twelve writer threads on top of twelve callers oversubscribe a 12-thread CPU. LMAX's win
+needs fire-and-forget submission and a spinning queue; Mercury has the event half of that and
+not the submission half. So `INLINE` stays the default on the measurement rather than on
+taste, and the gap is recorded in `docs/KNOWN_GAPS.md` rather than quietly left out.
+
 **M12 complete** — single-threaded Monte Carlo: a second, independent pricer for
 `EuropeanOption` (`MonteCarloOptionModel`, registered through `PricingService` exactly the
 way the registry exists to enable - `PricingModel`'s own javadoc names "priceable by
@@ -14,9 +67,12 @@ Black-Scholes and by a binomial tree, so the two can be cross-checked" as the re
 is a registry at all), and Monte Carlo Value at Risk with **Expected Shortfall**. GBM has a
 closed-form terminal distribution, so `GeometricBrownianMotion.terminalValue` is an exact
 draw - no Euler-Maruyama time-stepping error, only genuine Monte Carlo sampling error, which
-the convergence tests show actually shrinking (195, then 32, then ~1 dollar of error at
+the convergence tests show actually shrinking (92, then 23, then ~3 dollars of error at
 100 / 10,000 / 1,000,000 paths on the same option) rather than asserting a single lucky
-agreement. Monte Carlo VaR turned out to need no new percentile machinery at all: it
+agreement. *(Those three figures were 195, 32 and ~1 as M12 shipped. M13 cut a run into
+fixed-size blocks with a stream split per block, so a given seed now draws a different set of
+paths - the convergence is the claim, and it is unchanged; the particular draws behind it were
+never the claim.)* Monte Carlo VaR turned out to need no new percentile machinery at all: it
 generates a scenario per simulated path and hands the list to `HistoricalVaRCalculator`
 (M10), the same class now also carrying Expected Shortfall - historical and Monte Carlo VaR
 differ only in where the scenario list comes from, never in how the statistic is computed

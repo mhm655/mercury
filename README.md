@@ -172,6 +172,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M10 — Risk engine: Gamma, Vega, analytic cross-validation, historical VaR | ✅ complete |
 | M11 — Scenarios / stress: named scenarios, impact report | ✅ complete |
 | M12 — Monte Carlo, single-threaded: GBM paths, VaR + Expected Shortfall, convergence tests | ✅ complete |
+| M13 — Concurrency: parallel Monte Carlo, event bus, single-writer books, scaling benchmarks | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -185,13 +186,13 @@ Three artifacts, each checkable in about a minute:
 
 | Artifact | Status | What it proves |
 |---|---|---|
-| **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book measured | Real JMH numbers on stated hardware — including a prediction of mine that the measurements disproved, reported as a failure rather than deleted |
+| **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book, Monte Carlo scaling, venue concurrency | Real JMH numbers on stated hardware — including three predictions of mine that the measurements disproved (a cache-friendly baseline that never won, hyperthreads that beat the forecast, and a single-writer engine that lost to the lock it was supposed to beat), each reported as a failure rather than deleted |
 | **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
 | **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written. It also fails if the report in this README drifts from what the engine prints |
 | **[End-to-end walkthrough](mercury-app/src/main/java/com/mercury/app/EndToEndDemo.java)** | ✅ `walkthrough` | Orders cross on the book, a bond is negotiated against a credit limit and a larger trade refused, only the book's own trades are booked, and that ledger is valued and risked — one run, no hand-declared positions |
 | **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ `lifecycle` | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped |
 | **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ `risk` | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios |
-| **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ `montecarlo` | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (195 → 32 → ~1 dollar of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure |
+| **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ `montecarlo` | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (92 → 23 → ~3 dollars of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure |
 
 ### Measured so far
 
@@ -205,6 +206,18 @@ Order book, 50,000 resting orders, against a linear-scan baseline
 
 Top of book measures 2.42 / 2.45 / 2.43 ns at 1,000 / 10,000 / 50,000 orders — flat to
 within noise, which is direct evidence the cached-best-level invariant holds.
+
+Concurrency, on 6 physical cores / 12 threads:
+
+| Measurement | 1 worker | 12 workers | |
+|---|---:|---:|---:|
+| Monte Carlo option price, 1M paths | 25.87 ms | **4.36 ms** | 5.93× |
+| Monte Carlo VaR, 50k paths | 156.6 ms | 61.1 ms | 2.56× (flat from 4 workers) |
+| Venue throughput, 12 callers | 900.7 ops/ms *(1 book)* | **2948.3 ops/ms** *(12 books)* | 3.27× |
+
+Every Monte Carlo figure is the same number to the last bit at every worker count. The VaR
+plateau is an allocation ceiling rather than the parallel structure, and the
+[write-up](docs/BENCHMARKS.md) shows the GC profile that says so.
 
 ## Built so far
 
@@ -267,6 +280,16 @@ within noise, which is direct evidence the cached-best-level invariant holds.
   and came out 1.5 basis points off par ([ADR 0006](docs/adr/0006-curve-pillars-are-dates.md)).
   A flat rate is now the one-pillar case of the same type, which is how the whole pricing stack
   moved onto curves without a single reference value changing.
+- **Concurrency chosen per component, then measured.** Three models, because the components
+  genuinely differ: Monte Carlo is embarrassingly parallel over immutable snapshots, with
+  random streams split per fixed-size block so the same seed gives a **bit-identical** answer
+  on one worker or twelve; the event bus is synchronous by default and asynchronous by
+  choice; each order book has one writer, either the calling thread under a per-book lock or a
+  thread of its own fed from a command queue. The benchmarks then disagreed with the design
+  doc twice - hyperthreads gave 47% where 15–30% was predicted, and the single-writer engine
+  came out *slower* than the lock while callers still block for their trades. Both corrections
+  are [in the design proposal](docs/DESIGN_PROPOSAL.md#56-concurrency--three-deliberate-models-not-add-threads)
+  beside the original claims, not instead of them.
 
 ### Dead weight, looked for on purpose
 
@@ -278,6 +301,8 @@ ahead of any consumer — and label the ones being kept:
 |---|---|
 | `HasUnderlying`, `OptionTerms` | One implementor each, and callers use the concrete type. Kept for a second option type, deleted if one doesn't arrive |
 | `RiskLimit.and()` / `.composite()` | Composite machinery, real and tested (`RiskLimitTest`), but only one leaf (`CounterpartyExposureLimit`) exists in production wiring - nothing actually composes two limits together yet. Kept for the reason `MarketShock`'s composite shape was kept before M11 gave it a second real user: a second `RiskLimit` type is an expected addition, not a hypothetical one |
+| `AsynchronousEventBus` | Built, tested and documented at M13, and nothing in production wiring uses it: a deterministic demo and a golden-master test both want their subscribers finished before the next line runs. Kept because the live simulation is what it was built for, and because the synchronous default is only defensible if the asynchronous alternative actually exists to compare against |
+| `BookConcurrency.THREAD_PER_BOOK` | The single-writer matching engine, exercised by tests and the benchmark, with `INLINE` wired everywhere in production - because the benchmark says single-writer is slower while callers block for their trades. Kept as the thing that makes one-book-one-owner real, and as the measurement's own subject: deleting it would delete the evidence for the default |
 
 Three rows this table used to carry are gone. Two because they stopped being true, not
 because they were deleted unread: the `matching` package (979 lines with no production
@@ -297,9 +322,15 @@ only here.
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **Concurrency chosen per component** (M13). Single-writer matching engine;
-  embarrassingly-parallel Monte Carlo over immutable snapshots with reproducible per-task
-  RNG splitting.
+- **The golden-master book trades itself** (M14). The report above still declares its eight
+  trades by hand; M14 moves them onto the venues, so the reproducible report is the output of
+  the execution path rather than a parallel set of positions.
+- **Extensibility proof and architecture documentation** (M15). The sixth-instrument commit
+  exists; the diagrams and the architecture write-up it is meant to anchor do not.
+- **An asynchronous submission path** for the matching engine. M13 measured why single-writer
+  books cost more than they return while every caller waits for its trades — see
+  [KNOWN_GAPS](docs/KNOWN_GAPS.md). The event half is built; the fire-and-forget half would
+  change `ExecutionVenue`'s contract, so it waits for a caller that needs it.
 
 Deliberate omissions and deferred fixes are listed in
 **[KNOWN_GAPS.md](docs/KNOWN_GAPS.md)**, so their absence reads as a decision rather than an
