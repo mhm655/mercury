@@ -12,6 +12,7 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.EventBus;
 import com.mercury.event.SynchronousEventBus;
 import com.mercury.instrument.FxForward;
 import com.mercury.instrument.Stock;
@@ -22,7 +23,18 @@ import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class OrderBookVenueTest {
@@ -270,5 +282,130 @@ class OrderBookVenueTest {
         venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK);
 
         assertThat(announced).isEmpty();
+    }
+
+    @Nested
+    @DisplayName("single-writer books")
+    class SingleWriter {
+
+        private static final InstrumentId MSFT = InstrumentId.of("MSFT");
+
+        private OrderBookVenue threadedVenue(EventBus events) {
+            InstrumentCatalog catalog = InstrumentCatalog.of(
+                    Stock.of("AAPL", Currency.USD), Stock.of("MSFT", Currency.USD));
+            return new OrderBookVenue(new TradeIdGenerator("TRD-"), catalog, events,
+                    BookConcurrency.THREAD_PER_BOOK);
+        }
+
+        @Test
+        @DisplayName("produces exactly the trades the inline venue produces")
+        void sameTradesAsInline() {
+            // The whole claim of BookConcurrency: it changes who matches, not what matched.
+            List<OrderBookInstruction> script = List.of(
+                    OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 100, SELLER),
+                    OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("101.00"), 100, SELLER),
+                    OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("101.00"), 150, BUYER),
+                    OrderBookInstruction.market(AAPL, Side.SELL, 50, SELLER));
+
+            List<String> inline = new ArrayList<>();
+            OrderBookVenue plain = newVenue();
+            script.forEach(instruction -> plain.execute(instruction, CLOCK)
+                    .forEach(trade -> inline.add(describe(trade))));
+
+            List<String> threaded = new ArrayList<>();
+            try (OrderBookVenue venue = threadedVenue(EventBus.ignoring())) {
+                script.forEach(instruction -> venue.execute(instruction, CLOCK)
+                        .forEach(trade -> threaded.add(describe(trade))));
+            }
+
+            assertThat(threaded).isEqualTo(inline).isNotEmpty();
+        }
+
+        /** Trade ids are minted per venue, so compare everything else. */
+        private String describe(Trade trade) {
+            return trade.instrumentId() + " " + trade.owner() + " " + trade.delta() + " "
+                    + trade.consideration() + " " + trade.status();
+        }
+
+        @Test
+        @DisplayName("each book is matched by one thread, and different books by different ones")
+        void oneWriterPerBook() {
+            // The single-writer property itself, observed rather than asserted in a comment:
+            // every execution is announced from inside the lane that matched it, so the
+            // publishing thread is the thread that owned the book.
+            SynchronousEventBus bus = new SynchronousEventBus();
+            Map<InstrumentId, Set<String>> threadsByInstrument = new ConcurrentHashMap<>();
+            bus.subscribe(TradeExecuted.class, event -> threadsByInstrument
+                    .computeIfAbsent(event.trade().instrumentId(), id -> ConcurrentHashMap.newKeySet())
+                    .add(Thread.currentThread().getName()));
+
+            try (OrderBookVenue venue = threadedVenue(bus)) {
+                for (int i = 0; i < 20; i++) {
+                    venue.execute(OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 10, SELLER), CLOCK);
+                    venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK);
+                    venue.execute(OrderBookInstruction.limit(MSFT, Side.SELL, Price.of("400.00"), 10, SELLER), CLOCK);
+                    venue.execute(OrderBookInstruction.limit(MSFT, Side.BUY, Price.of("400.00"), 10, BUYER), CLOCK);
+                }
+
+                assertThat(threadsByInstrument.get(AAPL)).hasSize(1);
+                assertThat(threadsByInstrument.get(MSFT)).hasSize(1);
+                assertThat(threadsByInstrument.get(AAPL))
+                        .isNotEqualTo(threadsByInstrument.get(MSFT));
+                assertThat(threadsByInstrument.get(AAPL).iterator().next())
+                        .isNotEqualTo(Thread.currentThread().getName());
+            }
+        }
+
+        @Test
+        @DisplayName("concurrent callers cannot over-fill a resting order")
+        void concurrentCallersConserveQuantity() throws InterruptedException {
+            int threads = 16;
+            try (OrderBookVenue venue = threadedVenue(EventBus.ignoring())) {
+                venue.execute(OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 1_000, SELLER), CLOCK);
+                ExecutorService pool = Executors.newFixedThreadPool(threads);
+                CountDownLatch done = new CountDownLatch(threads);
+                List<Trade> filled = Collections.synchronizedList(new ArrayList<>());
+
+                for (int i = 0; i < threads; i++) {
+                    pool.execute(() -> {
+                        try {
+                            filled.addAll(venue.execute(OrderBookInstruction.limit(
+                                    AAPL, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK));
+                        } finally {
+                            done.countDown();
+                        }
+                    });
+                }
+                assertThat(done.await(30, TimeUnit.SECONDS)).isTrue();
+                pool.shutdown();
+
+                long bought = filled.stream().filter(trade -> trade.owner().equals(BUYER))
+                        .mapToLong(trade -> trade.delta().value().longValue()).sum();
+                assertThat(bought).isEqualTo(1_000);
+            }
+        }
+
+        @Test
+        @DisplayName("a rejection surfaces as itself, not as a thread failure")
+        void errorsCrossTheThreadUnchanged() {
+            try (OrderBookVenue venue = threadedVenue(EventBus.ignoring())) {
+                assertThatThrownBy(() -> venue.execute(OrderBookInstruction.limit(
+                        InstrumentId.of("UNKNOWN"), Side.BUY, Price.of("1.00"), 1, BUYER), CLOCK))
+                        .isInstanceOf(RuntimeException.class);
+            }
+        }
+
+        @Test
+        @DisplayName("a closed venue refuses further executions")
+        void closedVenueRefuses() {
+            OrderBookVenue venue = threadedVenue(EventBus.ignoring());
+            venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK);
+            venue.close();
+            venue.close();
+
+            assertThatThrownBy(() -> venue.execute(OrderBookInstruction.limit(
+                    AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK))
+                    .isInstanceOf(RejectedExecutionException.class);
+        }
     }
 }

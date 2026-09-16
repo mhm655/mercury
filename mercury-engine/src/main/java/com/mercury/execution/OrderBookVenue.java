@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
 
 /**
@@ -52,20 +53,20 @@ import java.util.Optional;
  * after a fill (G-1) unreachable through this, the sole sanctioned entry point. See that
  * class's javadoc.
  */
-public final class OrderBookVenue implements ExecutionVenue {
+public final class OrderBookVenue implements ExecutionVenue, AutoCloseable {
 
     private final OrderIdGenerator orderIdGenerator = new OrderIdGenerator("OB-");
     private final TradeIdGenerator tradeIdGenerator;
     private final InstrumentCatalog instruments;
     private final EventBus events;
-    private final Map<InstrumentId, OrderBook> books = new HashMap<>();
+    private final BookConcurrency concurrency;
 
     /**
-     * The owner of every order that can still be filled, by id, so a resting order's owner is
-     * known when a later aggressor fills it. An entry is dropped as soon as its order leaves
-     * the book, so this is bounded by resting orders, not by every order ever submitted.
+     * One entry per instrument ever traded, created on first use. Concurrent because two
+     * callers can arrive for two different instruments at once, and this map is the one piece
+     * of state no single book's lane can own.
      */
-    private final Map<OrderId, CounterpartyId> owners = new HashMap<>();
+    private final Map<InstrumentId, InstrumentLane> lanes = new ConcurrentHashMap<>();
 
     /** A venue nothing listens to; every execution is still returned to the caller. */
     public OrderBookVenue(TradeIdGenerator tradeIdGenerator, InstrumentCatalog instruments) {
@@ -79,21 +80,53 @@ public final class OrderBookVenue implements ExecutionVenue {
      */
     public OrderBookVenue(TradeIdGenerator tradeIdGenerator, InstrumentCatalog instruments,
                           EventBus events) {
-        this.tradeIdGenerator = Objects.requireNonNull(tradeIdGenerator, "tradeIdGenerator");
-        this.instruments = Objects.requireNonNull(instruments, "instruments");
-        this.events = Objects.requireNonNull(events, "events");
+        this(tradeIdGenerator, instruments, events, BookConcurrency.INLINE);
     }
 
     /**
-     * Synchronized, which {@code OrderBook} itself deliberately is not. The book is
-     * single-writer by design; this is where concurrent callers actually arrive, so this is
-     * where they are put in a queue. Unserialised, two threads matching at once over-filled a
-     * resting order under test. One lock for every instrument's book is the simple correct
-     * choice at this scale - a lock per book is the refinement if one hot instrument ever
-     * starves the rest.
+     * @param concurrency who matches: the calling thread, or a thread that owns the book. The
+     *                    same trades either way - see {@link BookConcurrency}. A venue built
+     *                    with {@link BookConcurrency#THREAD_PER_BOOK} owns threads and should
+     *                    be {@link #close()}d.
+     */
+    public OrderBookVenue(TradeIdGenerator tradeIdGenerator, InstrumentCatalog instruments,
+                          EventBus events, BookConcurrency concurrency) {
+        this.tradeIdGenerator = Objects.requireNonNull(tradeIdGenerator, "tradeIdGenerator");
+        this.instruments = Objects.requireNonNull(instruments, "instruments");
+        this.events = Objects.requireNonNull(events, "events");
+        this.concurrency = Objects.requireNonNull(concurrency, "concurrency");
+    }
+
+    /**
+     * One instrument's book, the owners of its resting orders, and the lane that hands them
+     * out. Grouped into one object because they are one thing: the state a single writer owns.
+     * Nothing in here may be touched except inside {@link BookLane#run}.
+     *
+     * <p>{@code owners} holds the owner of every order that can still be filled, so a resting
+     * order's owner is known when a later aggressor fills it. An entry is dropped as soon as
+     * its order leaves the book, so it is bounded by resting orders rather than by every order
+     * ever submitted.
+     */
+    private record InstrumentLane(OrderBook book, Map<OrderId, CounterpartyId> owners,
+                                  BookLane lane) {
+
+        static InstrumentLane of(InstrumentId instrumentId, BookConcurrency concurrency) {
+            return new InstrumentLane(new OrderBook(instrumentId), new HashMap<>(),
+                    concurrency.laneFor(instrumentId));
+        }
+    }
+
+    /**
+     * Matches {@code instruction} against its instrument's book and returns the trades.
+     *
+     * <p>Not synchronized: exclusivity is per book, not per venue, so two instruments never
+     * wait for each other. Everything that touches a book happens inside that book's
+     * {@link BookLane} - either this thread under a lock, or the thread that owns the book,
+     * depending on {@link BookConcurrency}. Unserialised, two threads matching at once
+     * over-filled a resting order under test, which is why the lane exists at all.
      */
     @Override
-    public synchronized List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
+    public List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
         if (!(instruction instanceof OrderBookInstruction obi)) {
             throw new IllegalArgumentException(
                     "OrderBookVenue only executes OrderBookInstruction, but received "
@@ -111,19 +144,35 @@ public final class OrderBookVenue implements ExecutionVenue {
         }
         Currency currency = instrument.currency();
 
+        // Minted outside the lane: the generator is atomic, and an id is not book state.
         OrderId orderId = orderIdGenerator.next();
         Order order = new Order(orderId, obi.instrumentId(), obi.side(), obi.type(),
                 obi.limitPrice(), obi.quantity(), obi.timeInForce(), obi.participant());
-        owners.put(orderId, obi.participant());
 
-        OrderBook book = books.computeIfAbsent(obi.instrumentId(), OrderBook::new);
+        InstrumentLane instrumentLane = laneFor(obi.instrumentId());
+        return instrumentLane.lane().run(
+                () -> match(instrumentLane, order, obi.participant(), currency, clock));
+    }
+
+    /**
+     * Everything that touches the book. Runs with exclusive access to {@code instrumentLane} -
+     * on the calling thread or on the book's own writer thread, which is the only difference
+     * between the two {@link BookConcurrency} choices.
+     */
+    private List<Trade> match(InstrumentLane instrumentLane, Order order,
+                              CounterpartyId participant, Currency currency, SimulationClock clock) {
+        OrderBook book = instrumentLane.book();
+        Map<OrderId, CounterpartyId> owners = instrumentLane.owners();
+        owners.put(order.id(), participant);
+
         MatchResult result = book.submit(order);
 
         List<Trade> trades = new ArrayList<>();
         for (Fill fill : result.fills()) {
-            trades.add(tradeFor(fill, fill.aggressorSide(), fill.aggressingOrderId(), currency, clock));
+            trades.add(tradeFor(owners, fill, fill.aggressorSide(), fill.aggressingOrderId(),
+                    currency, clock));
             Side restingSide = fill.aggressorSide().isBuy() ? Side.SELL : Side.BUY;
-            trades.add(tradeFor(fill, restingSide, fill.restingOrderId(), currency, clock));
+            trades.add(tradeFor(owners, fill, restingSide, fill.restingOrderId(), currency, clock));
         }
 
         // Owners are needed only while an order can still be filled. Checked after the trades
@@ -133,25 +182,46 @@ public final class OrderBookVenue implements ExecutionVenue {
                 owners.remove(fill.restingOrderId());
             }
         }
-        if (!book.contains(orderId)) {
-            owners.remove(orderId);
+        if (!book.contains(order.id())) {
+            owners.remove(order.id());
         }
 
-        // Published while still holding the venue lock, so subscribers see executions in the
-        // order the book actually matched them - a blotter or audit feed that received them
-        // reordered would be recording a history that never happened. The cost is that a
-        // synchronous subscriber runs inside the lock and holds up other callers; that is
-        // exactly what AsynchronousEventBus is for, and it is why this loop does no work of
-        // its own beyond announcing.
+        // Published while this book is still exclusively held, so subscribers see executions
+        // in the order the book actually matched them - a blotter or audit feed that received
+        // them reordered would be recording a history that never happened. The cost is that a
+        // synchronous subscriber runs inside the lane and holds up the next caller for this
+        // instrument; that is exactly what AsynchronousEventBus is for, and it is why this
+        // loop does no work of its own beyond announcing.
         for (Trade trade : trades) {
             events.publish(new TradeExecuted(trade));
         }
         return List.copyOf(trades);
     }
 
-    /** How many orders' owners are held. Package-private, for tests of boundedness. */
-    synchronized int trackedOwnerCount() {
-        return owners.size();
+    private InstrumentLane laneFor(InstrumentId instrumentId) {
+        return lanes.computeIfAbsent(instrumentId, id -> InstrumentLane.of(id, concurrency));
+    }
+
+    /**
+     * Releases every book's lane. Only {@link BookConcurrency#THREAD_PER_BOOK} owns anything
+     * to release; on the default venue this does nothing, which is why callers that never
+     * asked for threads have never had to call it.
+     *
+     * <p>The books themselves are left as they are. This ends who may touch them, not what
+     * they hold - a closed venue is one nothing more can be traded on, not one whose resting
+     * orders were silently cancelled.
+     */
+    @Override
+    public void close() {
+        lanes.values().forEach(instrumentLane -> instrumentLane.lane().close());
+    }
+
+    /** How many orders' owners are held, across every book. For tests of boundedness. */
+    int trackedOwnerCount() {
+        return lanes.values().stream()
+                .mapToInt(instrumentLane ->
+                        instrumentLane.lane().run(() -> instrumentLane.owners().size()))
+                .sum();
     }
 
     /**
@@ -159,8 +229,8 @@ public final class OrderBookVenue implements ExecutionVenue {
      * side of the trade (not necessarily the fill's aggressor side), which is what decides
      * the sign of {@code delta} and {@code consideration}.
      */
-    private Trade tradeFor(Fill fill, Side side, OrderId orderId, Currency currency,
-                           SimulationClock clock) {
+    private Trade tradeFor(Map<OrderId, CounterpartyId> owners, Fill fill, Side side,
+                           OrderId orderId, Currency currency, SimulationClock clock) {
         CounterpartyId owner = owners.get(orderId);
         long signedQuantity = side.isBuy() ? fill.quantity() : -fill.quantity();
         Quantity delta = Quantity.of(signedQuantity);

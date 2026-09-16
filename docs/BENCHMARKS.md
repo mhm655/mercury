@@ -142,7 +142,9 @@ comparison here is against the naive implementation, not against LMAX.
 
 **Single-threaded throughout.** The concurrency model is single-writer per book (§5.6), so
 these figures are the per-book ceiling. Parallelism comes from running many instruments'
-books at once, which is measured at M13.
+books at once - measured in section 6, which confirms the spread across books and finds the
+per-book ownership model costing more than it returns while callers still wait for their
+trades.
 
 ---
 
@@ -217,3 +219,56 @@ speed, and nothing in Mercury yet needs VaR faster than 60 ms.
 
 For a VaR run on this machine, **4 workers is the useful maximum**. A 12-thread pool buys
 nothing over it.
+
+---
+
+## 6. Venue concurrency: books in parallel, and the handoff that did not pay (M13)
+
+`VenueConcurrencyBenchmark`, raw results in
+[`benchmarks/m13-venue-concurrency.json`](benchmarks/m13-venue-concurrency.json). Twelve caller
+threads, each pinned to one instrument, submitting a crossing sell/buy pair so the book stays
+shallow. Throughput in orders per millisecond, higher is better.
+
+| Books | `INLINE` (ops/ms) | `THREAD_PER_BOOK` (ops/ms) |
+|---:|---:|---:|
+| 1 | 900.7 ± 29.7 | 525.8 ± 64.9 |
+| 12 | **2948.3 ± 181.8** | 783.2 ± 44.6 |
+| gain from spreading | **3.27×** | 1.49× |
+
+### The claim that held
+
+Section 4 said parallelism comes from running many instruments' books at once. It does:
+spreading the same twelve callers over twelve books instead of one is **3.27× the throughput**
+with no change to the matching engine at all. One book is a queue by definition - every caller
+wants the same exclusive state - and twelve books are twelve independent queues.
+
+The gain is 3.27×, not 12×, on a 6-core machine running 12 caller threads. Matching is
+microseconds of work between allocations, so callers spend much of their time contending for
+memory rather than for books - the same allocation ceiling section 5 found for VaR.
+
+### The claim that did not: single-writer was slower, everywhere
+
+§5.6 a) describes the LMAX-style design - each book owned by one thread, fed from a command
+queue - as *faster* than locking the structure, because the data is never shared. Measured
+here, `THREAD_PER_BOOK` is **1.7× slower on one book and 3.8× slower on twelve**.
+
+The reason is in this implementation rather than in the idea. `OrderBookVenue.execute` returns
+the trades it produced, so a caller submits a command and then **blocks for the result**. Per
+order that adds an enqueue, a park, a wake-up on the writer thread, and a hand-back through a
+future: at twelve books, 0.34 µs per order inline against 1.28 µs threaded, so roughly **0.9 µs
+of pure handoff** around a matching operation that is itself faster than that. Twelve writer
+threads on top of twelve caller threads also oversubscribes a 12-thread CPU by 2×, which the
+inline version never does.
+
+What LMAX actually buys requires the caller *not* to wait: submissions are fire-and-forget, the
+writer batches whatever has accumulated, and executions come back as events rather than as
+return values - and its queue busy-spins rather than parking, which is what makes the handoff
+cost tens of nanoseconds instead of a microsecond. Mercury has the event half of that (M13's
+`EventBus`) but not the submission half: `ExecutionVenue.execute` is synchronous by contract,
+and every caller in the codebase uses its return value.
+
+**So `INLINE` stays the default**, and this is a measurement rather than an opinion.
+`THREAD_PER_BOOK` earns its place as the thing that makes the single-writer property real -
+one book, one owner, a command log, and deterministic replay - which is why it is built and
+tested; it does not currently earn its place on throughput. Closing that gap means an
+asynchronous submission path, not a faster queue.
