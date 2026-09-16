@@ -12,13 +12,16 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.SynchronousEventBus;
 import com.mercury.instrument.FxForward;
 import com.mercury.instrument.Stock;
 import com.mercury.matching.Side;
 import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.trade.Trade;
+import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -235,5 +238,37 @@ class OrderBookVenueTest {
         assertThatThrownBy(() -> venue.execute(otc, CLOCK))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("OrderBookInstruction");
+    }
+
+    @Test
+    void everyTradeItMintsIsPublished() {
+        // Both sides of the fill, so a subscriber sees the market maker's trade as well as
+        // ours - which is why LedgerKeeper filters by owner rather than booking everything.
+        SynchronousEventBus bus = new SynchronousEventBus();
+        List<TradeExecuted> announced = new ArrayList<>();
+        bus.subscribe(TradeExecuted.class, announced::add);
+        OrderBookVenue venue = new OrderBookVenue(new TradeIdGenerator("TRD-"),
+                InstrumentCatalog.of(Stock.of("AAPL", Currency.USD)), bus);
+
+        venue.execute(OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 100, SELLER), CLOCK);
+        List<Trade> trades = venue.execute(
+                OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK);
+
+        assertThat(announced).extracting(TradeExecuted::trade).containsExactlyElementsOf(trades);
+        assertThat(announced).extracting(event -> event.trade().owner())
+                .containsExactlyInAnyOrder(BUYER, SELLER);
+    }
+
+    @Test
+    void anOrderThatOnlyRestsPublishesNothing() {
+        SynchronousEventBus bus = new SynchronousEventBus();
+        List<TradeExecuted> announced = new ArrayList<>();
+        bus.subscribe(TradeExecuted.class, announced::add);
+        OrderBookVenue venue = new OrderBookVenue(new TradeIdGenerator("TRD-"),
+                InstrumentCatalog.of(Stock.of("AAPL", Currency.USD)), bus);
+
+        venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK);
+
+        assertThat(announced).isEmpty();
     }
 }

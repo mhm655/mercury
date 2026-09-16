@@ -8,6 +8,7 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.EventBus;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.matching.Fill;
 import com.mercury.matching.MatchResult;
@@ -16,6 +17,7 @@ import com.mercury.matching.OrderBook;
 import com.mercury.matching.Side;
 import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.trade.Trade;
+import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -55,6 +57,7 @@ public final class OrderBookVenue implements ExecutionVenue {
     private final OrderIdGenerator orderIdGenerator = new OrderIdGenerator("OB-");
     private final TradeIdGenerator tradeIdGenerator;
     private final InstrumentCatalog instruments;
+    private final EventBus events;
     private final Map<InstrumentId, OrderBook> books = new HashMap<>();
 
     /**
@@ -64,9 +67,21 @@ public final class OrderBookVenue implements ExecutionVenue {
      */
     private final Map<OrderId, CounterpartyId> owners = new HashMap<>();
 
+    /** A venue nothing listens to; every execution is still returned to the caller. */
     public OrderBookVenue(TradeIdGenerator tradeIdGenerator, InstrumentCatalog instruments) {
+        this(tradeIdGenerator, instruments, EventBus.ignoring());
+    }
+
+    /**
+     * @param events every {@link Trade} this venue mints is published here as a
+     *               {@link TradeExecuted}, both sides of every fill - see
+     *               {@code LedgerKeeper} for why a subscriber must filter by owner
+     */
+    public OrderBookVenue(TradeIdGenerator tradeIdGenerator, InstrumentCatalog instruments,
+                          EventBus events) {
         this.tradeIdGenerator = Objects.requireNonNull(tradeIdGenerator, "tradeIdGenerator");
         this.instruments = Objects.requireNonNull(instruments, "instruments");
+        this.events = Objects.requireNonNull(events, "events");
     }
 
     /**
@@ -120,6 +135,16 @@ public final class OrderBookVenue implements ExecutionVenue {
         }
         if (!book.contains(orderId)) {
             owners.remove(orderId);
+        }
+
+        // Published while still holding the venue lock, so subscribers see executions in the
+        // order the book actually matched them - a blotter or audit feed that received them
+        // reordered would be recording a history that never happened. The cost is that a
+        // synchronous subscriber runs inside the lock and holds up other callers; that is
+        // exactly what AsynchronousEventBus is for, and it is why this loop does no work of
+        // its own beyond announcing.
+        for (Trade trade : trades) {
+            events.publish(new TradeExecuted(trade));
         }
         return List.copyOf(trades);
     }

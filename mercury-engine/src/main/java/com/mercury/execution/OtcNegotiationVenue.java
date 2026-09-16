@@ -8,6 +8,7 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.EventBus;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.InstrumentCatalog;
@@ -17,6 +18,7 @@ import com.mercury.risk.LimitCheckResult;
 import com.mercury.risk.RiskLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
+import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.util.HashMap;
 import java.util.List;
@@ -104,6 +106,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     private final CounterpartyId ownBook;
     private final CounterpartyDirectory counterparties;
     private final RiskLimit riskLimit;
+    private final EventBus events;
 
     /**
      * Guards the two maps below. A credit check is read-check-commit: two negotiations
@@ -122,10 +125,24 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
      */
     private final Map<TradeId, RecordedExposure> exposureAdded = new HashMap<>();
 
+    /** A venue nothing listens to; every execution is still returned to the caller. */
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
                                CounterpartyId ownBook, CounterpartyDirectory counterparties,
                                RiskLimit riskLimit) {
+        this(pricingService, market, instruments, tradeIdGenerator, ownBook, counterparties,
+                riskLimit, EventBus.ignoring());
+    }
+
+    /**
+     * @param events every executed negotiation is published here as a {@link TradeExecuted};
+     *               a rejected one publishes nothing, because nothing executed
+     */
+    public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
+                               InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
+                               CounterpartyId ownBook, CounterpartyDirectory counterparties,
+                               RiskLimit riskLimit, EventBus events) {
+        this.events = Objects.requireNonNull(events, "events");
         this.pricingService = Objects.requireNonNull(pricingService, "pricingService");
         this.market = Objects.requireNonNull(market, "market");
         this.instruments = Objects.requireNonNull(instruments, "instruments");
@@ -212,6 +229,11 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
 
             exposureByCounterparty.put(counterparty.id(), projectedExposure);
             exposureAdded.put(trade.id(), new RecordedExposure(trade, counterparty.id(), tradeExposure));
+
+            // Announced under the same lock that committed the exposure, so a subscriber can
+            // never see a trade the venue has not yet counted against its counterparty's
+            // limit. A rejected negotiation publishes nothing: nothing executed.
+            events.publish(new TradeExecuted(trade));
             return NegotiationResult.executed(trade);
         }
     }

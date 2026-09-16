@@ -16,12 +16,15 @@ import com.mercury.execution.OrderBookVenue;
 import com.mercury.execution.OtcInstruction;
 import com.mercury.execution.OtcNegotiationVenue;
 import com.mercury.execution.TradeIdGenerator;
+import com.mercury.event.EventBus;
+import com.mercury.event.SynchronousEventBus;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.marketdata.Scenario;
 import com.mercury.matching.Side;
 import com.mercury.portfolio.CashAccount;
 import com.mercury.portfolio.CostBasisMethod;
 import com.mercury.portfolio.InstrumentCatalog;
+import com.mercury.portfolio.LedgerKeeper;
 import com.mercury.portfolio.PnlStatement;
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioLedger;
@@ -33,8 +36,7 @@ import com.mercury.simulation.MonteCarloVaRCalculator;
 import com.mercury.trade.CreditLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
-import java.util.ArrayList;
-import java.util.List;
+import com.mercury.trade.TradeExecuted;
 import java.util.Locale;
 
 /**
@@ -65,39 +67,49 @@ public final class EndToEndDemo {
         MarketDataSnapshot market = DemoScenario.market();
         SimulationClock clock = SimulationClock.fixedAt(DemoScenario.VALUATION_DATE);
         TradeIdGenerator tradeIds = new TradeIdGenerator("TRD-");
+
+        // Nothing below books a trade by hand. The venues announce every execution on the bus;
+        // the keeper books the ones this book owns, and the printer shows them as they happen.
+        // Neither venue knows that a ledger exists, and the two subscribers do not know about
+        // each other - which is the whole point of section 6's Observer entry.
+        EventBus events = new SynchronousEventBus();
+        LedgerKeeper ourBook = new LedgerKeeper(MERCURY_BOOK, PortfolioLedger.opening(
+                PortfolioId.of("WALKTHROUGH"), Currency.USD, CostBasisMethod.FIRST_IN_FIRST_OUT,
+                CashAccount.of(Money.of("1000000.00", Currency.USD))));
+        events.subscribe(TradeExecuted.class, ourBook);
+        events.subscribe(TradeExecuted.class, EndToEndDemo::printIfOurs);
+
         OtcNegotiationVenue otcVenue = new OtcNegotiationVenue(DemoScenario.pricingService(), market,
                 catalog, tradeIds, MERCURY_BOOK,
                 CounterpartyDirectory.of(new Counterparty(ACME, "Acme Capital",
                         new CreditLimit(Money.of("1000000.00", Currency.USD)))),
-                new CounterpartyExposureLimit());
-        ExecutionRouter router = new ExecutionRouter(new OrderBookVenue(tradeIds, catalog), otcVenue);
-        List<Trade> ours = new ArrayList<>();
+                new CounterpartyExposureLimit(), events);
+        ExecutionRouter router = new ExecutionRouter(
+                new OrderBookVenue(tradeIds, catalog, events), otcVenue);
 
         heading("1. EXCHANGE-TRADED: THE BOOK LIFTS A MARKET MAKER'S OFFERS");
         router.execute(catalog.require(DemoScenario.AAPL), OrderBookInstruction.limit(
                 DemoScenario.AAPL, Side.SELL, Price.of("195.40"), 500, MARKET_MAKER), clock);
         router.execute(catalog.require(DemoScenario.MSFT), OrderBookInstruction.limit(
                 DemoScenario.MSFT, Side.SELL, Price.of("412.20"), 100, MARKET_MAKER), clock);
-        keepOurs(ours, router.execute(catalog.require(DemoScenario.AAPL), OrderBookInstruction.limit(
-                DemoScenario.AAPL, Side.BUY, Price.of("195.50"), 300, MERCURY_BOOK), clock));
-        keepOurs(ours, router.execute(catalog.require(DemoScenario.MSFT), OrderBookInstruction.market(
-                DemoScenario.MSFT, Side.BUY, 100, MERCURY_BOOK), clock));
+        router.execute(catalog.require(DemoScenario.AAPL), OrderBookInstruction.limit(
+                DemoScenario.AAPL, Side.BUY, Price.of("195.50"), 300, MERCURY_BOOK), clock);
+        router.execute(catalog.require(DemoScenario.MSFT), OrderBookInstruction.market(
+                DemoScenario.MSFT, Side.BUY, 100, MERCURY_BOOK), clock);
 
         heading("2. OVER THE COUNTER: A BOND FROM ACME, CHECKED AGAINST ITS CREDIT LIMIT");
-        NegotiationResult bond = otcVenue.negotiate(new OtcInstruction(
+        otcVenue.negotiate(new OtcInstruction(
                 DemoScenario.CORP_BOND, Side.BUY, Quantity.of(200), ACME, BasisPoints.of(10)), clock);
-        keepOurs(ours, bond.trades());
         NegotiationResult tooMuch = otcVenue.negotiate(new OtcInstruction(
                 DemoScenario.CORP_BOND, Side.BUY, Quantity.of(1000), ACME, BasisPoints.of(10)), clock);
         System.out.println("  1,000 more units: " + (tooMuch.isRejected() ? "rejected" : "executed"));
         tooMuch.breaches().forEach(breach -> System.out.println("  " + breach));
         System.out.println("  exposure to " + ACME + ": " + otcVenue.exposureTo(ACME));
 
-        heading("3. BOOKED: THOSE TRADES, AND ONLY THOSE, BECOME A LEDGER");
-        PortfolioLedger ledger = PortfolioLedger.opening(PortfolioId.of("WALKTHROUGH"), Currency.USD,
-                        CostBasisMethod.FIRST_IN_FIRST_OUT,
-                        CashAccount.of(Money.of("1000000.00", Currency.USD)))
-                .bookAll(ours);
+        heading("3. BOOKED: THOSE TRADES, AND ONLY THOSE, BECAME A LEDGER");
+        // Already done, event by event, as each execution above happened - the market maker's
+        // side of every fill reached the same bus and was ignored, because it is not our book.
+        PortfolioLedger ledger = ourBook.ledger();
         for (var instrument : ledger.instruments()) {
             System.out.println("  " + pad(instrument.value()) + ledger.quantityOf(instrument)
                     + " at a cost of " + ledger.costBasisOf(instrument));
@@ -130,15 +142,17 @@ public final class EndToEndDemo {
                 + var.valueAtRiskConfidenceInterval() + " (20,000 paths, seed " + var.seed() + ")");
     }
 
-    /** Only the book's own side of each execution belongs in its ledger. */
-    private static void keepOurs(List<Trade> ours, List<Trade> executed) {
-        for (Trade trade : executed) {
-            if (trade.owner().equals(MERCURY_BOOK)) {
-                ours.add(trade);
-                System.out.println("  " + trade.id() + " " + trade.instrumentId() + " " + trade.delta()
-                        + " for " + trade.consideration()
-                        + trade.counterparty().map(c -> " vs " + c).orElse(" on the order book"));
-            }
+    /**
+     * The second subscriber: prints our own executions as they happen. Separate from the
+     * keeper on purpose - reporting and booking are different jobs, and on a bus neither has
+     * to know the other subscribed.
+     */
+    private static void printIfOurs(TradeExecuted event) {
+        Trade trade = event.trade();
+        if (trade.owner().equals(MERCURY_BOOK)) {
+            System.out.println("  " + trade.id() + " " + trade.instrumentId() + " " + trade.delta()
+                    + " for " + trade.consideration()
+                    + trade.counterparty().map(c -> " vs " + c).orElse(" on the order book"));
         }
     }
 

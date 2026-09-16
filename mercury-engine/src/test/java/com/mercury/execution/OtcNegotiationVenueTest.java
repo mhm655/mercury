@@ -12,6 +12,7 @@ import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.SynchronousEventBus;
 import com.mercury.instrument.FinancialInstrument;
 import com.mercury.instrument.TradabilityProfile;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -26,8 +27,10 @@ import com.mercury.risk.RiskLimit;
 import com.mercury.trade.CreditLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
+import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -532,5 +535,30 @@ class OtcNegotiationVenueTest {
                 .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
         venue.release(settled);
         assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+    }
+
+    @Test
+    void anExecutedNegotiationIsPublishedAndARejectedOneIsNot() {
+        // A breach is not an execution: publishing one would put a trade that never happened
+        // into every subscriber's ledger, which is the whole reason the check comes first.
+        SynchronousEventBus bus = new SynchronousEventBus();
+        List<TradeExecuted> announced = new ArrayList<>();
+        bus.subscribe(TradeExecuted.class, announced::add);
+        PricingService pricingService = PricingService.builder().register(new FixedPriceModel()).build();
+        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
+        OtcNegotiationVenue venue = new OtcNegotiationVenue(pricingService, market,
+                InstrumentCatalog.of(INSTRUMENT), new TradeIdGenerator("TRD-"), OWN_BOOK,
+                CounterpartyDirectory.of(new Counterparty(COUNTERPARTY, "Acme Capital",
+                        new CreditLimit(Money.of("150000.00", Currency.USD)))),
+                new CounterpartyExposureLimit(), bus);
+
+        NegotiationResult executed = venue.negotiate(new OtcInstruction(
+                INSTRUMENT.id(), Side.BUY, Quantity.of(100), COUNTERPARTY, BasisPoints.of(10)), CLOCK);
+        NegotiationResult rejected = venue.negotiate(new OtcInstruction(
+                INSTRUMENT.id(), Side.BUY, Quantity.of(10_000), COUNTERPARTY, BasisPoints.of(10)), CLOCK);
+
+        assertThat(rejected.isRejected()).isTrue();
+        assertThat(announced).extracting(TradeExecuted::trade)
+                .containsExactlyElementsOf(executed.trades());
     }
 }
