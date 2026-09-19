@@ -154,8 +154,10 @@ it runs does not.)*
 
 See **[docs/DESIGN_PROPOSAL.md](docs/DESIGN_PROPOSAL.md)** for the full design: domain
 model, architecture, the design problems that drive it, justified pattern choices,
-anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
-[ADRs](docs/adr) as they are made, not reconstructed afterwards.
+anti-patterns being avoided, and the delivery roadmap. **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+is the map of the finished thing instead - modules, package layers and the two or three
+mechanisms that do most of the work, each pinned to the test that keeps it true. Decisions are
+recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 
 | Milestone | Status |
 |---|---|
@@ -176,7 +178,7 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M12 — Monte Carlo, single-threaded: GBM paths, VaR + Expected Shortfall, convergence tests | ✅ complete |
 | M13 — Concurrency: parallel Monte Carlo, event bus, single-writer books, scaling benchmarks | ✅ complete |
 | M14 — Harness: the golden-master book trades through the real venues, not by hand | ✅ complete |
-| M15 — Extensibility proof & architecture documentation | ⏳ extensibility proof done; diagrams and write-up pending |
+| M15 — Extensibility proof & architecture documentation | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -328,9 +330,6 @@ only here.
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **Architecture documentation** (M15). The sixth-instrument commit exists
-  ([docs/EXTENSIBILITY.md](docs/EXTENSIBILITY.md)); the diagrams and the architecture write-up
-  it is meant to anchor do not.
 - **An asynchronous submission path** for the matching engine. M13 measured why single-writer
   books cost more than they return while every caller waits for its trades — see
   [KNOWN_GAPS](docs/KNOWN_GAPS.md). The event half is built; the fire-and-forget half would

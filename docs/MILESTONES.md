@@ -7,6 +7,36 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M15 complete** — **architecture documentation**, the second half of the pair §7 of the design
+proposal calls the highest-value items in the project. The sixth-instrument commit
+([docs/EXTENSIBILITY.md](EXTENSIBILITY.md)) shipped early, folded into the M6/M7 window rather
+than waiting for its named milestone, because nothing about proving the registry open for
+extension depended on anything M8 through M14 built. What M15 actually closes is the second
+half: a reader had the design proposal's argument for the architecture and the milestone log's
+account of what got built, and nothing showing the two agree with the code as it stands today.
+
+[docs/ARCHITECTURE.md](ARCHITECTURE.md) is that document, built the way the rest of this
+project's evidence is built - checked, not asserted. Its package-dependency diagram is not a
+redrawing of `docs/DESIGN_PROPOSAL.md` §4.1's intended layering; it is `grep -rh "^import
+com.mercury\." mercury-engine/src/main/java/com/mercury/<package>/*.java` against every
+package, one at a time, so an edge on the page is an edge that actually exists - the same
+discipline `LayeringRulesTest` already applies at the package level, applied for the first time
+to the documentation describing it.
+
+The two disagree, and the disagreement is worth recording rather than quietly resolving.
+§4.1 draws ports and adapters: a central "domain" declares interfaces
+(`PricingModel`, `EventBus`, `RiskLimit`) that pricing, risk and matching implement from
+outside, so dependencies point *inward* toward the domain. The code that actually shipped never
+built that inversion - there is no domain-owned `PricingModel` port with `pricing` as one
+adapter among several; `com.mercury.pricing` owns the interface itself, and `portfolio` depends
+on it directly, the same ordinary direction `execution` depends on `risk` and `risk` depends on
+`portfolio`. Dependencies still run one way and still avoid cycles - `LayeringRulesTest` would
+fail the build otherwise - they just never inverted at the package boundary the way §4.1
+proposed. The type-keyed registry in `pricing` (§5.1) delivered the actual goal a ports-and-
+adapters shape was reaching for - swapping an implementation without touching a caller - by a
+more direct route, which is likely why nobody noticed the inversion itself never got built:
+the property it was meant to buy showed up regardless.
+
 **M14 complete** — **the golden-master book trades itself.** `DemoScenario.ledger()` called
 `PortfolioLedger.buy`/`sell`/`trade` directly through M13: a parallel set of positions that
 happened to match what a venue would have produced, never actually produced by one. It now
