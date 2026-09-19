@@ -44,6 +44,17 @@ order-book fill. That owner filter had been a hand-written loop inside the walkt
 a rule living in a demo instead of in the engine. The walkthrough now books nothing by hand,
 subscribes a keeper and a printer, and prints exactly what it printed before.
 
+*(A post-ship review found that "synchronous is the default, deliberately" had never been
+measured against the alternative it was a default relative to. `docs/BENCHMARKS.md` §7 now
+does: against a subscriber costing a few milliseconds, `AsynchronousEventBus` is roughly
+17,000× faster on the publisher's own latency, because its cost is a queue insertion regardless
+of the subscriber, while the synchronous bus's cost *is* the subscriber's. Against a subscriber
+as cheap as `LedgerKeeper`'s, synchronous wins instead - decoupling costs more than the work
+being deferred. The same run also turned `KNOWN_GAPS.md`'s "nothing produces faster than the
+dispatcher consumes" into a reproducible failure: a benchmark publishing at that rate overflowed
+the unbounded queue and timed out draining it on close. The claim that no *production* caller
+does this yet still holds; the claim that it couldn't be shown did not.)*
+
 **Single-writer books, opt-in, and the prediction that failed.** Each instrument's book, the
 owners of its resting orders and the lane guarding them are one object with one writer.
 `BookConcurrency` chooses who that writer is: `INLINE` matches on the calling thread under a

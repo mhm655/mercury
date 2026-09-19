@@ -272,3 +272,46 @@ and every caller in the codebase uses its return value.
 one book, one owner, a command log, and deterministic replay - which is why it is built and
 tested; it does not currently earn its place on throughput. Closing that gap means an
 asynchronous submission path, not a faster queue.
+
+## 7. Event bus: what `publish` costs, synchronous against asynchronous (M13)
+
+`EventBusPublishBenchmark`, raw results in
+[`benchmarks/m13-eventbus-publish.json`](benchmarks/m13-eventbus-publish.json). Average time to
+call `publish`, one subscriber, two subscriber shapes: `FAST` (roughly what `LedgerKeeper.accept`
+costs - book one trade, nothing else) and `SLOW` (`Blackhole.consumeCPU` calibrated to a few
+milliseconds, standing in for the "subscriber that revalues a book in milliseconds"
+`AsynchronousEventBus`'s own javadoc names as the reason it exists - no subscriber in this
+codebase is actually that slow yet). Lower is better; this is the cost paid by the thread that
+calls `publish`, not the cost of delivery.
+
+| Subscriber | `SynchronousEventBus` | `AsynchronousEventBus` |
+|---|---:|---:|
+| `FAST` | 0.031 ± 0.004 µs | 0.237 ± 0.274 µs |
+| `SLOW` | 4068 ± 1475 µs | 0.238 ± 1.057 µs |
+
+### The claim that held
+
+The synchronous bus's cost is the subscriber's cost, full stop - 0.03 µs for a cheap one, four
+milliseconds for a slow one, because `publish` does not return until the subscriber does.
+The asynchronous bus's cost is flat at about a quarter of a microsecond **regardless of what the
+subscriber does**, because that number is only ever a queue insertion. Against a slow subscriber,
+decoupling the publisher is worth roughly **17,000×** on the publisher's own latency - this is
+the number the README's dead-weight table asserted existed without ever showing it.
+
+Against a fast subscriber, asynchronous is *worse* - about 8× slower than calling the subscriber
+directly - because a queue insertion and a context switch to a dispatcher thread cost more than
+the work being deferred. `SynchronousEventBus` is the right default not only because async is a
+classic mistake for tests and demos (§5.6 c)), but because for every subscriber actually wired up
+in this codebase today (`LedgerKeeper`, a `println`), synchronous is also the *faster* choice.
+
+### The claim that did not: an unbounded queue against a slow subscriber is a real gap, not a hypothetical one
+
+One measurement run of `ASYNCHRONOUS` / `SLOW` failed outright: JMH's per-iteration timeout fired
+while `AsynchronousEventBus.close()` was blocked draining the queue, because a 2-second
+measurement window at ~0.24 µs per `publish` against a ~4 ms subscriber enqueues far more work
+than the subscriber can ever clear. `AsynchronousEventBus`'s own javadoc already names this: "a
+genuinely faster producer than consumer would need a bounded queue and a stated
+drop-or-block policy; nothing here produces at that rate." This benchmark is that producer -
+manufactured to demonstrate the gap, not evidence it occurs in production - and it turned the
+javadoc's hedge into a reproducible failure inside two seconds. Recorded in
+[`KNOWN_GAPS.md`](KNOWN_GAPS.md) rather than left for the next person to rediscover by accident.

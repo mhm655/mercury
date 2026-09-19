@@ -1,0 +1,223 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.mercury.benchmarks.EventBusPublishBenchmark.publish",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "C:\\Users\\user\\tools\\jdk-21\\bin\\java.exe",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "21.0.12.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.12.1+9-LTS",
+        "warmupIterations" : 3,
+        "warmupTime" : "2 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 5,
+        "measurementTime" : "2 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "busType" : "SYNCHRONOUS",
+            "subscriberCost" : "FAST"
+        },
+        "primaryMetric" : {
+            "score" : 0.031065132467373642,
+            "scoreError" : 0.0038641806547544885,
+            "scoreConfidence" : [
+                0.027200951812619154,
+                0.03492931312212813
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.029485722545585395,
+                "50.0" : 0.03135072106971228,
+                "90.0" : 0.032139981268753524,
+                "95.0" : 0.032139981268753524,
+                "99.0" : 0.032139981268753524,
+                "99.9" : 0.032139981268753524,
+                "99.99" : 0.032139981268753524,
+                "99.999" : 0.032139981268753524,
+                "99.9999" : 0.032139981268753524,
+                "100.0" : 0.032139981268753524
+            },
+            "scoreUnit" : "us/op",
+            "rawData" : [
+                [
+                    0.029485722545585395,
+                    0.0315439437955433,
+                    0.030805293657273684,
+                    0.032139981268753524,
+                    0.03135072106971228
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.mercury.benchmarks.EventBusPublishBenchmark.publish",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "C:\\Users\\user\\tools\\jdk-21\\bin\\java.exe",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "21.0.12.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.12.1+9-LTS",
+        "warmupIterations" : 3,
+        "warmupTime" : "2 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 5,
+        "measurementTime" : "2 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "busType" : "SYNCHRONOUS",
+            "subscriberCost" : "SLOW"
+        },
+        "primaryMetric" : {
+            "score" : 4068.1874000413673,
+            "scoreError" : 1474.6847191288698,
+            "scoreConfidence" : [
+                2593.5026809124975,
+                5542.872119170237
+            ],
+            "scorePercentiles" : {
+                "0.0" : 3752.5608938547484,
+                "50.0" : 3943.3365422396855,
+                "90.0" : 4734.816705882353,
+                "95.0" : 4734.816705882353,
+                "99.0" : 4734.816705882353,
+                "99.9" : 4734.816705882353,
+                "99.99" : 4734.816705882353,
+                "99.999" : 4734.816705882353,
+                "99.9999" : 4734.816705882353,
+                "100.0" : 4734.816705882353
+            },
+            "scoreUnit" : "us/op",
+            "rawData" : [
+                [
+                    4734.816705882353,
+                    3752.5608938547484,
+                    3927.7970645792566,
+                    3982.425793650794,
+                    3943.3365422396855
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.mercury.benchmarks.EventBusPublishBenchmark.publish",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "C:\\Users\\user\\tools\\jdk-21\\bin\\java.exe",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "21.0.12.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.12.1+9-LTS",
+        "warmupIterations" : 3,
+        "warmupTime" : "2 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 5,
+        "measurementTime" : "2 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "busType" : "ASYNCHRONOUS",
+            "subscriberCost" : "FAST"
+        },
+        "primaryMetric" : {
+            "score" : 0.2367745244405576,
+            "scoreError" : 0.27402315744511013,
+            "scoreConfidence" : [
+                -0.03724863300455253,
+                0.5107976818856678
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.1537755501563447,
+                "50.0" : 0.22165297868548264,
+                "90.0" : 0.34860923904394114,
+                "95.0" : 0.34860923904394114,
+                "99.0" : 0.34860923904394114,
+                "99.9" : 0.34860923904394114,
+                "99.99" : 0.34860923904394114,
+                "99.999" : 0.34860923904394114,
+                "99.9999" : 0.34860923904394114,
+                "100.0" : 0.34860923904394114
+            },
+            "scoreUnit" : "us/op",
+            "rawData" : [
+                [
+                    0.22165297868548264,
+                    0.1537755501563447,
+                    0.21351431097789816,
+                    0.2463205433391214,
+                    0.34860923904394114
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.mercury.benchmarks.EventBusPublishBenchmark.publish",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "C:\\Users\\user\\tools\\jdk-21\\bin\\java.exe",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "21.0.12.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.12.1+9-LTS",
+        "warmupIterations" : 3,
+        "warmupTime" : "2 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 5,
+        "measurementTime" : "2 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "busType" : "ASYNCHRONOUS",
+            "subscriberCost" : "SLOW"
+        },
+        "primaryMetric" : {
+            "score" : 0.23848630252726313,
+            "scoreError" : 1.0573476380346887,
+            "scoreConfidence" : [
+                -0.8188613355074256,
+                1.295833940561952
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.09384669969514255,
+                "50.0" : 0.23194008714373093,
+                "90.0" : 0.3962183361264482,
+                "95.0" : 0.3962183361264482,
+                "99.0" : 0.3962183361264482,
+                "99.9" : 0.3962183361264482,
+                "99.99" : 0.3962183361264482,
+                "99.999" : 0.3962183361264482,
+                "99.9999" : 0.3962183361264482,
+                "100.0" : 0.3962183361264482
+            },
+            "scoreUnit" : "us/op",
+            "rawData" : [
+                [
+                    0.09384669969514255,
+                    0.3962183361264482,
+                    0.36315443693043925,
+                    0.1007257373570226
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+
