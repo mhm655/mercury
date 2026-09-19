@@ -316,13 +316,11 @@ public final class DemoScenario {
                 CashAccount.of(OPENING_CASH)));
         events.subscribe(TradeExecuted.class, keeper);
 
-        TradeIdGenerator tradeIds = new TradeIdGenerator("TRD-");
-        OrderBookVenue orderBook = new OrderBookVenue(tradeIds, catalog, events);
-        OtcNegotiationVenue otc = new OtcNegotiationVenue(pricingService(), market(), catalog,
-                tradeIds, MERCURY_BOOK, CounterpartyDirectory.of(new Counterparty(DEALER,
-                        "Demo Dealer", new CreditLimit(Money.of("10000000.00", Currency.USD)))),
-                new CounterpartyExposureLimit(), events);
-        ExecutionRouter router = new ExecutionRouter(orderBook, otc);
+        Venues venues = venues(catalog, MERCURY_BOOK, CounterpartyDirectory.of(new Counterparty(
+                DEALER, "Demo Dealer", new CreditLimit(Money.of("10000000.00", Currency.USD)))),
+                events);
+        ExecutionRouter router = venues.router();
+        OtcNegotiationVenue otc = venues.otc();
         SimulationClock.Advancing clock = SimulationClock.advancing(AAPL_BUY_DATE);
 
         cross(router, catalog, AAPL, Side.SELL, Price.of("180.00"), 1_200, clock);
@@ -350,6 +348,39 @@ public final class DemoScenario {
         cross(router, catalog, EUR_BOND, Side.SELL, Price.of("990.00"), 200, clock);
 
         return keeper.ledger();
+    }
+
+    /**
+     * The two venues every runnable in this module trades through, and the router that
+     * dispatches between them by {@code TradabilityProfile} - bundled together because every
+     * caller so far has needed at least two of the three: the router, for routed execution,
+     * and {@link #otc} directly, for the OTC-specific calls {@code ExecutionRouter} does not
+     * expose ({@code negotiate}, {@code exposureTo}, {@code release}).
+     *
+     * <p>Extracted at M14, once this became the third demo - after {@link EndToEndDemo} and
+     * {@link TradeLifecycleDemo} - to build one {@link OrderBookVenue}/{@link
+     * OtcNegotiationVenue}/{@link ExecutionRouter} triple from scratch by hand, sharing a
+     * {@link TradeIdGenerator} between the two venues so a CLOB trade and an OTC trade landing
+     * in the same ledger never collide on an id (see {@code docs/KNOWN_GAPS.md} G-1). The
+     * shape had been copied twice already with nothing catching the copies drifting apart;
+     * this codebase's own stated convention - extract on a confirmed second real user, not
+     * speculatively - was already past due by the time a third copy was about to be written.
+     */
+    public record Venues(OrderBookVenue orderBook, OtcNegotiationVenue otc, ExecutionRouter router) {
+    }
+
+    /**
+     * @param events every execution is published here; pass {@link EventBus#ignoring()} for a
+     *               caller that books trades from the returned list directly instead, the way
+     *               {@link TradeLifecycleDemo} does
+     */
+    public static Venues venues(InstrumentCatalog catalog, CounterpartyId ownBook,
+                                CounterpartyDirectory counterparties, EventBus events) {
+        TradeIdGenerator tradeIds = new TradeIdGenerator("TRD-");
+        OrderBookVenue orderBook = new OrderBookVenue(tradeIds, catalog, events);
+        OtcNegotiationVenue otc = new OtcNegotiationVenue(pricingService(), market(), catalog,
+                tradeIds, ownBook, counterparties, new CounterpartyExposureLimit(), events);
+        return new Venues(orderBook, otc, new ExecutionRouter(orderBook, otc));
     }
 
     /**

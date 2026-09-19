@@ -65,6 +65,23 @@ portfolio's quantities and the market (which is everything except cash and cost 
 byte-identical to M13; only what the book actually paid for what it holds changed, because
 that is the only thing this milestone touched.
 
+*(A post-ship review found two things worth fixing. First, a real performance regression:
+`DemoScenario.ledger()` went from a cheap immutable builder chain (tens of microseconds) to
+running actual order-book matching and OTC pricing (measured at roughly 30x slower per call,
+42µs to 1.3ms), and two call sites - `Main.printReport()` and `GoldenMasterTest.runScenario()` -
+still called it two or three times per invocation out of habit from when that cost nothing.
+Both now build the ledger once and derive everything else from it; report output is
+byte-identical, confirmed against the golden file. Second, a duplication this milestone made
+worse rather than better: `EndToEndDemo` and `TradeLifecycleDemo` already each built an
+`OrderBookVenue`/`OtcNegotiationVenue`/`ExecutionRouter` triple by hand, and M14 added a third
+copy in `DemoScenario.ledger()` instead of noticing the shape had already been copied once.
+Past this codebase's own stated threshold - extract on a confirmed second real user, not
+speculatively - the three call sites now share `DemoScenario.venues(...)`, which returns the
+two venues and the router together because every caller needs at least two of the three: the
+router for routed execution, and the OTC venue directly for `negotiate`/`exposureTo`/`release`,
+calls `ExecutionRouter` does not expose. All three demos' output is unchanged, confirmed by
+diffing `report`, `walkthrough`, `lifecycle`, `risk` and `montecarlo` before and after.)*
+
 **M13 complete** — **concurrency, chosen per component** rather than "add threads", and
 measured rather than assumed. Three pieces, and the measurements are the interesting part.
 

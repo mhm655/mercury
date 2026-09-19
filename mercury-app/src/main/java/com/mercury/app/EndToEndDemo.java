@@ -12,10 +12,8 @@ import com.mercury.execution.CounterpartyDirectory;
 import com.mercury.execution.ExecutionRouter;
 import com.mercury.execution.NegotiationResult;
 import com.mercury.execution.OrderBookInstruction;
-import com.mercury.execution.OrderBookVenue;
 import com.mercury.execution.OtcInstruction;
 import com.mercury.execution.OtcNegotiationVenue;
-import com.mercury.execution.TradeIdGenerator;
 import com.mercury.event.EventBus;
 import com.mercury.event.SynchronousEventBus;
 import com.mercury.marketdata.MarketDataSnapshot;
@@ -29,7 +27,6 @@ import com.mercury.portfolio.PnlStatement;
 import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
-import com.mercury.risk.CounterpartyExposureLimit;
 import com.mercury.risk.SensitivityCalculator;
 import com.mercury.simulation.MonteCarloRiskResult;
 import com.mercury.simulation.MonteCarloVaRCalculator;
@@ -66,7 +63,6 @@ public final class EndToEndDemo {
         InstrumentCatalog catalog = InstrumentCatalog.of(DemoScenario.instruments());
         MarketDataSnapshot market = DemoScenario.market();
         SimulationClock clock = SimulationClock.fixedAt(DemoScenario.VALUATION_DATE);
-        TradeIdGenerator tradeIds = new TradeIdGenerator("TRD-");
 
         // Nothing below books a trade by hand. The venues announce every execution on the bus;
         // the keeper books the ones this book owns, and the printer shows them as they happen.
@@ -79,13 +75,11 @@ public final class EndToEndDemo {
         events.subscribe(TradeExecuted.class, ourBook);
         events.subscribe(TradeExecuted.class, EndToEndDemo::printIfOurs);
 
-        OtcNegotiationVenue otcVenue = new OtcNegotiationVenue(DemoScenario.pricingService(), market,
-                catalog, tradeIds, MERCURY_BOOK,
+        DemoScenario.Venues venues = DemoScenario.venues(catalog, MERCURY_BOOK,
                 CounterpartyDirectory.of(new Counterparty(ACME, "Acme Capital",
-                        new CreditLimit(Money.of("1000000.00", Currency.USD)))),
-                new CounterpartyExposureLimit(), events);
-        ExecutionRouter router = new ExecutionRouter(
-                new OrderBookVenue(tradeIds, catalog, events), otcVenue);
+                        new CreditLimit(Money.of("1000000.00", Currency.USD)))), events);
+        ExecutionRouter router = venues.router();
+        OtcNegotiationVenue otcVenue = venues.otc();
 
         heading("1. EXCHANGE-TRADED: THE BOOK LIFTS A MARKET MAKER'S OFFERS");
         router.execute(catalog.require(DemoScenario.AAPL), OrderBookInstruction.limit(

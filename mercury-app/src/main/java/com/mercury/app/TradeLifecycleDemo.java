@@ -8,12 +8,11 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
+import com.mercury.event.EventBus;
 import com.mercury.execution.ExecutionRouter;
 import com.mercury.execution.OrderBookInstruction;
-import com.mercury.execution.OrderBookVenue;
 import com.mercury.execution.OtcInstruction;
 import com.mercury.execution.OtcNegotiationVenue;
-import com.mercury.execution.TradeIdGenerator;
 import com.mercury.matching.Fill;
 import com.mercury.matching.MatchResult;
 import com.mercury.matching.Order;
@@ -25,7 +24,6 @@ import com.mercury.portfolio.CashAccount;
 import com.mercury.portfolio.CostBasisMethod;
 import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.portfolio.PortfolioLedger;
-import com.mercury.risk.CounterpartyExposureLimit;
 import com.mercury.trade.CreditLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
@@ -65,17 +63,18 @@ public final class TradeLifecycleDemo {
     public static void main(String[] args) {
         InstrumentCatalog catalog = InstrumentCatalog.of(DemoScenario.instruments());
         SimulationClock clock = SimulationClock.fixedAt(DemoScenario.VALUATION_DATE);
-        TradeIdGenerator tradeIds = new TradeIdGenerator("TRD-");
         Counterparty acme = new Counterparty(ACME, "Acme Capital",
                 new CreditLimit(Money.of("50000000.00", Currency.USD)));
         Counterparty tinyLimit = new Counterparty(TINY_LIMIT, "Tiny Capital",
                 new CreditLimit(Money.of("5000.00", Currency.USD)));
         CounterpartyDirectory counterparties = CounterpartyDirectory.of(acme, tinyLimit);
-        OrderBookVenue orderBookVenue = new OrderBookVenue(tradeIds, catalog);
-        OtcNegotiationVenue otcVenue = new OtcNegotiationVenue(
-                DemoScenario.pricingService(), DemoScenario.market(), catalog, tradeIds, MERCURY_BOOK,
-                counterparties, new CounterpartyExposureLimit());
-        ExecutionRouter router = new ExecutionRouter(orderBookVenue, otcVenue);
+        // This demo books each trade from the list router.execute() returns, rather than
+        // subscribing to the bus the way EndToEndDemo and DemoScenario.ledger() do - so it
+        // passes EventBus.ignoring() rather than a bus with nothing to subscribe.
+        DemoScenario.Venues venues = DemoScenario.venues(catalog, MERCURY_BOOK, counterparties,
+                EventBus.ignoring());
+        ExecutionRouter router = venues.router();
+        OtcNegotiationVenue otcVenue = venues.otc();
 
         System.out.println("=".repeat(78));
         System.out.println("M8/M9 TRADE LIFECYCLE DEMO");
