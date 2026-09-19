@@ -7,6 +7,34 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M14 complete** — **the golden-master book trades itself.** `DemoScenario.ledger()` called
+`PortfolioLedger.buy`/`sell`/`trade` directly through M13: a parallel set of positions that
+happened to match what a venue would have produced, never actually produced by one. It now
+runs the same eight economic events as real instructions through the same
+`ExecutionRouter` every other demo in this codebase uses - a `SimulationClock.Advancing`
+moves the book's history forward one trade date at a time, a market maker rests at the exact
+price this scenario always used for the five exchange-traded legs, and a dealer is negotiated
+against, at zero spread, for the two options and the swap and forward. A `LedgerKeeper`
+subscribed to the trade bus assembles the ledger from whatever actually executed, exactly as
+`EndToEndDemo`'s book has since M8. The report downstream of this - the one in the README, the
+one the golden master pins - is now the output of a simulation rather than a fixture that
+looked like one.
+
+That forced an honest correction the parallel-positions version had been hiding.
+`OtcNegotiationVenue` does not accept a caller-supplied price; it prices the instrument itself
+and applies a spread. The swap and forward are deliberately struck off market - see M4's
+`payerSwap()` - so their true price at execution is not zero, and a real desk does not hand
+over an off-market instrument for nothing: it charges the value it is walking in with. Booking
+them at zero, as the hand-declared version did "because that is what they cost," was quietly
+wrong the whole time; the book was never actually given those trades for free, it was simply
+never asked to price them. Running them through the venue that does price them turned an
+invented free lunch into real cash paid, which is why this book's headline profit moved -
+25,097.39 of unrealised profit to 13,795.53, without a single position's market value, Greek,
+DV01 or stress-scenario number changing at all. Every number that depends only on the
+portfolio's quantities and the market (which is everything except cash and cost basis) is
+byte-identical to M13; only what the book actually paid for what it holds changed, because
+that is the only thing this milestone touched.
+
 **M13 complete** — **concurrency, chosen per component** rather than "add threads", and
 measured rather than assumed. Three pieces, and the measurements are the interesting part.
 

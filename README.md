@@ -36,7 +36,9 @@ test that fails if the report below stops matching what the engine prints.
 
 ## The report
 
-This book opened as **1,000,000 of cash**, made eight trades, and holds what they add up to.
+This book opened as **1,000,000 of cash**, made eight trades - crossed on a book or negotiated
+against a dealer, the same venues the `walkthrough` command runs, not declared by hand - and
+holds what they add up to.
 
 ```
 POSITIONS
@@ -58,14 +60,14 @@ EXPOSURE BY CURRENCY  (positions settling in each, valued in USD)
   EUR                                                     211167.73
 
 CASH
-  USD                                                     469100.00
+  USD                                                     457798.14
   EUR                                                    -198000.00
-  NET ASSET VALUE  (positions + cash)                    1027497.39
+  NET ASSET VALUE  (positions + cash)                    1016195.53
 
 PROFIT AND LOSS  (FIFO cost basis)
   Realised                                                  2400.00
-  Unrealised                                               25097.39
-  Total                                                    27497.39
+  Unrealised                                               13795.53
+  Total                                                    16195.53
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
@@ -109,7 +111,7 @@ they add up to.
 
 The strongest number in the report is the one that owes nothing to the code producing it. This
 book opened as **1,000,000 of cash and nothing else**, so whatever it has done since, its total
-profit must be net asset value minus that. It comes to **27,497.39** both ways — which requires
+profit must be net asset value minus that. It comes to **16,195.53** both ways — which requires
 cost basis, FIFO lot matching, the realised/unrealised split and the FX conversion all to be
 right at once.
 
@@ -173,6 +175,8 @@ anti-patterns being avoided, and the delivery roadmap. Decisions are recorded as
 | M11 — Scenarios / stress: named scenarios, impact report | ✅ complete |
 | M12 — Monte Carlo, single-threaded: GBM paths, VaR + Expected Shortfall, convergence tests | ✅ complete |
 | M13 — Concurrency: parallel Monte Carlo, event bus, single-writer books, scaling benchmarks | ✅ complete |
+| M14 — Harness: the golden-master book trades through the real venues, not by hand | ✅ complete |
+| M15 — Extensibility proof & architecture documentation | ⏳ extensibility proof done; diagrams and write-up pending |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -188,7 +192,7 @@ Three artifacts, each checkable in about a minute:
 |---|---|---|
 | **[Benchmarks](docs/BENCHMARKS.md)** | ✅ order book, Monte Carlo scaling, venue concurrency | Real JMH numbers on stated hardware — including three predictions of mine that the measurements disproved (a cache-friendly baseline that never won, hyperthreads that beat the forecast, and a single-writer engine that lost to the lock it was supposed to beat), each reported as a failure rather than deleted |
 | **[Extensibility proof](docs/EXTENSIBILITY.md)** | ✅ one commit, 4 files, 0 modified | An interest-rate cap added in a single commit that edits **nothing** — verify with `git show --stat`. It pays a kind of cashflow the engine had never seen, and cap-floor parity checks it against the swap model, which knows nothing about caps |
-| **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written. It also fails if the report in this README drifts from what the engine prints |
+| **[Golden-master test](mercury-app/src/test/java/com/mercury/app/GoldenMasterTest.java)** | ✅ running from M4, trading its own book since M14 | The whole engine is byte-for-byte reproducible from a fixed clock — and it caught a real bug before it was even written. Its eight trades cross on the same venues `walkthrough` runs, not a hand-declared parallel set of positions. It also fails if the report in this README drifts from what the engine prints |
 | **[End-to-end walkthrough](mercury-app/src/main/java/com/mercury/app/EndToEndDemo.java)** | ✅ `walkthrough` | Orders cross on the book, a bond is negotiated against a credit limit and a larger trade refused, only the book's own trades are booked, and that ledger is valued and risked — one run, no hand-declared positions |
 | **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ `lifecycle` | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped |
 | **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ `risk` | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios |
@@ -225,9 +229,11 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   `ExecutionVenue`/`OrderBookVenue`/`OtcNegotiationVenue` (`com.mercury.execution`) and a
   `Trade` lifecycle (`com.mercury.trade`) that turns a `Fill` into a booked ledger entry via
   `PortfolioLedger.book(Trade)`. The `walkthrough` command runs that whole path - venue, trade,
-  ledger, valuation, risk - in one go. The report above still declares its eight trades by
-  hand; moving the golden-master book itself onto the venues is **M14**'s job ("full golden
-  master").
+  ledger, valuation, risk - in one go, and since M14 the report above's own eight trades run
+  through the same venues rather than being declared as ledger facts by hand - a market maker
+  resting at the exact price this scenario always used for the five exchange-traded trades, a
+  dealer negotiated against for the two options, the forward and the swap, with
+  `SimulationClock.advancing` moving the book's own history forward one trade date at a time.
   Price-time priority via a `TreeMap` of
   price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
   [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
@@ -322,11 +328,9 @@ only here.
 Listed separately on purpose — a README that describes intentions in the present tense is
 just a claim.
 
-- **The golden-master book trades itself** (M14). The report above still declares its eight
-  trades by hand; M14 moves them onto the venues, so the reproducible report is the output of
-  the execution path rather than a parallel set of positions.
-- **Extensibility proof and architecture documentation** (M15). The sixth-instrument commit
-  exists; the diagrams and the architecture write-up it is meant to anchor do not.
+- **Architecture documentation** (M15). The sixth-instrument commit exists
+  ([docs/EXTENSIBILITY.md](docs/EXTENSIBILITY.md)); the diagrams and the architecture write-up
+  it is meant to anchor do not.
 - **An asynchronous submission path** for the matching engine. M13 measured why single-writer
   books cost more than they return while every caller waits for its trades — see
   [KNOWN_GAPS](docs/KNOWN_GAPS.md). The event half is built; the fire-and-forget half would

@@ -802,8 +802,8 @@ scaffolding.
 | M11 | Scenarios / stress | Named scenarios (Market Crash, Rate Shock, Currency Crisis), impact report |
 | M12 | Monte Carlo, single-threaded | GBM paths, VaR + Expected Shortfall, convergence tests |
 | M13 | Concurrency | Parallel MC, async bus, single-writer books, **scaling benchmarks 1→12 workers** |
-| M14 | Harness, terminal UI, full golden master | End-to-end demo in one command + **§7.2 determinism test** |
-| M15 | Extensibility proof & documentation | **§7.1 sixth-instrument commit**, README, ARCHITECTURE.md, diagrams |
+| M14 | Harness, terminal UI, full golden master | End-to-end demo in one command + **§7.2 determinism test** — ✅ **done**. The golden-master book itself now trades through `ExecutionRouter` rather than declaring its positions by hand |
+| M15 | Extensibility proof & documentation | **§7.1 sixth-instrument commit** — ✅ **done** ([docs/EXTENSIBILITY.md](EXTENSIBILITY.md)); README, ARCHITECTURE.md, diagrams — pending |
 
 **M15 is not optional polish** — for this project's actual goal it is one of the
 highest-value milestones. Short ADRs should be written *as we go* rather than
