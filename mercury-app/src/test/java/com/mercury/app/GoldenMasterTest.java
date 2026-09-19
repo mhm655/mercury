@@ -7,7 +7,6 @@ import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.PnlStatement;
-import com.mercury.portfolio.Portfolio;
 import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
 import java.io.IOException;
@@ -306,11 +305,23 @@ class GoldenMasterTest {
     }
 
     private static String runScenario() {
-        Portfolio portfolio = DemoScenario.portfolio();
+        // Builds the ledger and the market once and derives everything else from them. Before
+        // M14, DemoScenario.ledger() and .portfolio() were cheap immutable builder chains, so
+        // calling each two or three times here cost nothing worth noticing. Since M14 they run
+        // the demo's eight trades through real matching and OTC pricing (and .market() bootstraps
+        // two curves), so the version of this method that built its own unused Portfolio, then
+        // called valueDemoPortfolio() (which rebuilds both), then called DemoScenario.ledger()
+        // and .market() again directly, was quietly re-running the whole simulation three times
+        // and bootstrapping the curves twice per call - work with no test outcome depending on
+        // it, multiplied by however many of this class's methods call this one.
+        PortfolioLedger ledger = DemoScenario.ledger();
+        MarketDataSnapshot market = DemoScenario.market();
+        PortfolioValuation valuation = DemoScenario.valuationService()
+                .value(ledger.toPortfolio(), market, DemoScenario.VALUATION_DATE);
         return ValuationReport.render(
-                DemoScenario.ledger(),
-                valueDemoPortfolio(),
-                DemoScenario.market(),
+                ledger,
+                valuation,
+                market,
                 DemoScenario.sensitivityCalculator(),
                 DemoScenario.riskFactors(),
                 DemoScenario.scenarios(),

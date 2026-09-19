@@ -74,10 +74,11 @@ instrument   curve   matching   trade   event      <- depend on core alone
    (+ event, matching)
 ```
 
-`execution` and `simulation` sit at the top and do not depend on each other: `execution` is the
-only package that also reaches into `matching` and `event`, and `simulation` is the only one
-that reaches back into `pricing` directly (a `MonteCarloOptionModel` is itself a `PricingModel`)
-as well as through `risk`.
+`execution` and `simulation` sit at the top and do not depend on each other. `execution` is the
+only package that reaches into `matching` and `event`. `pricing` is not simulation's alone to
+reach - `portfolio` and `execution` both depend on it directly too, the same as the diagram
+shows - but `simulation` is the only one of the three that reaches it *twice*, once directly
+(a `MonteCarloOptionModel` is itself a `PricingModel`) and once through `risk`.
 
 Two directions are asserted by name rather than left to the general no-cycles rule, because a
 direction can be right today and drift tomorrow without ever becoming a cycle:

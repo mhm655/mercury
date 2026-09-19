@@ -1,6 +1,7 @@
 package com.mercury.app;
 
-import com.mercury.portfolio.Portfolio;
+import com.mercury.marketdata.MarketDataSnapshot;
+import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -52,14 +53,21 @@ public final class Main {
     }
 
     private static void printReport() {
-        Portfolio portfolio = DemoScenario.portfolio();
+        // Ledger and market built once and reused below. Since M14, DemoScenario.ledger() runs
+        // the demo's eight trades through real matching and OTC pricing rather than a cheap
+        // builder chain, and .market() bootstraps two curves - so calling either of them twice
+        // per report, as an earlier version of this method did (once via .portfolio(), which
+        // calls .ledger() itself, and again directly for the render call below), silently
+        // doubled the cost of the one command most readers of this project actually run.
+        PortfolioLedger ledger = DemoScenario.ledger();
+        MarketDataSnapshot market = DemoScenario.market();
         PortfolioValuation valuation = DemoScenario.valuationService()
-                .value(portfolio, DemoScenario.market(), DemoScenario.VALUATION_DATE);
+                .value(ledger.toPortfolio(), market, DemoScenario.VALUATION_DATE);
 
         String report = ValuationReport.render(
-                DemoScenario.ledger(),
+                ledger,
                 valuation,
-                DemoScenario.market(),
+                market,
                 DemoScenario.sensitivityCalculator(),
                 DemoScenario.riskFactors(),
                 DemoScenario.scenarios(),
