@@ -325,5 +325,26 @@ class PortfolioLedgerTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("two different books");
         }
+
+        @Test
+        @DisplayName("a valuation that omits a position the ledger holds is refused too")
+        void valuationMissingAHeldPosition() {
+            // The asymmetric half, and the one that used to pass silently. Only the valuation
+            // was checked against the ledger, never the ledger against the valuation - so a
+            // held position left out of the valuation contributed no unrealised line while its
+            // realised profit was still counted, and the statement came out plausible and low.
+            // Here SAP's 1,000 of unrealised gain simply vanishes if this is not caught.
+            PortfolioLedger ledger = opening()
+                    .buy(AAPL, Quantity.of(100), Price.of("180"), Currency.USD, JANUARY)
+                    .buy(SAP, Quantity.of(100), Price.of("150"), Currency.EUR, JANUARY);
+            PortfolioValuation aaplOnly = valuation().value(
+                    Portfolio.builder(BOOK, Currency.USD).position(AAPL, 100).build(),
+                    market(), JUNE);
+
+            assertThatThrownBy(() -> PnlStatement.of(ledger, aaplOnly, market()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("SAP")
+                    .hasMessageContaining("two different books");
+        }
     }
 }

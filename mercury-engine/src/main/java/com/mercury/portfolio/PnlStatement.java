@@ -7,6 +7,8 @@ import com.mercury.marketdata.MarketDataSnapshot;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Profit and loss, split into the part already taken and the part still at risk.
@@ -51,13 +53,43 @@ public record PnlStatement(
     /**
      * Joins a book's history to a valuation of it.
      *
-     * @throws IllegalArgumentException if the valuation is of a different set of positions
+     * <h2>Both directions are checked, and only one used to be</h2>
+     * The mismatch this guards against has two sides, and the asymmetric half is the
+     * dangerous one. A valuation holding a position the ledger does not throws immediately -
+     * {@code costBasisOf} has nothing to subtract. But a <em>ledger</em> position the
+     * valuation omits used to pass silently: its cost contributed no unrealised line while
+     * its realised profit was still counted, so the statement came out plausible and low, and
+     * the reconciliation this project leans on - net asset value minus opening cash equals
+     * total profit - would have quietly stopped holding.
+     *
+     * <p>Unreachable in current wiring, since every caller values
+     * {@code ledger.toPortfolio()}. That is an argument for checking it, not against: the
+     * guarantee comes from how the callers happen to be written today, and this method's
+     * javadoc has always promised the check outright.
+     *
+     * @throws IllegalArgumentException if the valuation is of a different set of positions,
+     *                                  in either direction
      */
     public static PnlStatement of(PortfolioLedger ledger, PortfolioValuation valuation,
                                   MarketDataSnapshot market) {
         Objects.requireNonNull(ledger, "ledger");
         Objects.requireNonNull(valuation, "valuation");
         Objects.requireNonNull(market, "market");
+
+        Set<InstrumentId> valued = valuation.lines().stream()
+                .map(line -> line.instrument().id())
+                .collect(Collectors.toSet());
+        List<InstrumentId> unvalued = ledger.instruments().stream()
+                .filter(held -> !valued.contains(held))
+                .toList();
+        if (!unvalued.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "The ledger holds " + unvalued + " but the valuation does not value "
+                            + (unvalued.size() == 1 ? "it" : "them") + ". Leaving a held "
+                            + "position out would drop its unrealised profit while still "
+                            + "counting its realised, and report a total that looks like an "
+                            + "answer; these are two different books.");
+        }
 
         Currency reporting = valuation.totalValue().currency();
         List<Line> lines = new ArrayList<>(valuation.lines().size());
