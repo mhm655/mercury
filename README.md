@@ -284,19 +284,12 @@ plateau is an allocation ceiling rather than the parallel structure, and the
 
 ## Built so far
 
-- **An order book with real data structures**, now actually wired to a portfolio. M8 added
-  `ExecutionVenue`/`OrderBookVenue`/`OtcNegotiationVenue` (`com.mercury.execution`) and a
-  `Trade` lifecycle (`com.mercury.trade`) that turns a `Fill` into a booked ledger entry via
-  `PortfolioLedger.book(Trade)`. The `walkthrough` command runs that whole path - venue, trade,
-  ledger, valuation, risk - in one go, and since M14 the report above's own eight trades run
-  through the same venues rather than being declared as ledger facts by hand - a market maker
-  resting at the exact price this scenario always used for the five exchange-traded trades, a
-  dealer negotiated against for the two options, the forward and the swap, with
-  `SimulationClock.advancing` moving the book's own history forward one trade date at a time.
-  Price-time priority via a `TreeMap` of
-  price levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
-  [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills
-  execute at the *resting* order's price — the rule most often got wrong.
+- **An order book with real data structures.** Price-time priority via a `TreeMap` of price
+  levels over intrusive linked lists: O(1) cancellation and O(1) best bid/ask,
+  [measured](docs/BENCHMARKS.md) against a naive baseline rather than asserted. Fills execute
+  at the *resting* order's price — the rule most often got wrong. M8 wired it to a portfolio
+  through `ExecutionVenue` and a `Trade` lifecycle, which is the path `walkthrough` runs and
+  the one the report above's own eight trades went through.
 - **Domain conventions done properly.** Day counts, business-day rolling, composable
   holiday calendars, schedule generation rolled backwards from maturity. Unglamorous, and
   the clearest tell of whether a financial project is real.
@@ -306,25 +299,28 @@ plateau is an allocation ceiling rather than the parallel structure, and the
 - **Capability-based instruments.** Five instrument types that opt into what they can
   actually do; a stock implements no capability at all
   ([ADR 0004](docs/adr/0004-capability-interfaces-and-the-cashflow-boundary.md)).
-- **Architecture enforced by tests.** ArchUnit rules fail the build on a layering
-  violation, a stray clock read, or a public method nobody calls — rather than the README
-  asserting none of that happens.
+- **Architecture enforced by tests.** ArchUnit rules fail the build on a layering violation, a
+  stray clock read, or a public method nobody calls — rather than this README asserting none
+  of that happens. What that last rule quietly missed for two milestones is
+  [below](#dead-weight-looked-for-on-purpose).
 - **Open-closed pricing dispatch.** A type-keyed registry: a new instrument costs one class,
-  one model and one registration line. `PricingServiceTest` proves it by adding a sixth
-  instrument type inline and pricing it alongside the rest, with nothing existing modified.
+  one model and one registration line. All five types — stock, bond, FX forward, European
+  option, interest-rate swap — reach four models through it, and adding the swap at M6 cost
+  exactly that one line and changed nothing else in the pricing stack. `PricingServiceTest`
+  proves the claim by registering a sixth type inline; the
+  [interest-rate cap](docs/EXTENSIBILITY.md) proves it outside a test.
 - **Restraint, recorded — and then settled.** The design proposal listed Template Method as
   justified for the discounted-cashflow base. Implementing it showed there was no varying step
   to override, so it was dropped and [the entry struck through](docs/DESIGN_PROPOSAL.md#6-design-patterns--used-and-deliberately-not-used)
   rather than quietly deleted. M6 brought the predicted second case — a floating swap leg,
   which genuinely does need projection before discounting — and it justified extracting a
   four-line static function, not a base class. Waiting did not vindicate the pattern; it showed
-  the pattern was never the right shape. A build check also fails on any public method nobody
-  calls.
-- **One mechanism, three features — the first two working.** Immutable snapshots plus
-  composable shocks already drive both stress scenarios and bump-and-revalue risk; Monte
-  Carlo reuses the same abstraction at M12. Equity delta, DV01 and FX delta are the same two
-  lines with a different shock, which is why adding rate and currency risk cost three short
-  methods rather than a risk module.
+  the pattern was never the right shape.
+- **One mechanism, three features, all three now built.** Immutable snapshots plus
+  composable shocks drive stress scenarios, bump-and-revalue risk and — since M12 —
+  Monte Carlo, whose simulated paths are `MarketShock.scaleSpot` like everything else.
+  Equity delta, DV01 and FX delta are the same two lines with a different shock, which is
+  why adding rate and currency risk cost three short methods rather than a risk module.
 - **Invariants on the type that owns them.** Each `MarketDataKey` case states what values it
   can take, so the builder and `withShock` cannot disagree about what a legal market is. They
   did: a shock could impose a negative spot price that the builder rejected, and it surfaced
@@ -335,9 +331,6 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   depending on the method — all three correct, all three asserted.
 - **Multi-currency valuation.** A euro bond is priced on the euro curve and converted at the
   end, never discounted at a dollar rate. Deferred from M4 through M6 and finally closed.
-- **All five instruments, one dispatch.** Stock, bond, FX forward, European option and
-  interest-rate swap, priced by four models through a type-keyed registry. Adding the swap at
-  M6 cost one registration line and changed nothing else in the pricing stack.
 - **Curves fitted, not typed in.** Deposits and par swaps go in; a discount curve comes out,
   solved pillar by pillar and validated by repricing its own inputs to par. Pillars are keyed
   by settlement date rather than tenor, which sounds like pedantry and was not — a 2Y swap
@@ -350,11 +343,9 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   random streams split per fixed-size block so the same seed gives a **bit-identical** answer
   on one worker or twelve; the event bus is synchronous by default and asynchronous by
   choice; each order book has one writer, either the calling thread under a per-book lock or a
-  thread of its own fed from a command queue. The benchmarks then disagreed with the design
-  doc twice - hyperthreads gave 47% where 15–30% was predicted, and the single-writer engine
-  came out *slower* than the lock while callers still block for their trades. Both corrections
-  are [in the design proposal](docs/DESIGN_PROPOSAL.md#56-concurrency--three-deliberate-models-not-add-threads)
-  beside the original claims, not instead of them.
+  thread of its own fed from a command queue. Two of the three
+  [predictions above](#three-predictions-the-measurements-killed) were about this section,
+  and the measurements won both.
 
 ### Dead weight, looked for on purpose
 
