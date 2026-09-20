@@ -6,7 +6,6 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -43,10 +42,6 @@ public final class PositionLots {
         return new PositionLots(List.of());
     }
 
-    /** The lots, oldest first. */
-    public List<Lot> lots() {
-        return Collections.unmodifiableList(lots);
-    }
 
     /** The net holding: positive when long, negative when short, zero when flat. */
     public Quantity quantity() {

@@ -235,18 +235,12 @@ public sealed interface MarketDataKey
      */
     final class InvalidMarketDataException extends MercuryException {
 
-        private final transient MarketDataKey key;
 
         InvalidMarketDataException(MarketDataKey key, double value, String rule, String why) {
             super(key.describe() + " must " + rule + ", but was " + value + ". " + why
                     + " Market data invariants are enforced wherever a snapshot is built, "
                     + "including after a shock, so a scenario cannot produce a market that "
                     + "could not have been quoted in the first place.");
-            this.key = key;
-        }
-
-        public MarketDataKey key() {
-            return key;
         }
     }
 }

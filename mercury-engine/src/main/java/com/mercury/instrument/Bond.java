@@ -183,14 +183,7 @@ public final class Bond
         return name;
     }
 
-    public Money faceValue() {
-        return faceValue;
-    }
 
-    /** The annual coupon rate as a decimal: 5% is {@code 0.05}. */
-    public BigDecimal couponRate() {
-        return couponRate;
-    }
 
     public Frequency couponFrequency() {
         return couponFrequency;
@@ -200,9 +193,6 @@ public final class Bond
         return dayCount;
     }
 
-    public LocalDate issueDate() {
-        return issueDate;
-    }
 
     public Schedule schedule() {
         return schedule;

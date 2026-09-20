@@ -115,10 +115,6 @@ public final class CapFloor implements FinancialInstrument, Maturing {
         return type;
     }
 
-    public FloatingRateIndex index() {
-        return index;
-    }
-
     /** One period per caplet. */
     public Schedule schedule() {
         return schedule;

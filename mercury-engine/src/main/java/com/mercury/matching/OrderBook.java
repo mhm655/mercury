@@ -99,9 +99,6 @@ public final class OrderBook {
         this.instrumentId = Objects.requireNonNull(instrumentId, "instrumentId");
     }
 
-    public InstrumentId instrumentId() {
-        return instrumentId;
-    }
 
     // ------------------------------------------------------------ submission
 

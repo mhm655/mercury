@@ -11,25 +11,17 @@ package com.mercury.matching;
 public enum TimeInForce {
 
     /** Any unfilled remainder rests in the book until it trades or is cancelled. */
-    GOOD_TILL_CANCEL("Good till cancel"),
+    GOOD_TILL_CANCEL,
 
     /**
      * Fill whatever is available now; cancel the rest. Market orders are always this,
      * since they cannot rest.
      */
-    IMMEDIATE_OR_CANCEL("Immediate or cancel");
+    IMMEDIATE_OR_CANCEL;
 
-    private final String displayName;
-
-    TimeInForce(String displayName) {
-        this.displayName = displayName;
-    }
 
     public boolean restsInBook() {
         return this == GOOD_TILL_CANCEL;
     }
 
-    public String displayName() {
-        return displayName;
-    }
 }

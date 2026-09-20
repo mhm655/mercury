@@ -54,6 +54,23 @@ class NoOrphanedApiTest {
     private static final Set<String> ALWAYS_EXEMPT = Set.of(
             "equals", "hashCode", "toString", "main", "values", "valueOf", "compareTo");
 
+    /**
+     * Engine API whose only caller lives in {@code mercury-app}.
+     *
+     * <h2>Why a list and not a smarter rule</h2>
+     * This module's test classpath cannot see {@code mercury-app} - the dependency runs one
+     * way, which is the property {@code AppLayeringRulesTest} exists to protect. So an engine
+     * method used solely by the composition root looks dead from here and is not, and there is
+     * no structural way to tell that apart from the real thing inside this module.
+     *
+     * <p>An allowlist rots if nothing checks it, so something does:
+     * {@code AppLayeringRulesTest.engineApiThisModuleClaimsToUse} asserts every entry really is
+     * called from {@code mercury-app}. An entry that stops being used fails the build in the
+     * other module rather than silently excusing a method that has genuinely died.
+     */
+    static final Set<String> CALLED_ONLY_FROM_THE_APP_MODULE = Set.of(
+            "PortfolioLedger.costBasisMethod");
+
     @Test
     @DisplayName("every public method is called from somewhere")
     void everyPublicMethodHasACaller() {
@@ -97,6 +114,10 @@ class NoOrphanedApiTest {
         if (isRecordAccessor(clazz, method)) {
             return true;
         }
+        if (CALLED_ONLY_FROM_THE_APP_MODULE.contains(
+                clazz.getSimpleName() + "." + method.getName())) {
+            return true;
+        }
         // An abstract declaration is invoked through its implementations, and ArchUnit
         // records the call against whichever type it was made through - often the concrete
         // class. Known limitation: an interface method nothing implements would slip past.
@@ -106,9 +127,23 @@ class NoOrphanedApiTest {
         return overridesSupertypeMethod(clazz, method);
     }
 
-    /** A no-arg method named after one of the record's components. */
+    /**
+     * A no-arg method named after one of the record's own components.
+     *
+     * <h2>The record check is the whole point of this method</h2>
+     * Without {@code isRecord()} this exempted any no-arg method on any class whose name
+     * matched any field - and since the house style is {@code private final T foo} beside
+     * {@code public T foo()}, that is every getter in the codebase. The rule meant to exempt
+     * 2 record accessors was exempting 61 methods, so roughly a quarter of the no-arg API
+     * surface went unchecked, and it was exactly the quarter where dead accessors collect.
+     * Three had: {@code PositionLots.lots()} and the two exception {@code key()} accessors.
+     *
+     * <p>{@code getAllFields} rather than the declared ones is also deliberate now that the
+     * record check is in place: a record's components are its declared fields, so inherited
+     * ones cannot widen this, and the narrower call would be no safer.
+     */
     private static boolean isRecordAccessor(JavaClass clazz, JavaMethod method) {
-        if (!method.getRawParameterTypes().isEmpty()) {
+        if (!clazz.isRecord() || !method.getRawParameterTypes().isEmpty()) {
             return false;
         }
         return clazz.getAllFields().stream()

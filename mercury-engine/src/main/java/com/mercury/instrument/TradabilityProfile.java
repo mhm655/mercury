@@ -21,24 +21,16 @@ public enum TradabilityProfile {
      * Trades on an order book: anonymous, price-time priority, partial fills, no
      * counterparty selection. Equities and listed bonds.
      */
-    EXCHANGE_TRADED("Exchange traded"),
+    EXCHANGE_TRADED,
 
     /**
      * Negotiated bilaterally against a named counterparty. Priced on request rather than
      * matched, and carries counterparty credit exposure that an exchange-traded position
      * does not.
      */
-    OVER_THE_COUNTER("Over the counter");
+    OVER_THE_COUNTER;
 
-    private final String displayName;
 
-    TradabilityProfile(String displayName) {
-        this.displayName = displayName;
-    }
-
-    public String displayName() {
-        return displayName;
-    }
 
     /** True if orders in this instrument belong in a matching engine. */
     public boolean isExchangeTraded() {

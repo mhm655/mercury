@@ -305,6 +305,17 @@ A build check fails on any public method nobody calls, in both modules. That cat
 API and cannot see the larger problem, so as of M7 the audits also look for abstractions built
 ahead of any consumer — and label the ones being kept:
 
+For two milestones that claim was **not true of the engine**, and the way it failed is worth
+keeping. The rule exempts record accessors, and the engine's copy tested only whether a
+no-argument method's name matched a field — never whether the class was a record. Since the
+house style is `private final T foo` beside `public T foo()`, that exempted every getter in
+the module: 61 methods, of which 2 were actual record accessors. The app module's copy had
+already been tightened with `isRecord()` after a planted orphan slipped through it; the
+engine's copy never received the same fix, and nothing compared the two. Closing it found 14
+genuinely dead methods, all deleted. **A check that is believed to cover everything is worth
+less than one that is known to cover something** — the same lesson the app-module rule was
+added for, arriving a second time because a fix was applied to one copy of a duplicated rule.
+
 | | Standing |
 |---|---|
 | `HasUnderlying`, `OptionTerms` | One implementor each, and callers use the concrete type. Kept for a second option type, deleted if one doesn't arrive |

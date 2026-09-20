@@ -32,7 +32,7 @@ public enum DayCountConvention {
      * most swaps. Note it yields slightly more than a "true" year fraction, since a real
      * year has 365 days but is divided by 360.
      */
-    ACT_360("Actual/360") {
+    ACT_360 {
         @Override
         public double yearFraction(LocalDate start, LocalDate end) {
             return actualDays(start, end) / 360.0;
@@ -46,7 +46,7 @@ public enum DayCountConvention {
      * <p>Standard for GBP and several other markets. "Fixed" means the denominator is
      * always 365 and never 366.
      */
-    ACT_365F("Actual/365 Fixed") {
+    ACT_365F {
         @Override
         public double yearFraction(LocalDate start, LocalDate end) {
             return actualDays(start, end) / 365.0;
@@ -68,7 +68,7 @@ public enum DayCountConvention {
      *       from the 29th to a 31st is 32.</li>
      * </ol>
      */
-    THIRTY_360_US("30/360 US (Bond Basis)") {
+    THIRTY_360_US {
         @Override
         public double yearFraction(LocalDate start, LocalDate end) {
             requireOrdered(start, end);
@@ -95,7 +95,7 @@ public enum DayCountConvention {
      * only one here whose result depends on <em>which</em> years a period spans rather
      * than just its length, so a period is split at each year boundary.
      */
-    ACT_ACT_ISDA("Actual/Actual ISDA") {
+    ACT_ACT_ISDA {
         @Override
         public double yearFraction(LocalDate start, LocalDate end) {
             requireOrdered(start, end);
@@ -117,11 +117,6 @@ public enum DayCountConvention {
         }
     };
 
-    private final String displayName;
-
-    DayCountConvention(String displayName) {
-        this.displayName = displayName;
-    }
 
     /**
      * The accrual factor for {@code [start, end)} as a fraction of a year.
@@ -133,9 +128,6 @@ public enum DayCountConvention {
      */
     public abstract double yearFraction(LocalDate start, LocalDate end);
 
-    public String displayName() {
-        return displayName;
-    }
 
     static long actualDays(LocalDate start, LocalDate end) {
         requireOrdered(start, end);

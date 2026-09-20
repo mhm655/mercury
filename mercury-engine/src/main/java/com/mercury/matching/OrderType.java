@@ -11,21 +11,13 @@ package com.mercury.matching;
 public enum OrderType {
 
     /** Executes only at the stated limit price or better. May rest in the book. */
-    LIMIT("Limit"),
+    LIMIT,
 
     /**
      * Executes against whatever liquidity exists, at any price. Never rests: an unfilled
      * remainder is cancelled, because there is no price at which to queue it.
      */
-    MARKET("Market");
+    MARKET;
 
-    private final String displayName;
 
-    OrderType(String displayName) {
-        this.displayName = displayName;
-    }
-
-    public String displayName() {
-        return displayName;
-    }
 }

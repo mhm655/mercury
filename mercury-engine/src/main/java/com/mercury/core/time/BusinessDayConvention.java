@@ -21,7 +21,7 @@ import java.util.Objects;
 public enum BusinessDayConvention {
 
     /** No adjustment. The date is used as-is even if markets are closed. */
-    UNADJUSTED("Unadjusted") {
+    UNADJUSTED {
         @Override
         public LocalDate adjust(LocalDate date, HolidayCalendar calendar) {
             return date;
@@ -29,7 +29,7 @@ public enum BusinessDayConvention {
     },
 
     /** Roll forward to the next business day. */
-    FOLLOWING("Following") {
+    FOLLOWING {
         @Override
         public LocalDate adjust(LocalDate date, HolidayCalendar calendar) {
             return calendar.isBusinessDay(date) ? date : calendar.nextBusinessDay(date);
@@ -45,7 +45,7 @@ public enum BusinessDayConvention {
      * September, pushing a cashflow into the next accrual period and the next month's
      * accounting. Rolling back to Friday 29 August keeps the period intact.
      */
-    MODIFIED_FOLLOWING("Modified Following") {
+    MODIFIED_FOLLOWING {
         @Override
         public LocalDate adjust(LocalDate date, HolidayCalendar calendar) {
             if (calendar.isBusinessDay(date)) {
@@ -59,7 +59,7 @@ public enum BusinessDayConvention {
     },
 
     /** Roll backward to the previous business day. */
-    PRECEDING("Preceding") {
+    PRECEDING {
         @Override
         public LocalDate adjust(LocalDate date, HolidayCalendar calendar) {
             return calendar.isBusinessDay(date) ? date : calendar.previousBusinessDay(date);
@@ -70,7 +70,7 @@ public enum BusinessDayConvention {
      * Roll backward, unless that would cross into the previous calendar month, in which
      * case roll forward instead. The mirror of {@link #MODIFIED_FOLLOWING}.
      */
-    MODIFIED_PRECEDING("Modified Preceding") {
+    MODIFIED_PRECEDING {
         @Override
         public LocalDate adjust(LocalDate date, HolidayCalendar calendar) {
             if (calendar.isBusinessDay(date)) {
@@ -83,11 +83,6 @@ public enum BusinessDayConvention {
         }
     };
 
-    private final String displayName;
-
-    BusinessDayConvention(String displayName) {
-        this.displayName = displayName;
-    }
 
     /**
      * Returns {@code date} if it is a business day, otherwise the adjusted date this
@@ -95,7 +90,4 @@ public enum BusinessDayConvention {
      */
     public abstract LocalDate adjust(LocalDate date, HolidayCalendar calendar);
 
-    public String displayName() {
-        return displayName;
-    }
 }

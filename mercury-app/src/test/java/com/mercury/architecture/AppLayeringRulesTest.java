@@ -69,6 +69,48 @@ class AppLayeringRulesTest {
                 .isEmpty();
     }
 
+    /**
+     * The other half of the engine's allowlist.
+     *
+     * <p>{@code NoOrphanedApiTest} in {@code mercury-engine} cannot see this module, so engine
+     * API called only from the composition root looks dead to it. It carries a short list of
+     * such methods - and a list nothing checks is how a dead method acquires a permanent
+     * excuse. This is the check: every name the engine exempts on the grounds that the app
+     * uses it must actually be used here.
+     *
+     * <p>Kept as a literal rather than imported from the engine's test class, because test
+     * classes are not published between modules. Two short lists that must agree, with a
+     * failing build when they do not, beats one list nobody verifies.
+     */
+    private static final Set<String> ENGINE_EXEMPTS_BECAUSE_THIS_MODULE_CALLS_IT =
+            Set.of("PortfolioLedger.costBasisMethod");
+
+    @Test
+    @DisplayName("engine API exempted as app-only really is called from the app")
+    void engineApiThisModuleClaimsToUse() {
+        JavaClasses appClasses = new ClassFileImporter().importPackages("com.mercury.app");
+
+        List<String> unused = new ArrayList<>();
+        for (String exempt : ENGINE_EXEMPTS_BECAUSE_THIS_MODULE_CALLS_IT) {
+            String methodName = exempt.substring(exempt.indexOf('.') + 1);
+            String owner = exempt.substring(0, exempt.indexOf('.'));
+            boolean called = appClasses.stream()
+                    .flatMap(clazz -> clazz.getMethodCallsFromSelf().stream())
+                    .anyMatch(call -> call.getName().equals(methodName)
+                            && call.getTargetOwner().getSimpleName().equals(owner));
+            if (!called) {
+                unused.add(exempt);
+            }
+        }
+
+        assertThat(unused)
+                .as("mercury-engine's NoOrphanedApiTest exempts these from its dead-API rule on "
+                        + "the grounds that this module calls them, and this module does not. "
+                        + "Either call them or delete both the method and its exemption - an "
+                        + "allowlist nothing verifies is how dead code gets a permanent excuse")
+                .isEmpty();
+    }
+
     private static boolean isExempt(JavaClass clazz, JavaMethod method) {
         if (!method.getModifiers().contains(JavaModifier.PUBLIC)) {
             return true;

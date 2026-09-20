@@ -259,9 +259,6 @@ public final class YieldCurve {
         return referenceDate;
     }
 
-    public Interpolation interpolation() {
-        return interpolation;
-    }
 
     public int size() {
         return dates.length;
