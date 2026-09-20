@@ -109,9 +109,20 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
      * report, not by a failing test.
      *
      * <p>Applied in {@code PortfolioValuationService} for a position's market value, in
-     * {@code Bond} for a coupon, and in {@code PortfolioLedger} for a trade's consideration.
-     * Each of those points here rather than retelling it. See ADR 0001 for the wider split
-     * between exact ledger amounts and approximate model output.
+     * {@code OtcNegotiationVenue} for a negotiated consideration, and in
+     * {@code FloatingRateLeg} for a coupon projected off a curve. Each of those points here
+     * rather than retelling it. See ADR 0001 for the wider split between exact ledger amounts
+     * and approximate model output.
+     *
+     * <h2>What this method cannot promise</h2>
+     * It is the boundary for values that <em>start life</em> as {@code double}. It is not a
+     * way to launder a {@code double} into an amount that was always exact, and for two
+     * milestones this javadoc named {@code Bond} as a caller when {@code Bond} did not call
+     * it: bond and fixed-leg coupons crossed via {@code BigDecimal.valueOf(yearFraction)}
+     * instead, which is the same crossing with none of the greppability this method exists to
+     * provide. A coupon is a contractual amount, not model output, so the fix was to stop it
+     * crossing at all - see {@link com.mercury.core.time.DayCountConvention.Accrual}, which
+     * keeps the accrual a fraction so the division lands last.
      */
     public static Money fromModelValue(double modelValue, Currency currency) {
         if (!Double.isFinite(modelValue)) {

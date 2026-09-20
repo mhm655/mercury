@@ -1,5 +1,7 @@
 package com.mercury.core.time;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
@@ -34,8 +36,8 @@ public enum DayCountConvention {
      */
     ACT_360 {
         @Override
-        public double yearFraction(LocalDate start, LocalDate end) {
-            return actualDays(start, end) / 360.0;
+        public Accrual accrual(LocalDate start, LocalDate end) {
+            return new Accrual(actualDays(start, end), 360);
         }
     },
 
@@ -48,8 +50,8 @@ public enum DayCountConvention {
      */
     ACT_365F {
         @Override
-        public double yearFraction(LocalDate start, LocalDate end) {
-            return actualDays(start, end) / 365.0;
+        public Accrual accrual(LocalDate start, LocalDate end) {
+            return new Accrual(actualDays(start, end), 365);
         }
     },
 
@@ -70,7 +72,7 @@ public enum DayCountConvention {
      */
     THIRTY_360_US {
         @Override
-        public double yearFraction(LocalDate start, LocalDate end) {
+        public Accrual accrual(LocalDate start, LocalDate end) {
             requireOrdered(start, end);
             int d1 = start.getDayOfMonth();
             int d2 = end.getDayOfMonth();
@@ -83,7 +85,7 @@ public enum DayCountConvention {
             int days = 360 * (end.getYear() - start.getYear())
                     + 30 * (end.getMonthValue() - start.getMonthValue())
                     + (d2 - d1);
-            return days / 360.0;
+            return new Accrual(days, 360);
         }
     },
 
@@ -97,36 +99,109 @@ public enum DayCountConvention {
      */
     ACT_ACT_ISDA {
         @Override
-        public double yearFraction(LocalDate start, LocalDate end) {
+        public Accrual accrual(LocalDate start, LocalDate end) {
             requireOrdered(start, end);
             if (start.equals(end)) {
-                return 0.0;
+                return new Accrual(0, 1);
             }
             int startYear = start.getYear();
             int endYear = end.getYear();
             if (startYear == endYear) {
-                return actualDays(start, end) / daysInYear(startYear);
+                return new Accrual(actualDays(start, end), daysInYear(startYear));
             }
+            long leadingBasis = daysInYear(startYear);
+            long trailingBasis = daysInYear(endYear);
             // Leading stub: start -> 1 January of the following year.
-            double total = actualDays(start, LocalDate.of(startYear + 1, 1, 1)) / daysInYear(startYear);
-            // Whole years in between contribute exactly 1.0 each, by definition.
-            total += endYear - startYear - 1;
+            long leadingDays = actualDays(start, LocalDate.of(startYear + 1, 1, 1));
             // Trailing stub: 1 January of the end year -> end.
-            total += actualDays(LocalDate.of(endYear, 1, 1), end) / daysInYear(endYear);
-            return total;
+            long trailingDays = actualDays(LocalDate.of(endYear, 1, 1), end);
+            // Whole years in between contribute exactly 1.0 each, by definition.
+            long wholeYears = endYear - startYear - 1L;
+
+            // Put the three terms over one denominator rather than summing three quotients,
+            // so the result stays an exact fraction. This is the only convention whose answer
+            // is a sum, and it is the one where evaluating each part first would round thrice.
+            long basis = leadingBasis * trailingBasis;
+            long days = leadingDays * trailingBasis
+                    + wholeYears * basis
+                    + trailingDays * leadingBasis;
+            return new Accrual(days, basis);
         }
     };
 
 
     /**
-     * The accrual factor for {@code [start, end)} as a fraction of a year.
+     * The accrual factor for {@code [start, end)} as an exact fraction of a year.
+     *
+     * <p>Every convention here is a count of days over a basis, so the factor is always
+     * rational and this hands it back without evaluating the division. See {@link Accrual}
+     * for why that matters to a cashflow.
      *
      * @param start inclusive period start
      * @param end   exclusive period end; must not precede {@code start}
-     * @return a non-negative year fraction, {@code 0.0} when the dates are equal
      * @throws IllegalArgumentException if {@code end} precedes {@code start}
      */
-    public abstract double yearFraction(LocalDate start, LocalDate end);
+    public abstract Accrual accrual(LocalDate start, LocalDate end);
+
+    /**
+     * The accrual factor as a {@code double} - the model-domain form, for discounting and
+     * everything else that is approximate anyway.
+     *
+     * <p>Derived from {@link #accrual} rather than computed alongside it, so the exact and
+     * the approximate answer cannot drift apart. Each convention is defined once.
+     *
+     * @return a non-negative year fraction, {@code 0.0} when the dates are equal
+     */
+    public final double yearFraction(LocalDate start, LocalDate end) {
+        return accrual(start, end).toDouble();
+    }
+
+    /**
+     * A year fraction as the exact ratio it is: {@code days} over {@code basis}.
+     *
+     * <h2>Why a fraction and not a number</h2>
+     * ADR 0001 splits the engine into exact ledger amounts and approximate model output, and a
+     * coupon sits on the exact side - it is money that changes hands. But a year fraction is
+     * usually not representable: 11/360 is 0.0305555... in binary or decimal alike, so
+     * evaluating it first and multiplying afterwards puts a rounding error underneath the
+     * whole cashflow.
+     *
+     * <p>That is not theoretical. Mercury's own demo bond accrues 1000 x 4.5% x 11/360, which
+     * is exactly 1.375 and rounds half-even to <b>1.38</b>. Routed through a {@code double}
+     * year fraction the product came to 1.37499999999999997500 and the report printed
+     * <b>1.37</b> - a cent low, decided entirely by which way the binary approximation of
+     * 11/360 happened to fall.
+     *
+     * <p>Keeping the numerator and the denominator apart lets a caller divide <em>last</em>,
+     * at the currency's own scale, so the only rounding in a coupon is the one that belongs
+     * there. {@link #toDouble} serves everyone whose answer was approximate anyway.
+     */
+    public record Accrual(long days, long basis) {
+
+        public Accrual {
+            if (basis <= 0) {
+                throw new IllegalArgumentException(
+                        "An accrual basis is a count of days in a year and must be positive, "
+                                + "but was " + basis);
+            }
+        }
+
+        /** The model-domain value: approximate, and right for anything being discounted. */
+        public double toDouble() {
+            return (double) days / basis;
+        }
+
+        /**
+         * {@code amount x days / basis}, rounded once to {@code scale}.
+         *
+         * <p>The division happens here, after the multiplication - which is the entire reason
+         * the fraction is carried this far instead of being evaluated at the source.
+         */
+        public BigDecimal applyTo(BigDecimal amount, int scale) {
+            return amount.multiply(BigDecimal.valueOf(days))
+                    .divide(BigDecimal.valueOf(basis), scale, RoundingMode.HALF_EVEN);
+        }
+    }
 
 
     static long actualDays(LocalDate start, LocalDate end) {
@@ -134,8 +209,8 @@ public enum DayCountConvention {
         return ChronoUnit.DAYS.between(start, end);
     }
 
-    private static double daysInYear(int year) {
-        return java.time.Year.isLeap(year) ? 366.0 : 365.0;
+    private static long daysInYear(int year) {
+        return java.time.Year.isLeap(year) ? 366L : 365L;
     }
 
     static void requireOrdered(LocalDate start, LocalDate end) {

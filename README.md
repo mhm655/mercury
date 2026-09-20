@@ -71,7 +71,7 @@ PROFIT AND LOSS  (FIFO cost basis)
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
-  CORP-5Y               1010.9455         1.3700      1012.3155
+  CORP-5Y               1010.9355         1.3800      1012.3155
   BUND-3Y                984.4650         0.0000       984.4650
 
 DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
@@ -139,13 +139,25 @@ restored**: it had been specified in the design document since M4 and quietly mi
 code, which nobody noticed while the book held no material rate risk
 ([D-1](docs/KNOWN_GAPS.md)).
 
-Three audits have found five real defects and one weak test suite: a bond that reported itself
+Four audits have found six real defects and one weak test suite: a bond that reported itself
 matured while still owing its principal, a market-data shock that could build a market the
 builder would have refused, property tests that looked thorough while only ever building a
 book of fourteen orders. The most instructive one was not a defect at all — the engine had
 been measuring interest-rate and currency risk since M5 and printing none of it. All are
 written up in [KNOWN_GAPS.md](docs/KNOWN_GAPS.md), along with what was deliberately left
 undone.
+
+The sixth is the smallest and the most uncomfortable, because the report above carried it in
+print for eleven milestones. `CORP-5Y` accrues 1000 × 4.5% × 11/360, which is exactly 1.375
+and rounds half-even to **1.38**. It printed **1.37** — the year fraction was evaluated into a
+`double` first, making the product 1.374999999999999975, and a cent fell off a settlement
+figure because of which way a binary approximation landed. One cent is not the point.
+[ADR 0001](docs/adr/0001-bigdecimal-for-ledger-double-for-models.md) exists to keep exactly
+this out of amounts that change hands, and `Money.fromModelValue` is the boundary it is
+supposed to cross at — a boundary whose own javadoc named `Bond` as a caller when `Bond` had
+never called it. The rule was right, the doctrine was documented, and four cashflow methods
+quietly went around it. **A convention only holds where something checks it**: the golden
+master had frozen the wrong cent as correct, so no test could ever have noticed.
 
 *(This section used to lead with a test count. It was removed on purpose: the audit showed
 the number was uninformative — the eight property tests it was flattering covered almost none

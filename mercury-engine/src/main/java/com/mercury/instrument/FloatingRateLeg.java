@@ -79,10 +79,16 @@ public record FloatingRateLeg(
             throw new IllegalArgumentException(
                     "Projected rate must be finite, but was " + projectedRate);
         }
+        // Unlike a bond's or a fixed leg's, this coupon is genuinely model output: the rate
+        // was projected off a curve and is approximate before any arithmetic here touches it.
+        // So it crosses into Money at the declared boundary rather than pretending to be exact
+        // decimal work - whole product first, one conversion, one rounding. See ADR 0001 and
+        // Money.fromModelValue.
         double effectiveRate = projectedRate + spread.asDecimal();
-        double yearFraction = period.yearFraction(dayCount);
-        Money gross = notional.multipliedBy(
-                java.math.BigDecimal.valueOf(effectiveRate * yearFraction));
+        double amount = notional.amount().doubleValue()
+                * effectiveRate
+                * dayCount.accrual(period.accrualStart(), period.accrualEnd()).toDouble();
+        Money gross = Money.fromModelValue(amount, notional.currency());
         return payReceive == PayReceive.PAY ? gross.negated() : gross;
     }
 

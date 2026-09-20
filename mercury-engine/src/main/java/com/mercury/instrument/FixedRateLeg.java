@@ -64,10 +64,20 @@ public record FixedRateLeg(
         return List.copyOf(cashflows);
     }
 
-    /** The signed coupon for one accrual period. */
+    /**
+     * The signed coupon for one accrual period.
+     *
+     * <p>The accrual fraction's division is done last, at the currency's scale - see
+     * {@link com.mercury.core.time.DayCountConvention.Accrual}. A fixed coupon is known at
+     * trade time and settles exactly, so it is not a place to inherit a {@code double}'s
+     * approximation of a ratio like 11/360.
+     */
     public Money couponFor(SchedulePeriod period) {
-        double yearFraction = period.yearFraction(dayCount);
-        Money gross = notional.multipliedBy(fixedRate.multiply(BigDecimal.valueOf(yearFraction)));
+        BigDecimal annualCoupon = notional.amount().multiply(fixedRate);
+        Money gross = Money.of(
+                dayCount.accrual(period.accrualStart(), period.accrualEnd())
+                        .applyTo(annualCoupon, notional.currency().minorUnits()),
+                notional.currency());
         return payReceive == PayReceive.PAY ? gross.negated() : gross;
     }
 

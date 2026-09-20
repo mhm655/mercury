@@ -146,10 +146,20 @@ public final class Bond
         return List.copyOf(cashflows);
     }
 
-    /** The coupon for one accrual period. */
+    /**
+     * The coupon for one accrual period.
+     *
+     * <p>Face times rate times the accrual fraction, with the fraction's division done
+     * <em>last</em> at the currency's scale - see {@link DayCountConvention.Accrual}. A coupon
+     * is a settlement amount, so it must not inherit the error of a year fraction evaluated
+     * into a {@code double} first.
+     */
     public Money couponFor(SchedulePeriod period) {
-        double yearFraction = period.yearFraction(dayCount);
-        return faceValue.multipliedBy(couponRate.multiply(BigDecimal.valueOf(yearFraction)));
+        BigDecimal annualCoupon = faceValue.amount().multiply(couponRate);
+        return Money.of(
+                dayCount.accrual(period.accrualStart(), period.accrualEnd())
+                        .applyTo(annualCoupon, currency().minorUnits()),
+                currency());
     }
 
     /**
@@ -170,8 +180,11 @@ public final class Bond
             boolean inPeriod = !valuationDate.isBefore(period.accrualStart())
                     && valuationDate.isBefore(period.accrualEnd());
             if (inPeriod) {
-                double accrued = dayCount.yearFraction(period.accrualStart(), valuationDate);
-                return faceValue.multipliedBy(couponRate.multiply(BigDecimal.valueOf(accrued)));
+                BigDecimal annualCoupon = faceValue.amount().multiply(couponRate);
+                return Money.of(
+                        dayCount.accrual(period.accrualStart(), valuationDate)
+                                .applyTo(annualCoupon, currency().minorUnits()),
+                        currency());
             }
         }
         return Money.zero(currency());

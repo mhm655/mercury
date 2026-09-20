@@ -205,6 +205,31 @@ class BondTest {
             assertThat(bond.accruedInterest(LocalDate.of(2023, 1, 1)).isZero()).isTrue();
             assertThat(bond.accruedInterest(LocalDate.of(2030, 1, 1)).isZero()).isTrue();
         }
+
+        @Test
+        @DisplayName("rounds a half-cent accrual up to even, not down through a double")
+        void exactlyOnAHalfCentBoundary() {
+            // 1000 x 4.5% x 11/360 is exactly 1.375, so half-even gives 1.38. This is the
+            // demo book's own CORP-5Y accrual, and it is the case that exposed the defect:
+            // evaluating 11/360 into a double first makes the product 1.37499999999999997500,
+            // which rounds to 1.37 - a cent low, decided by binary representation rather than
+            // by arithmetic. The value is only reachable exactly if the accrual stays a
+            // fraction until the final division.
+            Bond bond = Bond.builder()
+                    .id("HALF-CENT")
+                    .name("Boundary 4.5%")
+                    .faceValue(Money.of("1000", Currency.USD))
+                    .couponRate("0.045")
+                    .couponFrequency(Frequency.SEMI_ANNUAL)
+                    .dayCount(DayCountConvention.THIRTY_360_US)
+                    .calendar(HolidayCalendar.alwaysOpen())
+                    .issueDate(LocalDate.of(2024, 6, 17))
+                    .maturityDate(LocalDate.of(2029, 6, 17))
+                    .build();
+
+            assertThat(bond.accruedInterest(LocalDate.of(2024, 6, 28)))
+                    .isEqualTo(Money.of("1.38", Currency.USD));
+        }
     }
 
     @Nested

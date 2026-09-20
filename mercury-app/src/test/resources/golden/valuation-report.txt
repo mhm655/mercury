@@ -34,7 +34,7 @@ PROFIT AND LOSS  (FIFO cost basis)
 
 ACCRUED INTEREST  (unit values above are dirty: clean + accrued)
   INSTRUMENT                CLEAN        ACCRUED          DIRTY
-  CORP-5Y               1010.9455         1.3700      1012.3155
+  CORP-5Y               1010.9355         1.3800      1012.3155
   BUND-3Y                984.4650         0.0000       984.4650
 
 DISCOUNT CURVES  (zero rates, continuously compounded, bootstrapped from quotes)
