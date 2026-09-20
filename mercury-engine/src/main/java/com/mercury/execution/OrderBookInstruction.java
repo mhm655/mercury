@@ -3,6 +3,7 @@ package com.mercury.execution;
 import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.Price;
+import com.mercury.instrument.TradabilityProfile;
 import com.mercury.matching.OrderType;
 import com.mercury.matching.Side;
 import com.mercury.matching.TimeInForce;
@@ -38,6 +39,12 @@ public record OrderBookInstruction(
         Objects.requireNonNull(limitPrice, "limitPrice");
         Objects.requireNonNull(timeInForce, "timeInForce");
         Objects.requireNonNull(participant, "participant");
+    }
+
+    /** A price and a time in force only mean something on a book. */
+    @Override
+    public TradabilityProfile requiredProfile() {
+        return TradabilityProfile.EXCHANGE_TRADED;
     }
 
     /** A limit order that rests until filled or cancelled. */

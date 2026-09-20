@@ -54,7 +54,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * after a fill (G-1) unreachable through this, the sole sanctioned entry point. See that
  * class's javadoc.
  */
-public final class OrderBookVenue implements ExecutionVenue, AutoCloseable {
+public final class OrderBookVenue implements ExecutionVenue<OrderBookInstruction>, AutoCloseable {
 
     private final OrderIdGenerator orderIdGenerator = new OrderIdGenerator("OB-");
     private final TradeIdGenerator tradeIdGenerator;
@@ -127,12 +127,8 @@ public final class OrderBookVenue implements ExecutionVenue, AutoCloseable {
      * over-filled a resting order under test, which is why the lane exists at all.
      */
     @Override
-    public List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
-        if (!(instruction instanceof OrderBookInstruction obi)) {
-            throw new IllegalArgumentException(
-                    "OrderBookVenue only executes OrderBookInstruction, but received "
-                            + instruction.getClass().getSimpleName());
-        }
+    public List<Trade> execute(OrderBookInstruction obi, SimulationClock clock) {
+        Objects.requireNonNull(obi, "obi");
         Objects.requireNonNull(clock, "clock");
 
         // Resolved before the book is touched: failing after matching would leave resting

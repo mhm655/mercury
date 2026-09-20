@@ -4,6 +4,7 @@ import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Quantity;
+import com.mercury.instrument.TradabilityProfile;
 import com.mercury.matching.Side;
 import java.util.Objects;
 
@@ -45,6 +46,12 @@ public record OtcInstruction(
                             + "(1 - spread), so 100% gives the instrument away and anything above "
                             + "it has the seller paying the buyer.");
         }
+    }
+
+    /** A named counterparty and a spread only mean something in a bilateral negotiation. */
+    @Override
+    public TradabilityProfile requiredProfile() {
+        return TradabilityProfile.OVER_THE_COUNTER;
     }
 
     /** 100%, as basis points. See the constructor for why a spread must stay below it. */

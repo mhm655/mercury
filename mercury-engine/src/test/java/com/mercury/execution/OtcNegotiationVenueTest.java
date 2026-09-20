@@ -23,7 +23,6 @@ import com.mercury.pricing.PricingModel;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.ValuationResult;
 import com.mercury.risk.CounterpartyExposureLimit;
-import com.mercury.risk.RiskLimit;
 import com.mercury.trade.CreditLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
@@ -218,16 +217,6 @@ class OtcNegotiationVenueTest {
                 .isEqualTo(Money.zero(Currency.USD));
     }
 
-    @Test
-    void rejectsAnOrderBookInstruction() {
-        OtcNegotiationVenue venue = newVenue();
-        OrderBookInstruction wrong = OrderBookInstruction.market(
-                INSTRUMENT.id(), Side.BUY, 10, COUNTERPARTY);
-
-        assertThatThrownBy(() -> venue.execute(wrong, CLOCK))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("OtcInstruction");
-    }
 
     @Test
     void aTradeWithinTheCreditLimitExecutes() {

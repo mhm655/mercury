@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
-import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.CurrencyPair;
 import com.mercury.core.money.Money;
@@ -241,16 +240,6 @@ class OrderBookVenueTest {
         assertThat(venue.trackedOwnerCount()).isEqualTo(1);
     }
 
-    @Test
-    void rejectsAnOtcInstruction() {
-        OrderBookVenue venue = newVenue();
-        OtcInstruction otc = new OtcInstruction(AAPL, Side.BUY, Quantity.of(100), SELLER,
-                BasisPoints.ZERO);
-
-        assertThatThrownBy(() -> venue.execute(otc, CLOCK))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("OrderBookInstruction");
-    }
 
     @Test
     void everyTradeItMintsIsPublished() {

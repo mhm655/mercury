@@ -76,9 +76,14 @@ public interface FinancialInstrument {
     /**
      * Whether this instrument trades on an order book or is negotiated bilaterally.
      *
-     * <p>This is what routes an order to the right {@code ExecutionVenue} without any
-     * {@code instanceof} check. Swaps and forwards are OTC; running them through a
-     * price-time-priority matching engine would be a domain error.
+     * <p>This is how an instrument reaches the right {@code ExecutionVenue} without any
+     * {@code instanceof} on its concrete type. Swaps and forwards are OTC; running them
+     * through a price-time-priority matching engine would be a domain error.
+     *
+     * <p>{@code ExecutionRouter} checks it against the profile the instruction itself
+     * requires, and picks the venue by matching over the sealed instruction hierarchy - so
+     * this answers "is the caller holding the right kind of instruction for me", which is
+     * the question that can actually be got wrong.
      */
     TradabilityProfile tradability();
 

@@ -97,7 +97,7 @@ import java.util.Optional;
  * {@code OrderBookVenue.execute} forwards only {@code MatchResult.fills()} and drops
  * {@code selfTradePrevented()}.
  */
-public final class OtcNegotiationVenue implements ExecutionVenue {
+public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction> {
 
     private final PricingService pricingService;
     private final MarketDataSnapshot market;
@@ -153,12 +153,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue {
     }
 
     @Override
-    public List<Trade> execute(ExecutionInstruction instruction, SimulationClock clock) {
-        if (!(instruction instanceof OtcInstruction otc)) {
-            throw new IllegalArgumentException(
-                    "OtcNegotiationVenue only executes OtcInstruction, but received "
-                            + instruction.getClass().getSimpleName());
-        }
+    public List<Trade> execute(OtcInstruction otc, SimulationClock clock) {
         return negotiate(otc, clock).trades();
     }
 

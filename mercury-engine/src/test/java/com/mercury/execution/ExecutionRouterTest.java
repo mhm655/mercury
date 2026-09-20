@@ -127,7 +127,12 @@ class ExecutionRouterTest {
     }
 
     @Test
-    void anInstructionOfTheWrongShapeForItsVenueStillThrows() {
+    void refusesAnInstructionBuiltForTheOtherKindOfVenue() {
+        // The only misrouting still expressible. A venue can no longer be handed the wrong
+        // instruction shape - ExecutionVenue is parameterised by the one it accepts, so
+        // OrderBookVenue.execute(OtcInstruction) does not compile - but a caller can still
+        // pair an exchange-traded instrument with an OTC instruction here, and the two
+        // disagreeing is a caller error worth naming rather than a cast failure to discover.
         Stock aapl = Stock.of("AAPL", Currency.USD);
         InstrumentCatalog catalog = InstrumentCatalog.of(aapl);
         ExecutionRouter router = new ExecutionRouter(
@@ -139,6 +144,8 @@ class ExecutionRouterTest {
         assertThatThrownBy(() -> router.execute(aapl,
                 new OtcInstruction(aapl.id(), Side.BUY, Quantity.of(1), SELLER, BasisPoints.ZERO),
                 CLOCK))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("EXCHANGE_TRADED")
+                .hasMessageContaining("OVER_THE_COUNTER");
     }
 }
