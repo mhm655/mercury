@@ -57,6 +57,7 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.TradeExecuted;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * A fixed scenario: instruments, a market, a portfolio, and the services to value it.
@@ -124,7 +125,51 @@ public final class DemoScenario {
     private DemoScenario() {
     }
 
+    /**
+     * The three values below are constants of a fixed scenario, so each is built once.
+     *
+     * <h2>Why memoise rather than fix the callers</h2>
+     * {@code market()} bootstraps two curves (1.46 ms) and {@code ledger()} runs eight trades
+     * through real venues and OTC pricing (3.27 ms, of which the market is a part). Both were
+     * cheap builder chains until M14 made them real, and the cost then showed up as a
+     * regression in whichever runnable happened to call one twice.
+     *
+     * <p>That was fixed twice at the call site - once in {@code Main.printReport}, once in
+     * {@code GoldenMasterTest} - and both times the fix stayed where it was written.
+     * {@code MonteCarloDemo} was still calling {@code market()} twice four lines apart. A fix
+     * applied per caller has to be reapplied by every future caller who does not know it was
+     * ever needed, which is not a property a fix should have.
+     *
+     * <p>Safe because every one of them is immutable and deterministic: the same object is a
+     * correct answer to every call by construction, which is what "fixed scenario" already
+     * claimed. Nothing about the hand-wired composition changes - these are still built by
+     * calling constructors, just not repeatedly.
+     */
+    private static final Supplier<List<FinancialInstrument>> INSTRUMENTS =
+            once(DemoScenario::buildInstruments);
+    private static final Supplier<MarketDataSnapshot> MARKET = once(DemoScenario::buildMarket);
+    private static final Supplier<PortfolioLedger> LEDGER = once(DemoScenario::buildLedger);
+
+    /** Defers to {@code source} on first call and remembers the answer. Thread-safe. */
+    private static <T> Supplier<T> once(Supplier<T> source) {
+        return new Supplier<>() {
+            private T value;
+
+            @Override
+            public synchronized T get() {
+                if (value == null) {
+                    value = source.get();
+                }
+                return value;
+            }
+        };
+    }
+
     public static List<FinancialInstrument> instruments() {
+        return INSTRUMENTS.get();
+    }
+
+    private static List<FinancialInstrument> buildInstruments() {
         return List.of(
                 Stock.of("AAPL", Currency.USD),
                 Stock.of("MSFT", Currency.USD),
@@ -210,6 +255,10 @@ public final class DemoScenario {
      * curve is whatever term structure reprices all of them at once.
      */
     public static MarketDataSnapshot market() {
+        return MARKET.get();
+    }
+
+    private static MarketDataSnapshot buildMarket() {
         return MarketDataSnapshot.builder(VALUATION_DATE)
                 .spot(AAPL, 195.50)
                 .spot(MSFT, 412.25)
@@ -309,6 +358,10 @@ public final class DemoScenario {
      * only where it was convenient.
      */
     public static PortfolioLedger ledger() {
+        return LEDGER.get();
+    }
+
+    private static PortfolioLedger buildLedger() {
         InstrumentCatalog catalog = InstrumentCatalog.of(instruments());
         EventBus events = new SynchronousEventBus();
         LedgerKeeper keeper = new LedgerKeeper(MERCURY_BOOK, PortfolioLedger.opening(
