@@ -143,17 +143,21 @@ public final class BlackCapModel implements PricingModel<CapFloor> {
      * <p>It is a <em>separate</em> exception only because this class was added under a
      * constraint - see {@code docs/EXTENSIBILITY.md} - that no existing file be modified, and
      * the swap's version is nested inside {@code SwapModel}. Left to itself the right shape is
-     * one shared {@code MissingFixingException} in the pricing package, and that is what should
-     * happen when fixings arrive at M8. Recording the duplication is better than pretending the
-     * constraint was free.
+     * one shared {@code MissingFixingException} in the pricing package. Recording the
+     * duplication is better than pretending the constraint was free.
+     *
+     * <p>That hoist was once written here as something that would happen "when fixings arrive
+     * at M8". No fixing store arrived at M8 or since, and none is scheduled - so the
+     * duplication is standing, not pending, and the sentence that implied otherwise has been
+     * removed rather than left to age further.
      */
     public static final class CapletAlreadyFixedException extends MercuryException {
         CapletAlreadyFixedException(CapFloor capFloor, SchedulePeriod caplet, LocalDate asOf) {
             super("The caplet " + caplet + " of " + capFloor.id() + " fixed on "
                     + caplet.accrualStart() + ", before the valuation date " + asOf
                     + ". Its payoff is a published figure rather than a distribution, and "
-                    + "Mercury holds no fixing history. Fixings arrive with the trade lifecycle "
-                    + "at M8; until then a cap must be valued on or before its start date.");
+                    + "Mercury holds no fixing history and has none scheduled, so a cap must "
+                    + "be valued on or before its start date.");
         }
     }
 

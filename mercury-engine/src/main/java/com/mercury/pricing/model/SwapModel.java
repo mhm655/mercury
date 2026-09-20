@@ -187,8 +187,15 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
      * <p>So this follows the rule the rest of the engine already follows: an index fixing is
      * market data, the snapshot does not hold it, and missing market data is an error rather
      * than a zero - the same reasoning as
-     * {@code MarketDataSnapshot.MissingMarketDataException}. A fixing store is bookkeeping
-     * rather than a design question, and arrives with the trade lifecycle at M8.
+     * {@code MarketDataSnapshot.MissingMarketDataException}.
+     *
+     * <p><b>Still not built, and no longer scheduled.</b> An earlier version of this note said
+     * a fixing store "arrives with the trade lifecycle at M8". M8 built the lifecycle and not
+     * the store, and M9 through M15 did not either - so the sentence promising it outlived the
+     * milestone it named, which is the exact failure {@code NoOrphanedApiTest} exists to catch
+     * in code and nothing catches in prose. A fixing store is bookkeeping rather than a design
+     * question; it is deferred and unscheduled, and {@code docs/KNOWN_GAPS.md} is where its
+     * absence is tracked.
      *
      * <p>Swaps that start on or after the valuation date - every swap at the moment it is
      * traded - are unaffected.
@@ -201,8 +208,8 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
                     + "something a curve can project. Mercury holds no fixing history, and "
                     + "guessing the rate would produce a plausible wrong coupon: the accrual "
                     + "runs for the whole period, so any rate covering only the remainder is "
-                    + "charged over a longer time than it applies to. Fixings arrive with the "
-                    + "trade lifecycle at M8; until then a swap must be valued on or before its "
+                    + "charged over a longer time than it applies to. Mercury has no fixing "
+                    + "store and none is scheduled, so a swap must be valued on or before its "
                     + "start date.");
         }
     }

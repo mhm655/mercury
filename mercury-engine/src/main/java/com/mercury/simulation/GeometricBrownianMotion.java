@@ -24,10 +24,11 @@ import java.util.random.RandomGenerator;
  * <h2>Reproducibility</h2>
  * Takes a {@link RandomGenerator} rather than owning one, the same "injected, not read"
  * discipline {@code SimulationClock} enforces for time (`docs/DESIGN_PROPOSAL.md` section
- * 7.2: "injected clock, injected seed"). A caller seeds it once (typically a
- * {@code SplittableRandom}, chosen for M13's future per-task splitting, not needed yet since
- * M12 is single-threaded) and this draws from whatever state it is handed - deterministic
- * given a deterministic generator, and callable from any thread that owns its own generator.
+ * 7.2: "injected clock, injected seed"). A caller seeds it once - typically a
+ * {@code SplittableRandom}, chosen so that M13 could split a stream per block of paths, which
+ * {@code PathBlocks} now does - and this draws from whatever state it is handed:
+ * deterministic given a deterministic generator, and callable from any thread that owns its
+ * own generator. That is what makes a seeded run bit-identical on one worker or twelve.
  */
 public final class GeometricBrownianMotion {
 

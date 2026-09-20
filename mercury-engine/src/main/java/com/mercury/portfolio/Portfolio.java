@@ -21,8 +21,9 @@ import java.util.Optional;
  * service, not a method here.</em>
  *
  * <p>That is what keeps it from becoming the god class the design set out to avoid. Valuation
- * lives in {@link PortfolioValuationService}; realised P&amp;L and exposure arrive at M7 as
- * their own collaborators, not as more methods on this.
+ * lives in {@link PortfolioValuationService}; realised P&amp;L and exposure arrived at M7 as
+ * their own collaborators - {@code PortfolioLedger} and {@code PnlStatement} - rather than as
+ * more methods on this.
  *
  * <p>The opposite failure - an anemic bag of getters - is avoided by keeping the invariants
  * here: a position is never stored flat, and quantities for one instrument are combined
@@ -59,8 +60,10 @@ public final class Portfolio {
     /**
      * The currency this portfolio's value is reported in.
      *
-     * <p>At M4 every position must already be in it - see
-     * {@link PortfolioValuationService} for why cross-currency valuation waits for M7.
+     * <p>Positions need not settle in it. Through M6 they did - every position had to be in
+     * the reporting currency already - and M7 lifted that: each position is now valued on its
+     * own currency's curve and converted once at the end. See
+     * {@link PortfolioValuationService}.
      */
     public Currency reportingCurrency() {
         return reportingCurrency;

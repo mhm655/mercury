@@ -89,8 +89,11 @@ Two things, and pretending otherwise would undermine the exercise.
 **A duplicated concept.** `SwapModel` refuses a floating period that has already fixed, and
 `BlackCapModel` now refuses a caplet that has already fixed, for exactly the same reason. The
 right shape is one shared `MissingFixingException` in the pricing package. That would have
-meant editing `SwapModel`, so the cap carries its own. When fixings arrive at M8 the two should
-be hoisted into one.
+meant editing `SwapModel`, so the cap carries its own.
+
+This used to say the two "should be hoisted into one when fixings arrive at M8". They did not
+arrive at M8, or since, and no fixing store is scheduled — so the duplication is a standing
+cost of the constraint rather than a temporary one, and is counted as such here.
 
 **Two setters deleted before they were used.** `CapFloor.Builder` was written with
 `businessDayConvention` and `calendar` setters, copied from the instruments around it. The

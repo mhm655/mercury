@@ -19,9 +19,10 @@ import java.util.Objects;
  *
  * <h2>What is deliberately missing</h2>
  * No cost basis, no realised P&amp;L. Those need a {@code CostBasisMethod} and a trade history,
- * and they arrive at M7. A position at M4 answers only "how much", which is all the market
- * value in this milestone requires. Adding the fields now, unused and untested, would be
- * speculative.
+ * and they live in {@code PortfolioLedger} and {@code PositionLots} instead - added at M7,
+ * and deliberately not folded back in here. A position answers only "how much", which is all
+ * a market value needs; the history that explains how it got there is a different question
+ * with a different owner.
  */
 public record Position(InstrumentId instrumentId, Quantity quantity) {
 

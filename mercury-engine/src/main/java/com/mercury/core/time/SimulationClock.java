@@ -27,15 +27,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * An ArchUnit rule enforces this: no production class outside this one may reference
  * {@code LocalDate.now()}, {@code Instant.now()} or {@code System.currentTimeMillis()}.
  *
- * <h2>The rule is doing the work, not this type</h2>
- * Worth saying plainly: at M7 nothing in production calls this class. Valuation dates enter
- * as constants at the composition root, so the ban on clock reads is enforced and the funnel
- * it was meant to enforce them through is unused.
+ * <h2>The funnel is now load-bearing</h2>
+ * Through M7 nothing in production called this class: valuation dates entered as constants at
+ * the composition root, so the ban on clock reads was enforced while the funnel it was meant
+ * to enforce them through stood unused. That was recorded here rather than hidden, on the
+ * grounds that a reader looking for the caller should be told there isn't one.
  *
- * <p>That is not an argument for deleting it - the ban is only meaningful because there is a
- * sanctioned way to obtain the time, and the simulation harness at M14 is what will advance
- * it. But a reader looking for the caller should be told there isn't one, rather than
- * concluding the search failed.
+ * <p>There is one now, in several places. Every {@code Trade} transition is stamped from a
+ * clock, both execution venues take one, and the M14 harness drives the golden-master book's
+ * own history forward with {@link #advancing}. The ban and the sanctioned way around it are
+ * both real.
  *
  * <p>Implementations must be thread-safe. Risk workers read the valuation date
  * concurrently, so a clock that could be observed mid-update would let two workers value
