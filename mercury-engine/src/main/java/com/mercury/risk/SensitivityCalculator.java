@@ -173,12 +173,10 @@ public final class SensitivityCalculator {
         // rather than return zero because neither shocked market differed from the base.
         market.yieldCurve(currency);
 
-        double up = changeUnder(portfolio, MarketShock.bumpRate(currency, BasisPoints.ONE),
-                market, asOf);
-        double down = changeUnder(portfolio,
-                MarketShock.bumpRate(currency, BasisPoints.ONE.negated()), market, asOf);
-
-        return (up - down) / 2.0;
+        return shockedDifference(portfolio,
+                MarketShock.bumpRate(currency, BasisPoints.ONE),
+                MarketShock.bumpRate(currency, BasisPoints.ONE.negated()),
+                market, asOf) / 2.0;
     }
 
     /**
@@ -204,12 +202,10 @@ public final class SensitivityCalculator {
 
         double rate = market.fxRate(pair.base(), pair.quote());
 
-        double up = changeUnder(portfolio,
-                MarketShock.scaleFxRate(pair, 1.0 + relativeBump), market, asOf);
-        double down = changeUnder(portfolio,
-                MarketShock.scaleFxRate(pair, 1.0 - relativeBump), market, asOf);
-
-        return (up - down) / (2.0 * relativeBump * rate);
+        return shockedDifference(portfolio,
+                MarketShock.scaleFxRate(pair, 1.0 + relativeBump),
+                MarketShock.scaleFxRate(pair, 1.0 - relativeBump),
+                market, asOf) / (2.0 * relativeBump * rate);
     }
 
     /**
@@ -235,7 +231,11 @@ public final class SensitivityCalculator {
         double h = relativeBump * spot;
 
         double up = revalue(portfolio, market, underlyingId, 1.0 + relativeBump, asOf);
-        double base = revalue(portfolio, market, underlyingId, 1.0, asOf);
+        // The unshocked market directly, rather than scaleSpot(underlyingId, 1.0): the two
+        // agree to the bit, and the second builds a whole shocked snapshot to arrive back
+        // where it started. Gamma is the one sensitivity here that genuinely needs three
+        // valuations, so the third should at least be the cheap one.
+        double base = valuationService.value(portfolio, market, asOf).modelTotal();
         double down = revalue(portfolio, market, underlyingId, 1.0 - relativeBump, asOf);
 
         return (up - 2.0 * base + down) / (h * h);
@@ -281,12 +281,10 @@ public final class SensitivityCalculator {
                             + "against an asymmetric pair of shocks would be silently biased.");
         }
 
-        double up = changeUnder(portfolio,
-                MarketShock.bumpVolatility(underlyingId, DEFAULT_VOLATILITY_BUMP), market, asOf);
-        double down = changeUnder(portfolio,
-                MarketShock.bumpVolatility(underlyingId, -DEFAULT_VOLATILITY_BUMP), market, asOf);
-
-        return (up - down) / 2.0;
+        return shockedDifference(portfolio,
+                MarketShock.bumpVolatility(underlyingId, DEFAULT_VOLATILITY_BUMP),
+                MarketShock.bumpVolatility(underlyingId, -DEFAULT_VOLATILITY_BUMP),
+                market, asOf) / 2.0;
     }
 
     /**
@@ -330,12 +328,35 @@ public final class SensitivityCalculator {
         return valuationService.value(portfolio, shocked, asOf).modelTotal();
     }
 
-    /** Unrounded value change under a shock. The model-domain twin of {@link #valueChangeUnder}. */
-    private double changeUnder(Portfolio portfolio, MarketShock shock,
-                               MarketDataSnapshot market, LocalDate asOf) {
-        double base = valuationService.value(portfolio, market, asOf).modelTotal();
-        double shocked = valuationService.value(portfolio, market.withShock(shock), asOf)
+    /**
+     * {@code V(up) - V(down)}, the numerator of every central difference here that shocks by
+     * something other than spot.
+     *
+     * <h2>The base valuation is not needed and is not computed</h2>
+     * This used to be expressed as two calls to a {@code changeUnder(shock)} helper, each
+     * returning {@code V(shock) - V(base)}, whose results were then subtracted:
+     *
+     * <pre>
+     *   (V(up) - V(base)) - (V(down) - V(base))  =  V(up) - V(down)
+     * </pre>
+     *
+     * The base cancels algebraically, so {@code dv01}, {@code fxDelta} and {@code vega} were
+     * each valuing the whole portfolio four times to use two of the answers - twice the work,
+     * every time, for a term that was always subtracted away again. Eight wasted full-portfolio
+     * valuations per report, on a book of eight instruments.
+     *
+     * <p>Worth noting where the mistake came from: {@link #valueChangesUnder}, twenty lines
+     * below, exists specifically to value the base once across many shocks and says so in its
+     * javadoc. The optimisation was understood and simply not applied to this class's own
+     * methods - which is the ordinary way a known idea fails to reach the second place that
+     * needs it.
+     */
+    private double shockedDifference(Portfolio portfolio, MarketShock up, MarketShock down,
+                                     MarketDataSnapshot market, LocalDate asOf) {
+        double shockedUp = valuationService.value(portfolio, market.withShock(up), asOf)
                 .modelTotal();
-        return shocked - base;
+        double shockedDown = valuationService.value(portfolio, market.withShock(down), asOf)
+                .modelTotal();
+        return shockedUp - shockedDown;
     }
 }
