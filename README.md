@@ -9,9 +9,36 @@ byte reproducible.
 > capital-markets software operates in. Not a clone of, and not derived from, any
 > proprietary system.
 
+## In thirty seconds
+
+Three claims, each checkable in about a minute, and each one the kind a reader can disprove:
+
+- **A sixth instrument was added without editing a single existing file.** An interest-rate
+  cap: one commit, four new files, zero modified — `git show --stat` settles it. That is the
+  strongest evidence here that the open-closed pricing dispatch is real rather than asserted
+  ([how](docs/EXTENSIBILITY.md)).
+- **Three of my own performance predictions were wrong, and all three are still written
+  down** next to the measurements that killed them: a cache-friendly baseline I expected to
+  win at small book sizes and which won at none, hyperthreads forecast at 15–30% that
+  delivered 47%, and a single-writer matching engine that came out 1.7–3.8× *slower* than the
+  lock it was built to beat ([the numbers](docs/BENCHMARKS.md)).
+- **The engine is byte-for-byte reproducible, and the report further down is its output** —
+  not a transcription of it. A test fails if this README drifts from what the jar prints.
+
+```bash
+mvn -q -DskipTests package && java -jar mercury-app/target/mercury.jar walkthrough
+```
+
+That single command runs the whole engine: orders cross on a book, a bond is negotiated
+against a credit limit and a larger trade refused, the fills become a ledger, and the ledger
+is valued and risked. Everything below is detail.
+
 ## Run it
 
-Requires JDK 21+ and Maven 3.9+.
+Requires JDK 21+ and Maven 3.9+. If `java -jar` fails with `UnsupportedClassVersionError`, or
+with a message about `jvm.cfg`, the `java` on your PATH is an older or broken install — the
+JVM rejects the jar before any code in it runs, so nothing inside can produce a friendlier
+message. `java -version` is the check.
 
 ```bash
 mvn -q -DskipTests package
@@ -21,7 +48,9 @@ mvn -q -DskipTests package
 java -jar mercury-app/target/mercury.jar
 ```
 
-That prints the report below. The same jar runs the rest:
+That prints the report below, and ends by naming the other four commands — the jar tells you
+what else it can do, so this table is a reference rather than a prerequisite. `help` lists
+them too.
 
 | Command | What it shows |
 |---|---|
@@ -212,6 +241,22 @@ Three artifacts, each checkable in about a minute:
 | **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ `risk` | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios |
 | **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ `montecarlo` | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (92 → 23 → ~3 dollars of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure |
 
+### Three predictions the measurements killed
+
+A benchmark suite that only ever confirms its author is not evidence of much. These were
+written down before the runs, in ADRs and in the design proposal, and are kept beside the
+numbers that contradicted them rather than quietly edited out:
+
+| I predicted | It measured |
+|---|---|
+| A naive `ArrayList` would beat the indexed book at small sizes, because a contiguous scan is cache-friendly — and said that if it never won, my baseline was a strawman | It won at no size. Even at 1,000 orders the indexed book is 39× faster. The reasoning was miscalibrated, not wrong in kind: cache friendliness buys maybe 10×, and interior cancellation does ~250× more work. The crossover is below what this harness can measure, which is [reported as unmeasured rather than absent](docs/BENCHMARKS.md) |
+| Hyperthreads would add 15–30% beyond 6 physical cores | They added **47%** |
+| A single-writer matching engine would beat a per-book lock | It lost: **1.7× slower on one book, 3.8× slower on twelve**, while callers still block for their trades. The losing design is [kept anyway](#dead-weight-looked-for-on-purpose) — deleting it would delete the evidence for the default |
+
+All three corrections sit in the [design proposal](docs/DESIGN_PROPOSAL.md#56-concurrency--three-deliberate-models-not-add-threads)
+beside the original claims, not instead of them, and in full in
+[BENCHMARKS.md](docs/BENCHMARKS.md).
+
 ### Measured so far
 
 Order book, 50,000 resting orders, against a linear-scan baseline
@@ -362,36 +407,24 @@ Deliberate omissions and deferred fixes are listed in
 **[KNOWN_GAPS.md](docs/KNOWN_GAPS.md)**, so their absence reads as a decision rather than an
 oversight.
 
-## Planned architecture
-
-```
-mercury-engine       value objects, market conventions, instruments, pricing,
-                     curves, market data, portfolio, matching, risk,
-                     trade lifecycle, simulation
-mercury-app          CLI / terminal UI, manual dependency-injection wiring
-mercury-benchmarks   JMH suites
-```
-
-The core engine is framework-independent — no Spring, no persistence, no web server.
-Layering is enforced by ArchUnit tests rather than asserted in documentation.
-
 ## Roadmap
 
-| Phase | Scope |
-|---|---|
-| 1 | Pure Java engine — **this is the product** |
-| 2 | Thin Spring Boot REST API over the engine (engine unchanged) |
-| 3 | PostgreSQL persistence, isolated from the domain model |
-| 4 | Terminal UI, generated HTML reports, observability |
-| 5 | Distributed compute — only if a requirement justifies it |
+**The pure Java engine is the product, and it is finished.** Not a phase one with four phases
+pending — everything this page claims is about the engine, and `mvn verify` checks all of it.
 
-The order book ships early (milestone 3), ahead of pricing and portfolio, so the most
-technically interesting component exists first — at the cost, still unpaid at M7, of it
-standing apart from everything built since. Milestone-level detail is in the
-[design proposal](docs/DESIGN_PROPOSAL.md#10-roadmap).
-
-There is deliberately **no web dashboard** on the roadmap; the reasoning is in
+Later phases are drawn up and deliberately not built: a thin Spring Boot API over an unchanged
+engine, PostgreSQL persistence isolated from the domain model, richer output. None of them
+would make the engine better at what it does; they would put it behind a network, a schema and
+a template. They live in the [design proposal](docs/DESIGN_PROPOSAL.md#10-roadmap) rather than
+here, so that this page describes what exists rather than what is intended. There is
+deliberately **no web dashboard** among them; the reasoning is in
 [§10.4](docs/DESIGN_PROPOSAL.md#104-phase-4--interface-and-observability).
+
+One ordering decision is worth keeping visible. The order book shipped at M3, ahead of pricing
+and portfolio, so the most technically interesting component existed first — at the cost of it
+standing apart from everything else for four milestones, with 979 lines and no production
+caller. M8 connected it, and the row this README used to carry about it is gone from the
+dead-weight table because it stopped being true, not because it was quietly dropped.
 
 ## Building
 
