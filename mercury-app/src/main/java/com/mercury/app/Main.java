@@ -39,11 +39,13 @@ public final class Main {
     public static void main(String[] args) {
         if (args.length == 0 || args[0].equals("report")) {
             printReport();
+            printOtherCommands();
             return;
         }
         Consumer<String[]> demo = DEMOS.get(args[0]);
         if (demo != null) {
             demo.accept(new String[0]);
+            printOtherCommands();
             return;
         }
         boolean askedForHelp = args[0].equals("help") || args[0].equals("--help");
@@ -78,6 +80,41 @@ public final class Main {
         // a platform separator - CRLF on Windows - reintroducing exactly the OS dependence
         // ValuationReport is careful to avoid.
         System.out.print(report);
+    }
+
+    /**
+     * Names the commands this run did not use.
+     *
+     * <h2>Why this exists</h2>
+     * The default command printed sixty lines of report and then stopped, never mentioning
+     * that {@code walkthrough}, {@code lifecycle}, {@code risk} and {@code montecarlo} exist.
+     * Four of the five things this jar can demonstrate were reachable only by reading the
+     * README's command table first - so a reader who typed the obvious thing saw the least
+     * interesting fifth of the project and had no reason to suspect there was more.
+     *
+     * <h2>Why stderr</h2>
+     * Because stdout is data. {@code GoldenMasterTest} documents re-recording the expected
+     * report as
+     *
+     * <pre>
+     *   java -jar mercury-app/target/mercury.jar &gt; src/test/resources/golden/valuation-report.txt
+     * </pre>
+     *
+     * and a hint on stdout would land in that file, and from there into the README block the
+     * same test compares against. A terminal shows both streams, so the reader sees this and
+     * a redirect does not - which is the whole distinction the two streams are for.
+     */
+    private static void printOtherCommands() {
+        System.err.println();
+        System.err.println("Five commands in this jar; this was one. The rest:");
+        System.err.println("  walkthrough  orders cross, become trades, become a book, and get");
+        System.err.println("               risked - the whole engine in one pass, and the one to");
+        System.err.println("               run next if you run only one more");
+        System.err.println("  lifecycle    trade state machine, self-trade prevention, a credit breach");
+        System.err.println("  risk         Gamma and Vega against their closed forms; historical VaR");
+        System.err.println("  montecarlo   Monte Carlo converging on Black-Scholes; VaR and shortfall");
+        System.err.println("  report       the valuation report (the default)");
+        System.err.println("Run one with: java -jar mercury.jar <command>");
     }
 
     private static String usage() {

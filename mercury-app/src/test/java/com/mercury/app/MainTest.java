@@ -37,6 +37,24 @@ class MainTest {
                 .contains("report", "walkthrough", "lifecycle", "risk", "montecarlo");
     }
 
+    @Test
+    void everyRunNamesTheCommandsItDidNotUse() {
+        // The default command used to print the report and stop, so four of the five things
+        // this jar demonstrates were reachable only by reading the README's table first.
+        assertThat(errorStreamOf()).contains("walkthrough", "lifecycle", "risk", "montecarlo");
+        assertThat(errorStreamOf("risk")).contains("walkthrough");
+    }
+
+    @Test
+    void theHintGoesToStderrSoARedirectCapturesOnlyTheReport() {
+        // GoldenMasterTest documents re-recording the expected report with
+        //   java -jar mercury.jar > golden/valuation-report.txt
+        // so anything helpful printed on stdout would land in the golden file, and from there
+        // into the README block that same test compares against. This is the guard on that.
+        assertThat(run()).doesNotContain("Five commands in this jar");
+        assertThat(run()).isEqualTo(run("report"));
+    }
+
     private static String run(String... args) {
         PrintStream original = System.out;
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
@@ -45,6 +63,21 @@ class MainTest {
             Main.main(args);
         } finally {
             System.setOut(original);
+        }
+        return captured.toString(StandardCharsets.UTF_8);
+    }
+
+    private static String errorStreamOf(String... args) {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        try {
+            Main.main(args);
+        } finally {
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
         return captured.toString(StandardCharsets.UTF_8);
     }
