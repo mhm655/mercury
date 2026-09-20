@@ -154,7 +154,7 @@ public final class SwapModel implements PricingModel<InterestRateSwap> {
     private static List<Cashflow> projectedCashflows(FloatingRateLeg leg,
                                                      MarketDataSnapshot market, LocalDate asOf) {
         YieldCurve curve = market.yieldCurve(leg.currency());
-        List<SchedulePeriod> remaining = leg.unpaidPeriods(asOf);
+        List<SchedulePeriod> remaining = leg.schedule().unpaidPeriodsAsOf(asOf);
         List<Cashflow> cashflows = new ArrayList<>(remaining.size());
 
         for (SchedulePeriod period : remaining) {

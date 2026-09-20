@@ -92,11 +92,6 @@ public record FloatingRateLeg(
         return payReceive == PayReceive.PAY ? gross.negated() : gross;
     }
 
-    /** Periods still to be paid as of {@code valuationDate}, for a pricer to project over. */
-    public List<SchedulePeriod> unpaidPeriods(java.time.LocalDate valuationDate) {
-        return schedule.unpaidPeriodsAsOf(valuationDate);
-    }
-
     @Override
     public String toString() {
         String spreadText = spread.value() == 0.0 ? "" : " + " + spread;

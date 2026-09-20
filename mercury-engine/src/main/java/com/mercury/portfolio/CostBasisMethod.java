@@ -4,6 +4,7 @@ import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -153,10 +154,10 @@ public enum CostBasisMethod {
         return lots.stream().map(Lot::cost).reduce(zero, Money::plus);
     }
 
-    private static java.time.LocalDate latestDate(List<Lot> lots) {
+    private static LocalDate latestDate(List<Lot> lots) {
         return lots.stream()
                 .map(Lot::acquired)
-                .max(java.time.LocalDate::compareTo)
+                .max(LocalDate::compareTo)
                 .orElseThrow(() -> new IllegalStateException("no lots"));
     }
 }

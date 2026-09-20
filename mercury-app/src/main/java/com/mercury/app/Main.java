@@ -3,6 +3,7 @@ package com.mercury.app;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -23,7 +24,7 @@ import java.util.function.Consumer;
 public final class Main {
 
     /** Command name to what it runs. Ordered, so {@code help} lists them as written. */
-    private static final Map<String, Consumer<String[]>> DEMOS = new java.util.LinkedHashMap<>();
+    private static final Map<String, Consumer<String[]>> DEMOS = new LinkedHashMap<>();
 
     static {
         DEMOS.put("walkthrough", EndToEndDemo::main);

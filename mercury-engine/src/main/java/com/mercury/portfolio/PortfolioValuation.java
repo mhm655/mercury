@@ -1,6 +1,7 @@
 package com.mercury.portfolio;
 
 import com.mercury.core.id.PortfolioId;
+import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
 import com.mercury.core.money.Quantity;
 import com.mercury.instrument.FinancialInstrument;
@@ -142,7 +143,7 @@ public record PortfolioValuation(
      * and this type exists partly to make that impossible. Risk keeps the unrounded figures;
      * see {@link #modelTotal()}.
      */
-    public Money exposureTo(com.mercury.core.money.Currency currency) {
+    public Money exposureTo(Currency currency) {
         Objects.requireNonNull(currency, "currency");
         return lines.stream()
                 .filter(line -> line.localValue().currency() == currency)
@@ -151,7 +152,7 @@ public record PortfolioValuation(
     }
 
     /** Every currency the book actually settles in, in the order positions were valued. */
-    public java.util.List<com.mercury.core.money.Currency> currencies() {
+    public List<Currency> currencies() {
         return lines.stream()
                 .map(line -> line.localValue().currency())
                 .distinct()

@@ -228,8 +228,8 @@ class InterestRateSwapTest {
         void exposesUnpaidPeriods() {
             FloatingRateLeg leg = payerSwap().floatingLeg();
 
-            assertThat(leg.unpaidPeriods(EFFECTIVE)).hasSize(20);
-            assertThat(leg.unpaidPeriods(LocalDate.of(2026, 1, 16))).hasSize(12);
+            assertThat(leg.schedule().unpaidPeriodsAsOf(EFFECTIVE)).hasSize(20);
+            assertThat(leg.schedule().unpaidPeriodsAsOf(LocalDate.of(2026, 1, 16))).hasSize(12);
         }
     }
 

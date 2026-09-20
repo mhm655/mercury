@@ -3,6 +3,7 @@ package com.mercury.core.time;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.Year;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
@@ -210,7 +211,7 @@ public enum DayCountConvention {
     }
 
     private static long daysInYear(int year) {
-        return java.time.Year.isLeap(year) ? 366L : 365L;
+        return Year.isLeap(year) ? 366L : 365L;
     }
 
     static void requireOrdered(LocalDate start, LocalDate end) {

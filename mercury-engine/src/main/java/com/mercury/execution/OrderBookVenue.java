@@ -19,13 +19,14 @@ import com.mercury.portfolio.InstrumentCatalog;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The exchange-traded {@link ExecutionVenue}: routes an {@link OrderBookInstruction} into a
@@ -239,7 +240,7 @@ public final class OrderBookVenue implements ExecutionVenue, AutoCloseable {
         // price to the currency's minor units before multiplying by quantity would scale
         // the rounding error by the fill size instead of rounding the final total once.
         Money consideration = Money.of(
-                fill.price().value().multiply(java.math.BigDecimal.valueOf(signedQuantity)), currency);
+                fill.price().value().multiply(BigDecimal.valueOf(signedQuantity)), currency);
 
         Trade trade = Trade.newTrade(tradeIdGenerator.next(), fill.instrumentId(), owner, delta,
                 consideration, clock.today(), Optional.empty(), Optional.empty());

@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Routes an instrument to a model that can price it.
@@ -200,7 +201,7 @@ public final class PricingService {
     /** Raised when no registered model can price an instrument. */
     public static final class NoPricingModelException extends MercuryException {
 
-        NoPricingModelException(FinancialInstrument instrument, java.util.Set<Class<?>> known) {
+        NoPricingModelException(FinancialInstrument instrument, Set<Class<?>> known) {
             super("No pricing model registered for " + instrument.getClass().getSimpleName()
                     + " (" + instrument.id() + "). Registered types: "
                     + known.stream().map(Class::getSimpleName).sorted().toList()
@@ -208,7 +209,7 @@ public final class PricingService {
         }
 
         NoPricingModelException(FinancialInstrument instrument, ModelName requested,
-                                java.util.Set<ModelName> available) {
+                                Set<ModelName> available) {
             super("No model named " + requested + " for "
                     + instrument.getClass().getSimpleName() + " (" + instrument.id()
                     + "). Available: " + available.stream().map(ModelName::value).sorted().toList());

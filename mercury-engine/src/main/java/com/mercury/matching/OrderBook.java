@@ -3,6 +3,7 @@ package com.mercury.matching;
 import com.mercury.core.id.InstrumentId;
 import com.mercury.core.id.OrderId;
 import com.mercury.core.money.Price;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -303,7 +304,7 @@ public final class OrderBook {
     }
 
     /** Best ask minus best bid, or empty unless both sides are populated. */
-    public Optional<java.math.BigDecimal> spread() {
+    public Optional<BigDecimal> spread() {
         if (bestBid == null || bestAsk == null) {
             return Optional.empty();
         }

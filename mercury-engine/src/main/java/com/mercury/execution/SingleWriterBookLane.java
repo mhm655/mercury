@@ -2,6 +2,7 @@ package com.mercury.execution;
 
 import com.mercury.core.id.InstrumentId;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -65,7 +66,7 @@ final class SingleWriterBookLane implements BookLane {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while waiting for the book's writer", e);
-        } catch (java.util.concurrent.ExecutionException e) {
+        } catch (ExecutionException e) {
             // The book rejected the command - an unknown instrument, a non-tradable one, a
             // duplicate order id. The caller must see the exception the book actually threw,
             // not a wrapper that says a thread failed: single-writer is a threading choice and

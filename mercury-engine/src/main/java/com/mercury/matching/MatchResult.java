@@ -1,8 +1,11 @@
 package com.mercury.matching;
 
 import com.mercury.core.id.OrderId;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * What happened when an order was submitted.
@@ -49,17 +52,17 @@ public record MatchResult(
     }
 
     /** The volume-weighted average price of this order's executions, or empty if none. */
-    public java.util.Optional<java.math.BigDecimal> averageFillPrice() {
+    public Optional<BigDecimal> averageFillPrice() {
         if (fills.isEmpty()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
-        java.math.BigDecimal notional = java.math.BigDecimal.ZERO;
+        BigDecimal notional = BigDecimal.ZERO;
         for (Fill fill : fills) {
             notional = notional.add(
-                    fill.price().value().multiply(java.math.BigDecimal.valueOf(fill.quantity())));
+                    fill.price().value().multiply(BigDecimal.valueOf(fill.quantity())));
         }
-        return java.util.Optional.of(notional.divide(
-                java.math.BigDecimal.valueOf(filledQuantity), 8, java.math.RoundingMode.HALF_EVEN));
+        return Optional.of(notional.divide(
+                BigDecimal.valueOf(filledQuantity), 8, RoundingMode.HALF_EVEN));
     }
 
     @Override
