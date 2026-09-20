@@ -19,9 +19,28 @@ import java.util.Objects;
  * here is a perfectly sensible, honest combination - it means "no more than 1% of scenarios
  * lost more than this, but exactly how much more is itself uncertain from this sample size."
  *
+ * <h2>A bound can run out of sample before it runs out of band</h2>
+ * The band is computed as a range of <em>ranks</em> around the point estimate's rank, and a
+ * rank cannot go below 1 or above {@code n}. On a small sample it frequently wants to: ten
+ * scenarios at 90% put the point estimate at rank 1 already, and the severe end of the band
+ * asks for rank -1. Clamping it to 1 returns the worst observation - which is the point
+ * estimate itself, so the interval comes back looking like {@code [5929.96, 14119.79]} with
+ * its upper end silently equal to the number it was supposed to be bracketing.
+ *
+ * <p>Read as a two-sided band that is badly misleading: it says "the loss is at most
+ * 14,119.79" when the truth is "this sample contains nothing worse, and a larger one very
+ * likely would". So a clamped bound is flagged rather than quietly returned, and
+ * {@link #toString} marks it with {@code >=} (or {@code <=} at the mild end). A bound limited
+ * by the sample is not a bound, and the difference has to be visible at the point where
+ * someone reads the number.
+ *
  * <p>Immutable and thread-safe.
  */
-public record QuantileConfidenceInterval(Money lowerBound, Money upperBound) {
+public record QuantileConfidenceInterval(
+        Money lowerBound,
+        Money upperBound,
+        boolean mildBoundAtSampleEdge,
+        boolean severeBoundAtSampleEdge) {
 
     public QuantileConfidenceInterval {
         Objects.requireNonNull(lowerBound, "lowerBound");
@@ -32,8 +51,22 @@ public record QuantileConfidenceInterval(Money lowerBound, Money upperBound) {
         }
     }
 
+    /** An interval whose two bounds both fell inside the sample. */
+    public QuantileConfidenceInterval(Money lowerBound, Money upperBound) {
+        this(lowerBound, upperBound, false, false);
+    }
+
+    /**
+     * True if either end of the band was cut off by the size of the sample rather than by the
+     * statistic - so the interval understates how uncertain the estimate really is.
+     */
+    public boolean isSampleLimited() {
+        return mildBoundAtSampleEdge || severeBoundAtSampleEdge;
+    }
+
     @Override
     public String toString() {
-        return "[" + lowerBound + ", " + upperBound + "]";
+        return "[" + (mildBoundAtSampleEdge ? "<=" : "") + lowerBound
+                + ", " + (severeBoundAtSampleEdge ? ">=" : "") + upperBound + "]";
     }
 }

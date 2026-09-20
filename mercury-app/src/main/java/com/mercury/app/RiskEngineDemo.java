@@ -138,5 +138,12 @@ public final class RiskEngineDemo {
         System.out.println("  only 10 days sampled, that interval is wide: this is the same statistic");
         System.out.println("  MonteCarloDemo reports from 200,000 paths, where it comes out far");
         System.out.println("  tighter. Ten historical days simply cannot pin a 90% VaR down closely.");
+        if (confidenceInterval.isSampleLimited()) {
+            System.out.println("  The >= marks a bound the sample ran out before the statistic did:");
+            System.out.println("  at 90% over 10 days the estimate is already the worst observation,");
+            System.out.println("  so the severe end has nothing worse to point at and is not a bound");
+            System.out.println("  at all. Printed unmarked it would read as 'the loss is at most");
+            System.out.println("  this', which is the one thing it does not say.");
+        }
     }
 }

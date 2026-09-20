@@ -220,15 +220,23 @@ public final class HistoricalVaRCalculator {
         double p = (double) ranked.rank() / n;
         double rankStandardError = Math.sqrt(n * p * (1.0 - p));
 
-        int lowerRank = clampRank((int) Math.round(ranked.rank() - CONFIDENCE_INTERVAL_Z * rankStandardError), n);
-        int upperRank = clampRank((int) Math.round(ranked.rank() + CONFIDENCE_INTERVAL_Z * rankStandardError), n);
+        int wantedLower = (int) Math.round(ranked.rank() - CONFIDENCE_INTERVAL_Z * rankStandardError);
+        int wantedUpper = (int) Math.round(ranked.rank() + CONFIDENCE_INTERVAL_Z * rankStandardError);
+        int lowerRank = clampRank(wantedLower, n);
+        int upperRank = clampRank(wantedUpper, n);
 
         // Ascending sort: a smaller rank is a worse (more negative) P&L, so it is the larger
         // loss and the upper bound of the interval; a larger rank is milder and the lower
         // bound. Not swapped - the names refer to the loss magnitude, not the rank order.
         Money milder = lossOrZero(ranked.sorted().get(upperRank - 1));
         Money worse = lossOrZero(ranked.sorted().get(lowerRank - 1));
-        return new QuantileConfidenceInterval(milder, worse);
+
+        // Whether the band wanted a rank the sample does not have. Ten scenarios at 90% put
+        // the point estimate at rank 1, so the severe end asks for rank -1 and gets clamped
+        // back onto the point estimate - an "upper bound" equal to the number it brackets.
+        // Returning that unmarked reads as "the loss is at most this" when it means "this
+        // sample holds nothing worse". See QuantileConfidenceInterval.
+        return new QuantileConfidenceInterval(milder, worse, wantedUpper > n, wantedLower < 1);
     }
 
     private static int clampRank(int rank, int n) {
