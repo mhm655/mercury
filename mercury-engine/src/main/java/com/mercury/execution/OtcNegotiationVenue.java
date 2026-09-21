@@ -19,6 +19,8 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -28,11 +30,16 @@ import java.util.Optional;
  * bilateral {@link Trade} against a named {@link com.mercury.trade.Counterparty} - the
  * request-for-quote model {@code docs/DESIGN_PROPOSAL.md} section A2.1 describes.
  *
- * <h2>Quote and execution happen in one call</h2>
- * A real RFQ workflow separates a quoted, expiring price from a later accept. This venue
- * collapses the two - it prices and executes atomically - which is a stated simplification
- * in the same spirit as the project's existing "vanilla fixed-float swap, single-curve"
- * simplifications, not an oversight. See {@code docs/KNOWN_GAPS.md}.
+ * <h2>M25: {@link #quote}, {@link #accept}, and {@link #negotiate} as sugar for both</h2>
+ * A real RFQ workflow separates a quoted, expiring price from a later accept - {@link #quote}
+ * prices and returns a frozen {@link Quote}, touching nothing else; {@link #accept} checks the
+ * quote has not expired, then does the credit check and execution against the price it froze,
+ * never re-pricing. {@link #negotiate} still prices and executes in one call, exactly as it
+ * always has - it is now sugar for {@code accept(quote(otc, clock), clock)}, so every existing
+ * caller is unaffected. {@link #quote} performs no credit or exposure check at all: reserving
+ * credit against a quote that might never be accepted is a materially larger "pending exposure"
+ * feature nothing in this codebase asks for yet, so that stays deferred entirely to
+ * {@link #accept} rather than built speculatively.
  *
  * <h2>The spread is a percentage of the priced mid, and that has a real limit</h2>
  * Scaling the mid by {@code (1 +/- spread)} is the right convention for anything quoted as a
@@ -94,6 +101,16 @@ import java.util.Optional;
  */
 public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction> {
 
+    /**
+     * How long a quote {@link #negotiate} takes internally stays honourable - never actually
+     * observed, since {@link #negotiate} accepts its own quote immediately, but every
+     * {@link Quote} needs a validity, and this is the stated one for the path that does not
+     * ask for one explicitly. A real caller wanting fire-and-forget-later negotiation should
+     * call {@link #quote(OtcInstruction, SimulationClock, Duration)} with a validity that means
+     * something to them.
+     */
+    private static final Duration DEFAULT_QUOTE_VALIDITY = Duration.ofMinutes(5);
+
     private final PricingService pricingService;
     private final MarketDataSnapshot market;
     private final InstrumentCatalog instruments;
@@ -154,16 +171,42 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     }
 
     /**
-     * Prices and negotiates {@code otc}, checking the projected exposure it would create
-     * against {@code riskLimit} before anything executes.
+     * Prices and negotiates {@code otc} in one call - sugar for
+     * {@code accept(quote(otc, clock), clock)}, kept byte-for-byte behaviourally identical to
+     * before M25 split the two apart: same exceptions, in the same order, under the same lock
+     * scope. See {@link #quote} and {@link #accept} for the two steps this composes.
      *
      * @throws SpreadHadNoEffectException if a nonzero requested spread had no measurable effect
      * @throws CounterpartyDirectory.UnknownCounterpartyException if {@code otc} names a
      *         counterparty this venue does not know
      */
     public NegotiationResult negotiate(OtcInstruction otc, SimulationClock clock) {
+        return accept(quote(otc, clock), clock);
+    }
+
+    /**
+     * {@link #quote(OtcInstruction, SimulationClock, Duration)} with this venue's default
+     * validity - used only by {@link #negotiate}'s internal delegation, where the quote is
+     * accepted immediately and any positive validity would do.
+     */
+    Quote quote(OtcInstruction otc, SimulationClock clock) {
+        return quote(otc, clock, DEFAULT_QUOTE_VALIDITY);
+    }
+
+    /**
+     * Prices {@code otc} and freezes the result into a {@link Quote}, valid for {@code validity}
+     * from {@code clock.now()} - the RFQ workflow's quote step. Touches nothing else: no credit
+     * check, no exposure committed, no {@link Trade} minted. See the class javadoc for why the
+     * credit check is deferred entirely to {@link #accept}.
+     *
+     * @throws SpreadHadNoEffectException if a nonzero requested spread had no measurable effect
+     * @throws CounterpartyDirectory.UnknownCounterpartyException if {@code otc} names a
+     *         counterparty this venue does not know
+     */
+    public Quote quote(OtcInstruction otc, SimulationClock clock, Duration validity) {
         Objects.requireNonNull(otc, "otc");
         Objects.requireNonNull(clock, "clock");
+        Objects.requireNonNull(validity, "validity");
 
         FinancialInstrument instrument = instruments.require(otc.instrumentId());
         ValuationResult priced = pricingService.price(instrument, market, clock.today());
@@ -203,24 +246,47 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
         double exposureInLimitCurrency =
                 consideration.abs().amount().doubleValue() * market.fxRate(currency, limitCurrency);
         Money tradeExposure = Money.fromModelValue(exposureInLimitCurrency, limitCurrency);
-        Quantity delta = buy ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
+
+        return new Quote(otc, instrument, consideration, tradeExposure, clock.now().plus(validity));
+    }
+
+    /**
+     * Accepts {@code quote} at exactly the price it froze - never re-pricing, which is the
+     * entire point of a quote - checking the projected exposure it would create against
+     * {@code riskLimit} before anything executes.
+     *
+     * @throws QuoteExpiredException if {@code clock.now()} has reached or passed
+     *         {@code quote.expiresAt()}
+     * @throws CounterpartyDirectory.UnknownCounterpartyException if {@code quote} names a
+     *         counterparty this venue does not know
+     */
+    public NegotiationResult accept(Quote quote, SimulationClock clock) {
+        Objects.requireNonNull(quote, "quote");
+        Objects.requireNonNull(clock, "clock");
+        if (quote.isExpiredAt(clock.now())) {
+            throw new QuoteExpiredException(quote, clock.now());
+        }
+
+        OtcInstruction otc = quote.instruction();
+        Counterparty counterparty = counterparties.require(otc.counterparty());
+        Quantity delta = otc.side().isBuy() ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
 
         synchronized (exposureLedger.lock()) {
-            Money projectedExposure = exposureTo(counterparty.id()).plus(tradeExposure);
+            Money projectedExposure = exposureTo(counterparty.id()).plus(quote.tradeExposure());
             LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
             if (check.isBreached()) {
                 return NegotiationResult.rejected(check.breaches());
             }
 
-            Trade trade = Trade.newTrade(tradeIdGenerator.next(), instrument.id(), ownBook, delta,
-                    consideration, clock.today(),
+            Trade trade = Trade.newTrade(tradeIdGenerator.next(), quote.instrument().id(), ownBook,
+                    delta, quote.consideration(), clock.today(),
                     Optional.of(SettlementConvention.settlementDateFor(clock.today())),
                     Optional.of(otc.counterparty()));
-            trade = trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
+            trade = trade.transitionTo(TradeStatus.VALIDATED, "accepted from quote", clock)
                     .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
                     .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
 
-            exposureLedger.commit(counterparty.id(), projectedExposure, trade, tradeExposure);
+            exposureLedger.commit(counterparty.id(), projectedExposure, trade, quote.tradeExposure());
 
             // Announced under the same lock that committed the exposure, so a subscriber can
             // never see a trade the venue has not yet counted against its counterparty's
@@ -286,6 +352,21 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
                     + "spread on one is quoted on the rate, not as a fraction of the NPV, and this "
                     + "venue does not yet support that convention (see docs/KNOWN_GAPS.md). "
                     + "Booking the trade anyway would silently claim a spread that was never applied.");
+        }
+    }
+
+    /**
+     * Raised when {@link #accept} is called on a {@link Quote} that has already expired - see
+     * that method's javadoc for why this venue refuses rather than silently honouring a stale
+     * price or silently re-pricing.
+     */
+    public static final class QuoteExpiredException extends MercuryException {
+
+        QuoteExpiredException(Quote quote, Instant now) {
+            super("Quote for " + quote.instruction().instrumentId() + " expired at "
+                    + quote.expiresAt() + "; it is now " + now + ". A quote's price is frozen at "
+                    + "the moment it was given, so accepting it late would either honour a stale "
+                    + "price or silently re-price - this venue does neither. Request a fresh quote.");
         }
     }
 }

@@ -28,10 +28,12 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class OtcNegotiationVenueTest {
@@ -95,6 +97,32 @@ class OtcNegotiationVenueTest {
         public ValuationResult price(TestOtcInstrument instrument, MarketDataSnapshot market,
                                      LocalDate asOf) {
             return new ValuationResult(0.0, instrument.currency(), name());
+        }
+    }
+
+    /**
+     * A different price on every call - proves whether a caller re-priced or used a frozen
+     * quote. If {@link OtcNegotiationVenue#accept} ever called {@code price} a second time, the
+     * executed trade's consideration would reflect the later, higher price instead of the one
+     * the quote froze.
+     */
+    private static final class IncrementingPriceModel implements PricingModel<TestOtcInstrument> {
+        private final AtomicInteger calls = new AtomicInteger();
+
+        @Override
+        public Class<TestOtcInstrument> instrumentType() {
+            return TestOtcInstrument.class;
+        }
+
+        @Override
+        public ModelName name() {
+            return ModelName.of("incrementing");
+        }
+
+        @Override
+        public ValuationResult price(TestOtcInstrument instrument, MarketDataSnapshot market,
+                                     LocalDate asOf) {
+            return new ValuationResult(100.00 + calls.getAndIncrement(), instrument.currency(), name());
         }
     }
 
@@ -549,5 +577,141 @@ class OtcNegotiationVenueTest {
         assertThat(rejected.isRejected()).isTrue();
         assertThat(announced).extracting(TradeExecuted::trade)
                 .containsExactlyElementsOf(executed.trades());
+    }
+
+    @Test
+    void quotingDoesNotExecuteOrCommitExposure() {
+        SynchronousEventBus bus = new SynchronousEventBus();
+        List<TradeExecuted> announced = new ArrayList<>();
+        bus.subscribe(TradeExecuted.class, announced::add);
+        PricingService pricingService = PricingService.builder().register(new FixedPriceModel()).build();
+        MarketDataSnapshot market = MarketDataSnapshot.builder(VALUATION_DATE).build();
+        OtcNegotiationVenue venue = new OtcNegotiationVenue(pricingService, market,
+                InstrumentCatalog.of(INSTRUMENT), new TradeIdGenerator("TRD-"), OWN_BOOK,
+                CounterpartyDirectory.of(ACME), new CounterpartyExposureLimit(), bus);
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+
+        assertThat(quote.consideration()).isEqualTo(Money.of("10000.00", Currency.USD));
+        assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.zero(Currency.USD));
+        assertThat(announced).isEmpty();
+    }
+
+    @Test
+    void acceptingAFreshQuoteExecutesAtTheFrozenPrice() {
+        OtcNegotiationVenue venue = newVenue(new IncrementingPriceModel(), ACME.creditLimit());
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+        NegotiationResult result = venue.accept(quote, CLOCK);
+
+        // 100.00 x 100 units, the price on the FIRST (and only) call to the model. A re-pricing
+        // accept would have called it again and produced 101.00 x 100 instead.
+        assertThat(result.trades().get(0).consideration())
+                .isEqualTo(Money.of("10000.00", Currency.USD));
+        assertThat(result.trades().get(0).consideration()).isEqualTo(quote.consideration());
+    }
+
+    @Test
+    void acceptingAnExpiredQuoteThrowsRatherThanExecuting() {
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        SimulationClock.Advancing clock = SimulationClock.advancing(VALUATION_DATE);
+
+        Quote quote = venue.quote(instruction, clock, Duration.ofMinutes(5));
+        clock.advanceTo(VALUATION_DATE.plusDays(1));
+
+        assertThatThrownBy(() -> venue.accept(quote, clock))
+                .isInstanceOf(OtcNegotiationVenue.QuoteExpiredException.class)
+                .hasMessageContaining("expired");
+    }
+
+    @Test
+    void acceptingAQuoteRightAtItsExpiryInstantThrows() {
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ZERO);
+
+        assertThatThrownBy(() -> venue.accept(quote, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.QuoteExpiredException.class);
+    }
+
+    @Test
+    void aTradeOverTheCreditLimitIsRejectedAtAcceptNotAtQuote() {
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("5000.00", Currency.USD)));
+        // mid 100.00, no spread, x 100 units = 10,000.00 - over a 5,000 limit.
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+        NegotiationResult result = venue.accept(quote, CLOCK);
+
+        assertThat(result.isRejected()).isTrue();
+        assertThat(result.breaches()).hasSize(1);
+    }
+
+    @Test
+    void negotiateStillProducesTheSameResultAsQuoteThenAccept() {
+        OtcNegotiationVenue viaNegotiate = newVenue();
+        OtcNegotiationVenue viaQuoteThenAccept = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ofPercent(1.0));
+
+        NegotiationResult negotiated = viaNegotiate.negotiate(instruction, CLOCK);
+        Quote quote = viaQuoteThenAccept.quote(instruction, CLOCK, Duration.ofMinutes(5));
+        NegotiationResult accepted = viaQuoteThenAccept.accept(quote, CLOCK);
+
+        assertThat(accepted.isRejected()).isEqualTo(negotiated.isRejected());
+        assertThat(accepted.trades().get(0).consideration())
+                .isEqualTo(negotiated.trades().get(0).consideration());
+        assertThat(accepted.trades().get(0).delta()).isEqualTo(negotiated.trades().get(0).delta());
+    }
+
+    @Test
+    void concurrentAcceptsOfDistinctQuotesNeverAdmitMoreThanTheLimit() throws Exception {
+        // The same invariant concurrentNegotiationsNeverAdmitMoreThanTheLimit proves for
+        // negotiate(), proven again for accept() - the refactor that split pricing from
+        // execution must not have weakened the lock scope that makes it hold.
+        for (int round = 0; round < 20; round++) {
+            OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                    new CreditLimit(Money.of("100000.00", Currency.USD)));
+            OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY,
+                    Quantity.of(10), COUNTERPARTY, BasisPoints.ZERO);
+
+            int attempts = 400;
+            List<Quote> quotes = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                quotes.add(venue.quote(instruction, CLOCK, Duration.ofMinutes(5)));
+            }
+
+            java.util.concurrent.ExecutorService pool =
+                    java.util.concurrent.Executors.newFixedThreadPool(16);
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<NegotiationResult>> results = new ArrayList<>();
+            for (Quote quote : quotes) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return venue.accept(quote, CLOCK);
+                }));
+            }
+            start.countDown();
+            int executed = 0;
+            for (java.util.concurrent.Future<NegotiationResult> result : results) {
+                if (!result.get().isRejected()) {
+                    executed++;
+                }
+            }
+            pool.shutdown();
+
+            assertThat(executed).as("round %d", round).isEqualTo(100);
+            assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("100000.00", Currency.USD));
+        }
     }
 }

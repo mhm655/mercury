@@ -1182,6 +1182,38 @@ a check that caught a real sign error during implementation before it reached a 
 **Not in scope:** a second, independently auditable `Trade` for the opening leg - real,
 additional design work for the day a caller actually needs one.
 
+#### M25 — OTC negotiation: a separate, expiring quote step — ✅ done
+
+`OtcNegotiationVenue.negotiate`'s own class javadoc named the simplification explicitly: "a
+real RFQ workflow separates a quoted, expiring price from a later accept. This venue collapses
+the two." That collapsing was deliberate, but left no shape for a caller who genuinely wants
+the two-step version.
+
+`quote(OtcInstruction, SimulationClock, Duration)` prices and freezes the result into a new
+`Quote` record, touching nothing else - no credit check, no exposure committed, no `Trade`
+minted. `accept(Quote, SimulationClock)` checks the quote has not expired, then does exactly
+what `negotiate` always did - credit check, mint, transition, commit, publish - against the
+quote's frozen price, never re-pricing. `negotiate` is now
+`accept(quote(otc, clock), clock)`: every pre-existing test still passes unchanged, which is
+the proof the refactor did not alter observable behaviour.
+
+`quote()` deliberately performs no credit or exposure check at all, a stated scope limit rather
+than a silent one: reserving credit against a quote that might never be accepted is a
+materially larger "pending exposure" feature nothing in this codebase asks for yet, and would
+need its own design work if a real caller ever does.
+
+Two things were proven rather than assumed. That `accept` truly never re-prices: a test
+pricing model returns a different value on every call, so a re-pricing `accept` would have
+produced a visibly different consideration than the one the quote recorded. And that expiry is
+real, not vacuous: the expiry test uses `SimulationClock.advancing(...)` with an explicit
+`advanceTo(...)` past the quote's expiry, deliberately avoiding the fixed-clock trap M19's
+`TradeLifecycleDemo` fell into once already this session (a clock that never advances cannot
+expire anything).
+
+**Not in scope:** reserving credit at quote time, and any multi-quote-per-instruction workflow
+(competing quotes from several venues, say) - both real, larger features nothing here needs
+yet.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and

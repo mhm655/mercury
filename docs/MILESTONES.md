@@ -7,6 +7,22 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M25 complete** — **OTC negotiation splits into a quote step and an accept step, with
+`negotiate` kept as sugar for both.** `OtcNegotiationVenue.negotiate` always priced and
+executed in one call - a stated simplification, but one that left no shape for a real RFQ
+workflow's quoted, expiring price. `quote(OtcInstruction, SimulationClock, Duration)` prices
+and freezes the result into a new `Quote`, touching nothing else - no credit check, no exposure
+committed. `accept(Quote, SimulationClock)` checks expiry, then does exactly what `negotiate`
+always did, against the frozen price, never re-pricing. `negotiate` is now
+`accept(quote(otc, clock), clock)` - every existing test still passes unchanged, confirming the
+refactor is behaviourally identical. `quote()` deliberately performs no credit or exposure
+check at all, a stated scope limit: reserving credit against a quote that might never be
+accepted is a materially larger "pending exposure" feature nothing asks for yet. Proven that
+re-pricing cannot sneak back in (a pricing model returning a different value on every call
+would expose it instantly) and that expiry is real (using an `Advancing` clock explicitly moved
+past the quote's expiry, not a clock that can never expire anything - the exact trap M19's
+`TradeLifecycleDemo` fell into once already this session).
+
 **M23 complete** — **a trade that carries a position through zero settles instead of being
 refused.** Selling fifteen when long ten is really two trades - closing ten at the old cost
 basis, opening a short five at today's price - and `PositionLots.apply` refused it rather than

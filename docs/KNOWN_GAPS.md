@@ -8,6 +8,37 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M25
+
+### P-1 · OTC negotiation collapsed a quote and its execution into one call · fixed
+
+`OtcNegotiationVenue.negotiate` priced and executed in one call, so a real RFQ workflow - a
+quoted, expiring price accepted or left to lapse - had no shape to fit into.
+
+**`quote` and `accept`, with `negotiate` kept as sugar for both.** `quote(OtcInstruction,
+SimulationClock, Duration)` prices and freezes the result into a new `Quote` record, touching
+nothing else - no credit check, no exposure committed, no `Trade` minted. `accept(Quote,
+SimulationClock)` checks the quote has not expired, then does exactly what `negotiate` always
+did: credit check, mint, transition, commit, publish - against the quote's frozen price, never
+re-pricing. `negotiate` is now `accept(quote(otc, clock), clock)`, so every existing caller and
+test is unaffected - proven directly, since every pre-existing `OtcNegotiationVenueTest` test
+still passes unchanged.
+
+**`quote()` performs no credit or exposure check at all** - deferred entirely to `accept()`,
+a stated scope limit rather than a silent one: reserving credit against a quote that might
+never be accepted is a materially larger "pending exposure" feature nothing in this codebase
+asks for yet.
+
+**Proven that re-pricing cannot sneak back in.** `acceptingAFreshQuoteExecutesAtTheFrozenPrice`
+uses a pricing model that returns a different price on every call, so a re-pricing `accept`
+would produce a visibly different consideration than the one the quote recorded - it doesn't.
+
+**Expiry proven with a clock that actually moves.** M19's `TradeLifecycleDemo` once used a
+fixed clock that never advanced, silently making a timestamp meaningless until a later
+debugging pass caught it - the same trap would make an expiry test vacuous.
+`acceptingAnExpiredQuoteThrowsRatherThanExecuting` uses `SimulationClock.advancing(...)` with
+an explicit `advanceTo(...)` past the quote's expiry, not a fixed clock.
+
 ## Fixed during M23
 
 ### O-1 · A trade that carries a position through zero was refused rather than split · fixed
@@ -404,7 +435,6 @@ decision.
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
 | Risk limits | Exposure measured beyond gross notional by counterparty | M9's `CounterpartyExposureLimit` checks the running sum of absolute trade considerations against a counterparty, released via `OtcNegotiationVenue.release`/`ExposureLedger.release` once a trade settles (`TradeSettlementBook`, M19) — not a mark-to-market or potential-future-exposure figure, so a trade still outstanding is counted at its full traded consideration rather than its current replacement cost. A stated, narrower choice than `ExposureCalculator`'s full gross/net/by-currency/by-asset-class design in `docs/DESIGN_PROPOSAL.md` §5.5, built only as far as a credit check needs. Only OTC trades are checked; a CLOB fill has no named counterparty to check against (see `TradabilityProfile`). |
-| OTC negotiation | A separate, expiring quote step | `OtcNegotiationVenue` prices and executes in one call. A real RFQ workflow quotes a price that can expire before it is accepted. Collapsing the two is a stated simplification, in the same spirit as the project's existing single-curve and vanilla-swap simplifications — not a gap that was missed. |
 | OTC negotiation | A percentage-of-mid spread on NPV instruments | `OtcNegotiationVenue` applies its spread as a fraction of the priced mid, which is the right convention for a clean per-unit price and the wrong one for a swap or forward's net present value — see F-1. A correct version needs `PricingModel` to reprice at a shocked rate input, which the interface does not support generically today; adding it for one caller would be speculative. For now, F-1 makes the venue refuse a spread that would have had no effect rather than pretend one was applied. |
 | Risk engine | No `AnalyticGreeks` capability interface or runtime "prefer analytic" dispatch | `docs/DESIGN_PROPOSAL.md` §5.3 describes a pricer optionally implementing `AnalyticGreeks`, with the risk engine preferring it over bump-and-revalue when available. M10 does not build that interface - `BlackScholesModel` instead exposes static `delta`/`gamma`/`vega` formulas, exactly the shape its own `price(...)` javadoc had already forward-declared ("so the analytic Greeks at M10 can share exactly these conventions"), used only for cross-validation tests. `SensitivityCalculator` always uses bump-and-revalue in production. Building the runtime-dispatch interface now would need per-position analytic-vs-numeric branching inside what is currently a uniform portfolio-level shock-and-revalue, for an optimisation with no measured performance problem behind it - exactly the speculative machinery A2.9 argues against. Revisit if a real performance case for it ever shows up. |
 | Risk engine | No historical-data loader | `HistoricalVaRCalculator` takes historical scenarios as caller-supplied `MarketShock`s, not loaded from any feed. This engine has no live or historical market-data source anywhere - every `MarketDataSnapshot` in Mercury is already caller-constructed - so a loader would be new infrastructure this class has no need to own. |
