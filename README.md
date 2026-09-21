@@ -48,7 +48,7 @@ mvn -q -DskipTests package
 java -jar mercury-app/target/mercury.jar
 ```
 
-That prints the report below, and ends by naming the other four commands — the jar tells you
+That prints the report below, and ends by naming the other five commands — the jar tells you
 what else it can do, so this table is a reference rather than a prerequisite. `help` lists
 them too.
 
@@ -59,6 +59,7 @@ them too.
 | `lifecycle` | Trade state machine, self-trade prevention, a credit-limit breach and its release |
 | `risk` | Gamma and Vega beside their Black-Scholes closed forms; historical VaR |
 | `montecarlo` | Monte Carlo prices converging on Black-Scholes; VaR and Expected Shortfall |
+| `tui` | The same walkthrough, replayed one step at a time: order book depth, blotter, P&L and risk redrawn after each step, with VaR shown stale — and labelled as such — between its periodic recomputes |
 
 `mvn verify` runs everything else: unit and property tests, the ArchUnit layering rules, and a
 test that fails if the report below stops matching what the engine prints.
@@ -220,6 +221,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M13 — Concurrency: parallel Monte Carlo, event bus, single-writer books, scaling benchmarks | ✅ complete |
 | M14 — Harness: the golden-master book trades through the real venues, not by hand | ✅ complete |
 | M15 — Extensibility proof & architecture documentation | ✅ complete |
+| M16 — Terminal UI: order book, blotter, P&L and risk replayed one step at a time | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -240,6 +242,7 @@ Three artifacts, each checkable in about a minute:
 | **[Trade lifecycle demo](mercury-app/src/main/java/com/mercury/app/TradeLifecycleDemo.java)** | ✅ `lifecycle` | Two participants cross on the order book, a same-owner crossing gets blocked with the fact printed rather than inferred, an OTC trade is negotiated against a named counterparty, one trade is walked to `SETTLED` and booked into a `PortfolioLedger`, and a trade that would breach a counterparty's credit limit is rejected with the breach printed rather than silently dropped |
 | **[Risk engine demo](mercury-app/src/main/java/com/mercury/app/RiskEngineDemo.java)** | ✅ `risk` | Gamma and Vega printed side by side against their Black-Scholes closed forms, then a 90% historical VaR over the full demo book across ten hardcoded historical daily scenarios |
 | **[Monte Carlo demo](mercury-app/src/main/java/com/mercury/app/MonteCarloDemo.java)** | ✅ `montecarlo` | A Monte Carlo option price visibly converging on the Black-Scholes answer as path count rises (92 → 23 → ~3 dollars of error), then Monte Carlo VaR and Expected Shortfall on the demo book's AAPL exposure |
+| **[Terminal UI](mercury-app/src/main/java/com/mercury/app/tui/TuiDemo.java)** | ✅ `tui` | The same six-instruction scenario `walkthrough` runs, replayed one step at a time: order book depth from a `ShadowBook` mirroring the real venue's own instructions, a blotter, and P&L/Greeks/VaR — the last throttled to every few steps rather than recomputed on every redraw, and labelled when it is showing a stale figure |
 
 ### Three predictions the measurements killed
 
@@ -346,6 +349,16 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   thread of its own fed from a command queue. Two of the three
   [predictions above](#three-predictions-the-measurements-killed) were about this section,
   and the measurements won both.
+- **A terminal UI that replays the engine rather than simulating one.** `SimulationClock` only
+  advances when told to, so there is nothing to render live in the literal sense — `tui` steps
+  through the same six instructions `walkthrough` runs in one pass, one at a time, redrawing
+  order book depth, a blotter, and P&L/Greeks/VaR after each. Depth comes from a `ShadowBook`
+  mirroring the real venue's own instructions, because `OrderBookVenue` keeps its books in a
+  private map by design and this was the wrong side of that boundary to add a method for
+  ([ADR 0007](docs/adr/0007-hand-rolled-ansi-terminal-ui.md)). The 20,000-path Monte Carlo VaR
+  is the one expensive panel, so it recomputes only every few steps and shows the stale figure
+  labelled `(as of step N)` in between, rather than either blocking every redraw on it or
+  hiding that it is stale.
 
 ### Dead weight, looked for on purpose
 
@@ -400,16 +413,19 @@ oversight.
 
 ## Roadmap
 
-**The pure Java engine is the product, and it is finished.** Not a phase one with four phases
+**The pure Java engine is the product, and it is finished.** Not a phase one with later phases
 pending — everything this page claims is about the engine, and `mvn verify` checks all of it.
+Phase 4's interface question has an answer rather than just a plan: deliberately
+**no web dashboard** — the reasoning is in
+[§10.4](docs/DESIGN_PROPOSAL.md#104-phase-4--interface-and-observability) — but its preferred
+alternative, a terminal UI replaying the order book, blotter, P&L and risk one step at a time
+against the engine's own venues, is built (`tui`, M16).
 
-Later phases are drawn up and deliberately not built: a thin Spring Boot API over an unchanged
-engine, PostgreSQL persistence isolated from the domain model, richer output. None of them
-would make the engine better at what it does; they would put it behind a network, a schema and
-a template. They live in the [design proposal](docs/DESIGN_PROPOSAL.md#10-roadmap) rather than
-here, so that this page describes what exists rather than what is intended. There is
-deliberately **no web dashboard** among them; the reasoning is in
-[§10.4](docs/DESIGN_PROPOSAL.md#104-phase-4--interface-and-observability).
+The remaining phases are drawn up and deliberately not built: a thin Spring Boot API over an
+unchanged engine, and PostgreSQL persistence isolated from the domain model. Neither would make
+the engine better at what it does; they would put it behind a network and a schema. They live in
+the [design proposal](docs/DESIGN_PROPOSAL.md#10-roadmap) rather than here, so that this page
+describes what exists rather than what is intended.
 
 One ordering decision is worth keeping visible. The order book shipped at M3, ahead of pricing
 and portfolio, so the most technically interesting component existed first — at the cost of it

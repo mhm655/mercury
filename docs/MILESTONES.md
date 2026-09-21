@@ -7,6 +7,44 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M16 complete** — **a terminal UI that replays the engine, rather than simulating one.**
+`SimulationClock` only advances when told to — there is nothing to render live in the literal
+sense — so `tui` steps through the same six order/negotiation instructions `walkthrough` runs
+in one pass, one at a time, blocking on a line of stdin between them and redrawing the whole
+screen from scratch after each. [ADR 0007](adr/0007-hand-rolled-ansi-terminal-ui.md) scopes it
+as hand-rolled ANSI, not a library: a few panels redrawn on each step is cursor math and colour
+codes, not a windowing toolkit's worth of layout and resize handling.
+
+Four panels, built in that order because each one's data source raised its own question.
+**Order book depth** has no public reader on the real venue — `OrderBookVenue` keeps its
+per-instrument books in a private map, by design (§5.6), and adding a method to
+`mercury-engine` for one UI's benefit was the wrong side of that boundary to move. `ShadowBook`
+resolves it without one: a second, display-only `OrderBook` per instrument, built from types
+already public (`OrderBook`, `Order`, `OrderId`), mirroring every instruction the real venue
+receives — an order book is a deterministic function of the orders it gets, so an identical
+sequence produces identical depth. **The blotter** raised the same shape of question for a
+rejected negotiation, which never becomes a `Trade` and so never reaches the event bus at all;
+the answer turned out not to need a new event type, since the caller running the negotiation
+already holds the `NegotiationResult` that says so. **P&L and risk** reuse the same
+`PortfolioValuationService`, `SensitivityCalculator` and `MonteCarloVaRCalculator` calls
+`EndToEndDemo` makes, against `TuiDemo`'s own evolving ledger rather than the fixed golden-
+master book. Valuation, P&L, delta and DV01 are cheap and recompute every frame; the
+20,000-path Monte Carlo VaR is not, so it recomputes only every few steps and the stale figure
+is shown labelled `(as of step N)` rather than silently going out of date — a cadence chosen
+over a background thread for the reason the whole UI already blocks on stdin between steps:
+there is no frame anyone is waiting on for a second thread to finish faster. **Testability**
+turned out to be free rather than a fourth thing to build: each panel is data assembly plus at
+most one small piece of cached state, tested without a terminal the same way the rest of this
+codebase's demo-facing code is — only `TuiDemo.printFrame` itself writes raw ANSI, and it stays
+as thin as `Main`'s own console-facing methods, assembling nothing itself.
+
+This is Phase 4's [preferred interface](DESIGN_PROPOSAL.md#104-phase-4--interface-and-observability)
+delivered — the alternative the design proposal argued for building instead of a web dashboard,
+on the reasoning that a mediocre frontend contaminates a reviewer's read of a backend they have
+not inspected yet. Not built, on purpose: a live external market feed (the engine has no way to
+produce one), new order types, and any change to `mercury-engine`'s public surface beyond what
+the blotter decision above needed.
+
 **M15 complete** — **architecture documentation**, the second half of the pair §7 of the design
 proposal calls the highest-value items in the project. The sixth-instrument commit
 ([docs/EXTENSIBILITY.md](EXTENSIBILITY.md)) shipped early, folded into the M6/M7 window rather

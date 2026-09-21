@@ -902,7 +902,7 @@ Observability (Micrometer/OpenTelemetry, Prometheus/Grafana) also lands here, an
 Grafana screenshot delivers most of the "real system" visual impact a dashboard would,
 without the frontend risk.
 
-#### M16 — Terminal UI (in progress)
+#### M16 — Terminal UI — ✅ done
 
 Scoped in [ADR 0007](adr/0007-hand-rolled-ansi-terminal-ui.md): hand-rolled ANSI, not a
 library, replaying the same deterministic demo scenario one step at a time rather than
@@ -957,9 +957,9 @@ New command: `java -jar mercury.jar tui`, dispatched the same way `walkthrough`,
 `lifecycle`, `risk` and `montecarlo` already are.
 
 **Not in scope:** a live external market feed, new order types, or any change to
-`mercury-engine`'s public surface beyond what M16b's blotter decision requires. The
-README's milestone table and "Built so far" section gain an M16 row only once this ships —
-the same rule that has applied to every milestone before it.
+`mercury-engine`'s public surface beyond what M16b's blotter decision requires. Shipped: the
+README's milestone table and "Built so far" section now carry the M16 row this rule gated on,
+and [docs/MILESTONES.md](MILESTONES.md) carries the full write-up.
 
 ### 10.5 Phase 5 — Optional, only if justified
 
