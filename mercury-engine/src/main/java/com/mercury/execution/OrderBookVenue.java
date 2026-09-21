@@ -128,6 +128,31 @@ public final class OrderBookVenue implements ExecutionVenue<OrderBookInstruction
      */
     @Override
     public List<Trade> execute(OrderBookInstruction obi, SimulationClock clock) {
+        PreparedOrder prepared = prepare(obi, clock);
+        return prepared.lane().run(() -> match(prepared.instrumentLane(), prepared.order(),
+                obi.participant(), prepared.currency(), clock));
+    }
+
+    /**
+     * {@code execute}, without waiting for the match to run or returning what it produced - see
+     * {@link BookLane#submit} and `docs/BENCHMARKS.md` §6. Trades reach a caller only through
+     * whatever {@code EventBus} this venue was built with; on {@link BookConcurrency#INLINE}
+     * this method still runs the match before returning (there is no other thread to hand it
+     * to), so the latency this exists to remove is specific to
+     * {@link BookConcurrency#THREAD_PER_BOOK}.
+     */
+    public void submit(OrderBookInstruction obi, SimulationClock clock) {
+        PreparedOrder prepared = prepare(obi, clock);
+        prepared.lane().submit(() -> match(prepared.instrumentLane(), prepared.order(),
+                obi.participant(), prepared.currency(), clock));
+    }
+
+    /**
+     * Everything {@code execute} and {@code submit} both need before either can touch a lane:
+     * validated, with an order minted from it - extracted once {@code submit} made this the
+     * second real caller of exactly this sequence.
+     */
+    private PreparedOrder prepare(OrderBookInstruction obi, SimulationClock clock) {
         Objects.requireNonNull(obi, "obi");
         Objects.requireNonNull(clock, "clock");
 
@@ -147,8 +172,12 @@ public final class OrderBookVenue implements ExecutionVenue<OrderBookInstruction
                 obi.limitPrice(), obi.quantity(), obi.timeInForce(), obi.participant());
 
         InstrumentLane instrumentLane = laneFor(obi.instrumentId());
-        return instrumentLane.lane().run(
-                () -> match(instrumentLane, order, obi.participant(), currency, clock));
+        return new PreparedOrder(instrumentLane, instrumentLane.lane(), order, currency);
+    }
+
+    /** What {@code execute} and {@code submit} share before they diverge on {@code run} vs {@code submit}. */
+    private record PreparedOrder(InstrumentLane instrumentLane, BookLane lane, Order order,
+                                 Currency currency) {
     }
 
     /**

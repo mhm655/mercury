@@ -7,6 +7,40 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M17 complete** — **asynchronous order submission, narrower than the fix `docs/KNOWN_GAPS.md`
+had priced.** M13's benchmark found `BookConcurrency.THREAD_PER_BOOK` **1.7-3.8× slower** than
+the `INLINE` default, traced to `SingleWriterBookLane.run` wrapping every command in a
+`FutureTask` and parking the caller until the writer thread woke it - roughly 0.9µs of handoff
+per order, more than matching itself costs. `KNOWN_GAPS.md` recorded the fix as a deliberate
+non-change: closing it "would change `ExecutionVenue`'s contract for every caller in the
+codebase." That priced the wrong repair. The measured cost lives entirely inside
+`OrderBookVenue`/`SingleWriterBookLane` - `OtcNegotiationVenue` has no threading model at all,
+and `ExecutionRouter` is a two-line validation pass-through with no logic of its own to change.
+
+[ADR 0008](adr/0008-fire-and-forget-order-submission.md) records the narrower shape actually
+built: `BookLane` gained a second door, `submit(Runnable)`, beside the existing
+`run(Supplier<T>)`. `SingleWriterBookLane.submit` queues a plain `Runnable` - no future, no
+`.get()` - and returns the instant it is queued; `LockedBookLane.submit` still runs inline
+under the same lock `run` uses, since `INLINE` has no writer thread to hand off to, so the win
+is specific to `THREAD_PER_BOOK`. `OrderBookVenue.submit(OrderBookInstruction,
+SimulationClock)` is new and entirely additive: `execute` and every caller of it -
+`ExecutionRouter`, every demo, every `execute`-based test - are untouched. A submitted order's
+trades reach a caller only through whatever `EventBus` the venue holds, the same publication
+`execute` already does before returning, never as a value handed back from `submit` itself.
+
+`docs/BENCHMARKS.md` §6 gained its own M17 section rather than a bare claim: removing the
+handoff roughly doubles throughput on one book and clears the twelve-book figure too,
+consistent with the original diagnosis. The same benchmark run is also the reason this
+milestone opened a gap instead of only closing one - a sustained twelve-thread synthetic load
+against `THREAD_PER_BOOK` ran the JVM out of heap, `OutOfMemoryError`, every writer thread
+dying mid-match, reproducibly. Raw enqueue is cheaper than real work with object allocation
+behind it, so an unthrottled producer eventually outruns the writer - the identical shape of
+finding M13 already recorded for `AsynchronousEventBus`'s own unbounded queue. Rather than
+picking a bound and a policy against no real caller's known throughput (sizing against a
+guess, the exact thing that entry already declined to do), the new gap is recorded in
+`docs/KNOWN_GAPS.md` beside the one it mirrors, not smoothed over by a benchmark window short
+enough to hide it.
+
 **M16 complete** — **a terminal UI that replays the engine, rather than simulating one.**
 `SimulationClock` only advances when told to — there is nothing to render live in the literal
 sense — so `tui` steps through the same six order/negotiation instructions `walkthrough` runs

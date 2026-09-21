@@ -222,6 +222,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M14 — Harness: the golden-master book trades through the real venues, not by hand | ✅ complete |
 | M15 — Extensibility proof & architecture documentation | ✅ complete |
 | M16 — Terminal UI: order book, blotter, P&L and risk replayed one step at a time | ✅ complete |
+| M17 — Asynchronous order submission: `submit()`, additive to `execute()` | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -359,6 +360,18 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   is the one expensive panel, so it recomputes only every few steps and shows the stale figure
   labelled `(as of step N)` in between, rather than either blocking every redraw on it or
   hiding that it is stale.
+- **Fire-and-forget order submission, narrower than the fix once looked too costly to make.**
+  M13's benchmark found `THREAD_PER_BOOK` 1.7-3.8× *slower* than the inline default, because
+  `SingleWriterBookLane.run` parks every caller on a `FutureTask` until the writer thread wakes
+  it. The fix was recorded as a deliberate non-change on the belief it would touch
+  `ExecutionVenue`'s contract everywhere; it did not need to. `BookLane.submit` and
+  `OrderBookVenue.submit` are new and purely additive — `execute` and every existing caller are
+  untouched — and remove exactly the park-and-wake `docs/BENCHMARKS.md` §6 measured
+  ([ADR 0008](docs/adr/0008-fire-and-forget-order-submission.md)). The same benchmark run that
+  proved the win also reproduced an `OutOfMemoryError` under sustained synthetic load — an
+  unthrottled producer can queue faster than the writer drains — recorded as its own entry in
+  `docs/KNOWN_GAPS.md` next to the identical trade-off already accepted for
+  `AsynchronousEventBus`, not hidden behind a shorter benchmark window.
 
 ### Dead weight, looked for on purpose
 

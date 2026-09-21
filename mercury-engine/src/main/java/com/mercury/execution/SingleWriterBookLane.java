@@ -20,14 +20,23 @@ import java.util.function.Supplier;
  * defensive, and because the queue is a command log - which is what makes deterministic replay
  * possible at all.
  *
- * <h2>The caller still waits</h2>
+ * <h2>Two ways in: {@link #run} waits, {@link #submit} does not</h2>
  * {@link #run} submits the command and blocks for its result, because
  * {@code OrderBookVenue.execute} returns the trades it produced and callers depend on that.
- * The gain here is therefore not "the caller is freed"; it is that <b>different instruments
- * genuinely run at once</b> while each book stays uncontended, and that a book has one owner
- * rather than whichever thread got the lock. Freeing the caller is a different feature -
- * fire-and-forget submission with executions arriving as events - and it belongs with the
- * event bus, not here.
+ * Through M16 that was the only door in, and the gain was never "the caller is freed"; it was
+ * that <b>different instruments genuinely run at once</b> while each book stays uncontended,
+ * and that a book has one owner rather than whichever thread got the lock.
+ *
+ * <p>M17 adds the door {@code run} was missing: {@link #submit} queues a plain
+ * {@code Runnable}, not a {@link FutureTask}, and returns as soon as it is queued - no
+ * park, no wake-up, no result to hand back. `docs/BENCHMARKS.md` §6 measured what {@code run}'s
+ * handoff costs: about 0.9 microseconds of park-and-wake per order, more than matching itself,
+ * which is why {@code THREAD_PER_BOOK} was slower than the inline default despite giving every
+ * book its own thread. {@code submit} is what closes that gap - fire-and-forget submission,
+ * with whatever it produces arriving through the event bus instead of a return value, exactly
+ * as this class used to say belonged somewhere else. {@link #cancelQueued} already treats a
+ * non-{@code FutureTask} command as nothing to cancel, so a plain submitted command left behind
+ * by a close is simply never run - it does not need its own path through shutdown.
  *
  * <p>Work is never stolen or reordered: commands run in the order the queue received them.
  * Two callers racing to submit to the same book may enqueue in either order, which is exactly
@@ -80,6 +89,31 @@ final class SingleWriterBookLane implements BookLane {
             }
             throw new IllegalStateException("A book command failed", cause);
         }
+    }
+
+    /**
+     * Queues {@code work} and returns immediately - no {@link FutureTask}, no waiting, no
+     * result. The writer thread runs it whenever it reaches the front of the queue, in the same
+     * order commands always run in; what it produces reaches a caller only through whatever
+     * {@code work} itself publishes (an {@code OrderBookVenue} publishes to the event bus from
+     * inside {@code match}, exactly as {@link #run} already does).
+     *
+     * <h2>No back-pressure</h2>
+     * {@code commands} is unbounded, the same choice {@code AsynchronousEventBus} already made
+     * and the same reason: bounding it means either blocking the submitter - which is the wait
+     * this method exists not to impose - or dropping work, which needs a stated policy this
+     * class does not have. A submitter that queues faster than the writer drains grows this
+     * queue without limit; a JMH benchmark reproduced exactly that (`docs/BENCHMARKS.md` §6),
+     * the same way one already had for the event bus (§7). No production caller in this
+     * codebase submits anywhere near that rate today - see {@code docs/KNOWN_GAPS.md}.
+     */
+    @Override
+    public void submit(Runnable work) {
+        if (closed) {
+            throw new RejectedExecutionException(
+                    "This book's writer thread is closed; the command would never run");
+        }
+        commands.add(work);
     }
 
     /**

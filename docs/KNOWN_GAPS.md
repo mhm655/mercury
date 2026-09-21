@@ -8,6 +8,37 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M17
+
+### H-1 · No asynchronous submission path · fixed
+
+`ExecutionVenue.execute` returns the trades it produced, so a caller always waited. That is
+what made `BookConcurrency.THREAD_PER_BOOK` slower than the inline default rather than faster
+(`docs/BENCHMARKS.md` §6): a park-and-wake handoff per order, around matching that was quicker
+than the handoff. The LMAX design it follows assumes fire-and-forget submission, a batching
+writer, executions arriving as events, and a spinning rather than parking queue. M13 built the
+events half; this milestone builds the submission half - but narrower than "change
+`ExecutionVenue`'s contract for every caller," which is what this entry originally said the
+fix would cost.
+
+**Additive, not a redesign.** The measured problem is specific to `OrderBookVenue` and
+`SingleWriterBookLane` - `OtcNegotiationVenue` has no threading model at all and was never
+part of it. `BookLane` gained a second door, `submit(Runnable)`, alongside the existing
+`run(Supplier<T>)`: `SingleWriterBookLane.submit` queues a plain `Runnable` (no `FutureTask`,
+no `.get()`) and returns as soon as it is queued; `LockedBookLane.submit` runs inline under the
+same lock `run` uses, since there is no writer thread to hand off to on `INLINE`.
+`OrderBookVenue.submit(OrderBookInstruction, SimulationClock)` is new and additive - `execute`
+and every one of its callers (`ExecutionRouter`, every demo, every `execute`-based test) are
+unchanged. A submitted order's trades reach a caller only through whatever `EventBus` the
+venue was built with, never as a return value.
+
+**Measured, not asserted.** `docs/BENCHMARKS.md` §6's own M17 section: removing the handoff
+roughly doubles throughput on one book and clears the twelve-book figure too, consistent with
+the diagnosis above. It also opens a new, honestly recorded gap - see "Execution |
+`OrderBookVenue.submit` has no back-pressure" below.
+
+---
+
 ## Fixed during M8
 
 ### G-1 · Order ids are reusable after an order fills · fixed
@@ -148,7 +179,7 @@ decision.
 | Scenarios | No scenario library shipped by the engine | `Scenario` (M11) is a general factory/Composite primitive in `com.mercury.marketdata`; Market Crash, Rate Shock and Currency Crisis are defined in `DemoScenario`, not the engine. Same reasoning `RiskFactors` already states: which scenarios a book is measured against is a reporting decision, and inferring or hardcoding a "standard" set into the engine would make that decision for every caller rather than leave it to whoever is doing the reporting. |
 | Monte Carlo | One risk factor at a time, no correlation | `MonteCarloVaRCalculator` (M12) simulates a single underlying's spot in isolation, the same per-factor shape `SensitivityCalculator.delta`/`gamma`/`vega`/`dv01` already have. A real multi-factor portfolio VaR needs correlated draws across every risk factor at once - a covariance matrix, a Cholesky decomposition, a joint distribution - which nothing here builds, since no caller needs it yet and getting correlation estimation right is a substantial piece of work on its own. |
 | Monte Carlo | VaR stops scaling at 4 workers | Parallel Monte Carlo landed at M13 and option pricing reaches 5.9× on 12 workers, but VaR flattens at 2.6× - each path allocates ~5.7 KB (a shocked snapshot, valuation lines, `BigDecimal`-backed `Money` per position) and the allocation rate hits a ceiling of ~4.6 GB/s exactly where throughput stops (`docs/BENCHMARKS.md` §5). The fixes would be a `double`-domain revaluation path for risk - ADR 0001 already separates ledger from model arithmetic - or reusing shocked snapshots per block. Both trade clarity for speed, and nothing needs VaR faster than 60 ms yet. |
-| Execution | No asynchronous submission path | `ExecutionVenue.execute` returns the trades it produced, so a caller always waits. That is what makes `BookConcurrency.THREAD_PER_BOOK` slower than the inline default rather than faster (`docs/BENCHMARKS.md` §6): a park-and-wake handoff per order, around matching that is quicker than the handoff. The LMAX design it follows assumes fire-and-forget submission, a batching writer, executions arriving as events, and a spinning rather than parking queue. M13 built the events half; the submission half would change `ExecutionVenue`'s contract for every caller in the codebase, so it is a deliberate non-change, not an oversight. |
+| Execution | `OrderBookVenue.submit` has no back-pressure | The M17 fix for the gap above (see "Fixed during M17") is itself unbounded: `SingleWriterBookLane`'s command queue has no limit, the same choice `AsynchronousEventBus` already made below and for the same reason - bounding it means blocking the submitter, which is what `submit` exists not to impose, or dropping work, which needs a stated policy this class does not have. `docs/BENCHMARKS.md` §6's own M17 run reproduced the failure mode directly: a twelve-thread JMH loop queuing faster than the writer could drain ran the JVM out of heap. No production caller in this codebase submits anywhere near that rate today. |
 | Execution | The command queue is not a command *log* | §5.6 a) says deterministic replay "falls out for free" from feeding each book from a queue. It does not fall out yet: `SingleWriterBookLane`'s queue is in memory and each command is discarded once it has run, so nothing can be replayed from it. Recording commands durably, and replaying them into a fresh book, is real work (a serialisation format for instructions, and a decision about what a replay does to the event bus) that no consumer has asked for. The structure the replay would need is in place; the recording is not. |
 | Event bus | No production subscriber runs asynchronously | `AsynchronousEventBus` is built, tested and documented, but every wiring in this codebase uses `SynchronousEventBus`, because a deterministic demo and a golden-master test want their subscribers finished before the next line runs. Listed in the README's dead-weight table for the same reason `RiskLimit.and()` is: real machinery with tests, waiting for the live simulation that will use it. `docs/BENCHMARKS.md` §7 measures the choice directly rather than leaving it asserted: against a subscriber costing a few milliseconds, decoupling the publisher is worth roughly 17,000× on `publish`'s own latency, which is the number this table used to claim without showing. |
 | Event bus | Unbounded queue, no back-pressure | `AsynchronousEventBus` queues without limit, because bounding it means blocking the publisher - the thing an async bus exists not to do - or dropping events, which needs a stated policy. *(This entry originally said "nothing in Mercury produces faster than the dispatcher consumes, so a bound would be sized against a guess." `docs/BENCHMARKS.md` §7's own measurement run is a counterexample: a publisher at ~0.24 µs against a ~4 ms subscriber enqueued faster than the dispatcher could drain, and `close()` timed out mid-drain inside a two-second JMH iteration - reproducible, not hypothetical, once something actually publishes that fast. It took a synthetic benchmark to produce that producer, not a real caller, so the underlying claim - no *production* wiring does this yet - still holds; only "would be sized against a guess" was wrong, since the failure mode is now on record with a number attached.)* A real deployment needs the bound and the policy together. |

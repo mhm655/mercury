@@ -396,5 +396,77 @@ class OrderBookVenueTest {
                     AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK))
                     .isInstanceOf(RejectedExecutionException.class);
         }
+
+        @Nested
+        @DisplayName("submit()")
+        class Submit {
+
+            @Test
+            @DisplayName("a crossing pair submitted, not executed, still trades and publishes")
+            void submittedInstructionsEventuallyTradeAndPublish() throws InterruptedException {
+                SynchronousEventBus bus = new SynchronousEventBus();
+                CountDownLatch bothTradesPublished = new CountDownLatch(2);
+                List<TradeExecuted> announced = Collections.synchronizedList(new ArrayList<>());
+                bus.subscribe(TradeExecuted.class, event -> {
+                    announced.add(event);
+                    bothTradesPublished.countDown();
+                });
+
+                try (OrderBookVenue venue = threadedVenue(bus)) {
+                    venue.submit(OrderBookInstruction.limit(
+                            AAPL, Side.SELL, Price.of("100.00"), 100, SELLER), CLOCK);
+                    venue.submit(OrderBookInstruction.limit(
+                            AAPL, Side.BUY, Price.of("100.00"), 100, BUYER), CLOCK);
+
+                    assertThat(bothTradesPublished.await(5, TimeUnit.SECONDS)).isTrue();
+                }
+                assertThat(announced).extracting(event -> event.trade().owner())
+                        .containsExactlyInAnyOrder(BUYER, SELLER);
+            }
+
+            @Test
+            @DisplayName("produces the same trades execute() would, just not returned")
+            void sameTradesAsExecuteJustNotReturned() throws InterruptedException {
+                List<OrderBookInstruction> script = List.of(
+                        OrderBookInstruction.limit(AAPL, Side.SELL, Price.of("100.00"), 100, SELLER),
+                        OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 150, BUYER),
+                        OrderBookInstruction.market(AAPL, Side.SELL, 50, SELLER));
+
+                List<String> inline = new ArrayList<>();
+                OrderBookVenue plain = newVenue();
+                script.forEach(instruction -> plain.execute(instruction, CLOCK)
+                        .forEach(trade -> inline.add(describe(trade))));
+
+                SynchronousEventBus bus = new SynchronousEventBus();
+                List<String> submitted = Collections.synchronizedList(new ArrayList<>());
+                CountDownLatch allPublished = new CountDownLatch(inline.size());
+                bus.subscribe(TradeExecuted.class, event -> {
+                    submitted.add(describe(event.trade()));
+                    allPublished.countDown();
+                });
+
+                try (OrderBookVenue venue = threadedVenue(bus)) {
+                    script.forEach(instruction -> venue.submit(instruction, CLOCK));
+                    assertThat(allPublished.await(5, TimeUnit.SECONDS)).isTrue();
+                }
+
+                assertThat(submitted).isEqualTo(inline).isNotEmpty();
+            }
+
+            @Test
+            @DisplayName("a closed venue refuses further submissions")
+            void closedVenueRefusesSubmit() {
+                OrderBookVenue venue = threadedVenue(EventBus.ignoring());
+                // A lane exists only once something has traded on it - close() with no lane
+                // yet for AAPL would close nothing, and a later submit() would just create a
+                // fresh, unclosed one. Trade first, exactly as closedVenueRefuses() does.
+                venue.submit(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK);
+                venue.close();
+
+                assertThatThrownBy(() -> venue.submit(OrderBookInstruction.limit(
+                        AAPL, Side.BUY, Price.of("100.00"), 10, BUYER), CLOCK))
+                        .isInstanceOf(RejectedExecutionException.class);
+            }
+        }
     }
 }

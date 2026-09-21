@@ -273,6 +273,46 @@ one book, one owner, a command log, and deterministic replay - which is why it i
 tested; it does not currently earn its place on throughput. Closing that gap means an
 asynchronous submission path, not a faster queue.
 
+### M17: `submit()`, and the gap it opens instead of closing
+
+`OrderBookVenue.submit` and `SingleWriterBookLane.submit` remove exactly the handoff the
+section above measured: no `FutureTask`, no park, no wake-up - a caller queues a command and
+returns. `submitCrossingPairAsync` is `submitCrossingPair`'s twin, through `submit` instead of
+`execute`, same script, same benchmark - raw results in
+[`benchmarks/m17-venue-concurrency-submit.json`](benchmarks/m17-venue-concurrency-submit.json),
+run over a short window (see below for why):
+
+| Books | `execute` on `THREAD_PER_BOOK` (ops/ms) | `submit` on `THREAD_PER_BOOK` (ops/ms) |
+|---:|---:|---:|
+| 1 | 541.4 ± 358.6 | 1241.1 ± 2913.3 |
+| 12 | 812.0 ± 535.7 | 1638.7 ± 23305.9 |
+
+Removing the handoff roughly **doubles** throughput on one book and clears the twelve-book
+figure too - consistent with §6's own diagnosis that the park-and-wake, not the matching, was
+the cost. `INLINE`'s two benchmark methods measure the same work (there is no writer thread to
+hand off to), so they agree with each other within noise, which is itself a sanity check that
+the comparison above isolates the right thing.
+
+**The error bars above are not a formality - they are the actual finding.** Unlike `execute`,
+`submit`'s "throughput" is not a steady-state number: a caller that queues faster than the
+writer drains grows the queue without bound. The same run, with a longer measurement window,
+ran the JVM out of heap outright on the twelve-book case - `OutOfMemoryError`, every writer
+thread dying mid-match, reproducibly; the figures above are from a deliberately short window
+(3×500ms) chosen to catch throughput before the backlog dominates, and even so the confidence
+interval on the twelve-book figure is wider than the figure itself. This is the identical shape
+of finding §7 already recorded for `AsynchronousEventBus`'s unbounded queue: raw enqueue is
+cheaper than real work with object allocation behind it, so an unthrottled producer eventually
+wins a race it should not be run long enough to win. Narrated honestly rather than smoothed
+over by a longer warm-up that would have hidden it - a claim next to a measurement, including
+the measurement's own instability.
+
+**Consequence, recorded rather than fixed here:** `submit()` ships with no back-pressure, the
+same trade-off `AsynchronousEventBus` already made (`docs/KNOWN_GAPS.md`) and for the same
+reason - bounding the queue means either blocking the submitter, which is the wait this method
+exists not to impose, or dropping work, which needs a policy this class does not have. No
+production caller in this codebase submits anywhere near the rate a twelve-thread JMH loop
+does. See `docs/KNOWN_GAPS.md` for the entry this benchmark run justifies.
+
 ## 7. Event bus: what `publish` costs, synchronous against asynchronous (M13)
 
 `EventBusPublishBenchmark`, raw results in

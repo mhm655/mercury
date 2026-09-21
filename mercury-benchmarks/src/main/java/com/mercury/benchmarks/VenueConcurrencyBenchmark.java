@@ -120,4 +120,29 @@ public class VenueConcurrencyBenchmark {
         blackhole.consume(venue.execute(OrderBookInstruction.limit(
                 caller.instrumentId, Side.BUY, PRICE, 10, BUYER), CLOCK));
     }
+
+    /**
+     * {@code execute}'s twin, through {@code OrderBookVenue.submit} (M17) instead: fire-and-
+     * forget, no {@code Future}, no result. On {@code INLINE} this measures the same work as
+     * {@code submitCrossingPair} - there is no writer thread to hand off to - so the comparison
+     * that matters is {@code THREAD_PER_BOOK}: {@code docs/BENCHMARKS.md} §6 found {@code
+     * execute} on {@code THREAD_PER_BOOK} 1.7-3.8x slower than {@code INLINE} because of the
+     * park-and-wake {@code SingleWriterBookLane.run} costs per order; this method exists to
+     * measure whether removing that handoff (queue-and-return, per {@link
+     * com.mercury.execution.SingleWriterBookLane#submit}) closes the gap.
+     *
+     * <p>What this measures is the caller's own hand-off cost, not confirmed completion: unlike
+     * {@code execute}, a submitted order may still be queued when this method returns, so a
+     * throughput figure here is producer throughput, not proof the writer drained at the same
+     * rate - the same distinction {@code docs/BENCHMARKS.md} §7 already draws between {@code
+     * publish}'s own latency and whether a dispatcher keeps up with it.
+     */
+    @Benchmark
+    @OperationsPerInvocation(2)
+    public void submitCrossingPairAsync(Caller caller) {
+        venue.submit(OrderBookInstruction.limit(
+                caller.instrumentId, Side.SELL, PRICE, 10, SELLER), CLOCK);
+        venue.submit(OrderBookInstruction.limit(
+                caller.instrumentId, Side.BUY, PRICE, 10, BUYER), CLOCK);
+    }
 }

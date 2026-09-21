@@ -961,6 +961,32 @@ New command: `java -jar mercury.jar tui`, dispatched the same way `walkthrough`,
 README's milestone table and "Built so far" section now carry the M16 row this rule gated on,
 and [docs/MILESTONES.md](MILESTONES.md) carries the full write-up.
 
+#### M17 — Asynchronous order submission — ✅ done
+
+Scoped in [ADR 0008](adr/0008-fire-and-forget-order-submission.md): `docs/KNOWN_GAPS.md`'s
+"No asynchronous submission path" entry warned that fixing §5.6 a)'s single-writer engine's
+own measured regression (`docs/BENCHMARKS.md` §6: `THREAD_PER_BOOK` 1.7-3.8× *slower* than
+`INLINE`, because `SingleWriterBookLane.run` parks the caller on a `FutureTask`) would change
+`ExecutionVenue`'s contract for every caller in the codebase. It did not need to: the problem
+is specific to `OrderBookVenue`/`SingleWriterBookLane`, not the shared interface.
+
+`BookLane` gained `submit(Runnable)` beside the existing `run(Supplier<T>)`;
+`SingleWriterBookLane.submit` queues a plain `Runnable` (no future, no waiting) and
+`OrderBookVenue.submit(OrderBookInstruction, SimulationClock)` is new and additive - `execute`
+and every existing caller (`ExecutionRouter`, every demo, every `execute`-based test) are
+unchanged. A submitted order's trades reach a caller only through the event bus, never as a
+return value. Measured rather than asserted: §6's M17 section shows `submit` on
+`THREAD_PER_BOOK` roughly doubling throughput on one book and clearing the twelve-book figure
+too - and the same benchmark run reproduced an `OutOfMemoryError` under sustained synthetic
+load, because the queue this needs is unbounded, the same trade-off `AsynchronousEventBus`
+already made. Recorded as its own entry in `docs/KNOWN_GAPS.md` rather than smoothed over.
+
+**Not in scope:** a redesign of `ExecutionVenue`'s shared contract, an equivalent for
+`OtcNegotiationVenue` (which has no threading model to give one to), and a bound-and-policy
+fix for the queue this opens - see the ADR's "Alternatives rejected" for why bounding it now
+would be sizing against a guess, the same reasoning that already applies to
+`AsynchronousEventBus`.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and
