@@ -8,6 +8,34 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M18
+
+### I-1 · Exposure was per-venue-instance, not global · fixed
+
+`OtcNegotiationVenue.exposureByCounterparty` lived on the venue instance - correct as long as
+exactly one `OtcNegotiationVenue` ever traded against a given counterparty, which was true of
+every wiring in this codebase, but not guaranteed the moment a second instance existed against
+overlapping counterparties (sharded by instrument, a failover replica): each would have tracked
+exposure independently, and a limit sized for the counterparty as a whole would have silently
+under-counted.
+
+**Extraction, not a redesign.** `exposureLock`, `exposureByCounterparty` and `exposureAdded`
+moved wholesale into a new `ExposureLedger` - same lock granularity, same read-check-commit
+sequence, same trust model on `release` (it looks up what it actually recorded, never a
+caller-supplied `Trade`'s own fields). `OtcNegotiationVenue.negotiate` still owns the sequence
+a credit check needs (read, check, mint a trade on approval, commit, publish) under
+`ExposureLedger.lock()`; the ledger owns only the state and its own `release`. Every existing
+constructor is untouched - each still builds a private `ExposureLedger` internally - and one
+new constructor overload accepts a shared one, so this is a zero-source-change extension for
+every caller before M18.
+
+**The fix proven, not just asserted.** `ExposureLedgerTest.twoVenuesSharingALedgerEnforceOneCombinedLimit`
+constructs two `OtcNegotiationVenue` instances against the same `ExposureLedger` and the same
+counterparty, and shows the second sees no room left once the first has spent the shared limit
+- the exact scenario this entry described as unreachable to test before the fix existed. A
+scaled-down version of the existing 16-thread concurrent stress test, split across both venue
+instances, confirms the combined limit is never over-admitted under concurrency either.
+
 ## Fixed during M17
 
 ### H-1 · No asynchronous submission path · fixed
@@ -171,7 +199,6 @@ decision.
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
 | Risk limits | Exposure measured beyond gross notional by counterparty | M9's `CounterpartyExposureLimit` checks the running sum of absolute trade considerations against a counterparty, released via `OtcNegotiationVenue.release` once a trade settles (see below) — not a mark-to-market or potential-future-exposure figure, so a trade still outstanding is counted at its full traded consideration rather than its current replacement cost. A stated, narrower choice than `ExposureCalculator`'s full gross/net/by-currency/by-asset-class design in `docs/DESIGN_PROPOSAL.md` §5.5, built only as far as a credit check needs. Only OTC trades are checked; a CLOB fill has no named counterparty to check against (see `TradabilityProfile`). |
 | Trade lifecycle | Settlement scheduling | `Trade` carries a `settlementDate` and supports the `SETTLED` state, but nothing moves a trade there automatically on clock advancement (`docs/DESIGN_PROPOSAL.md` A2.7). Driving a trade to `SETTLED` is a caller's explicit action until a real scheduler exists; adding one now, with no consumer, would be exactly the speculative machinery the project's restraint principle (A2.9) argues against. |
-| Risk limits | Exposure is per-venue-instance, not global | `OtcNegotiationVenue.exposureByCounterparty` lives on the venue instance. Correct as long as exactly one `OtcNegotiationVenue` ever trades against a given counterparty, which is true of every wiring in this codebase today (`ExecutionRouter` holds exactly one). If a second instance were ever introduced - sharded by instrument, a failover replica - each would track exposure independently and the limit would silently under-count. Not fixed now because doing so (a shared `ExposureLedger` injected into every venue, or a single venue enforced by construction) would be built against a scenario nothing in the codebase creates yet - exactly the kind of speculative machinery A2.9 argues against. Worth revisiting the moment a second venue instance actually exists. |
 | OTC negotiation | A separate, expiring quote step | `OtcNegotiationVenue` prices and executes in one call. A real RFQ workflow quotes a price that can expire before it is accepted. Collapsing the two is a stated simplification, in the same spirit as the project's existing single-curve and vanilla-swap simplifications — not a gap that was missed. |
 | OTC negotiation | A percentage-of-mid spread on NPV instruments | `OtcNegotiationVenue` applies its spread as a fraction of the priced mid, which is the right convention for a clean per-unit price and the wrong one for a swap or forward's net present value — see F-1. A correct version needs `PricingModel` to reprice at a shocked rate input, which the interface does not support generically today; adding it for one caller would be speculative. For now, F-1 makes the venue refuse a spread that would have had no effect rather than pretend one was applied. |
 | Risk engine | No `AnalyticGreeks` capability interface or runtime "prefer analytic" dispatch | `docs/DESIGN_PROPOSAL.md` §5.3 describes a pricer optionally implementing `AnalyticGreeks`, with the risk engine preferring it over bump-and-revalue when available. M10 does not build that interface - `BlackScholesModel` instead exposes static `delta`/`gamma`/`vega` formulas, exactly the shape its own `price(...)` javadoc had already forward-declared ("so the analytic Greeks at M10 can share exactly these conventions"), used only for cross-validation tests. `SensitivityCalculator` always uses bump-and-revalue in production. Building the runtime-dispatch interface now would need per-position analytic-vs-numeric branching inside what is currently a uniform portfolio-level shock-and-revalue, for an optimisation with no measured performance problem behind it - exactly the speculative machinery A2.9 argues against. Revisit if a real performance case for it ever shows up. |

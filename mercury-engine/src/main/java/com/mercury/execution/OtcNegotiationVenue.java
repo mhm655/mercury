@@ -2,7 +2,6 @@ package com.mercury.execution;
 
 import com.mercury.core.MercuryException;
 import com.mercury.core.id.CounterpartyId;
-import com.mercury.core.id.TradeId;
 import com.mercury.core.money.BasisPoints;
 import com.mercury.core.money.Currency;
 import com.mercury.core.money.Money;
@@ -20,9 +19,7 @@ import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -55,39 +52,37 @@ import java.util.Optional;
  * book on one side and the named counterparty on the other, so {@code ownBook} is supplied
  * once at construction rather than per instruction.
  *
- * <h2>M9: a pre-trade credit check, and where its running state lives</h2>
+ * <h2>M9: a pre-trade credit check</h2>
  * Every negotiation is checked against {@code riskLimit} before it is allowed to execute -
  * {@code docs/DESIGN_PROPOSAL.md} section A2.6's "evaluate limits against the portfolio as it
  * would be if the trade executed." The projection is cheap because nothing is committed until
- * the check clears: {@code exposureByCounterparty} - the running gross notional traded against
- * each counterparty, in that counterparty's own {@code CreditLimit} currency - is read to form
- * the projected total, and only written to once a trade actually executes. This venue already
- * holds other mutable per-instance state ({@link OrderBookVenue} holds its order books and
- * owners the same way), so adding one more running total here is the established shape, not a
- * new one.
+ * the check clears: the running gross notional traded against each counterparty, in that
+ * counterparty's own {@code CreditLimit} currency, is read to form the projected total, and
+ * only written to once a trade actually executes.
  *
  * <p>Only OTC trades are checked. A CLOB fill has no named counterparty to check - see
  * {@code TradabilityProfile} - so a counterparty exposure limit has nothing to apply to there.
  *
+ * <h2>M18: the running total lives in a shared {@link ExposureLedger}, not on this venue</h2>
+ * Through M17 the running exposure was this venue's own instance state - correct only as long
+ * as exactly one {@code OtcNegotiationVenue} ever trades against a given counterparty, which
+ * was true of every wiring in this codebase but stopped being guaranteed the moment a second
+ * venue instance could exist against overlapping counterparties. {@link ExposureLedger} is
+ * that state, extracted so it can be constructed once and shared - see its own javadoc for the
+ * full reasoning. This venue still owns the sequence a credit check needs (read, check, mint a
+ * trade on approval, commit, publish), all under {@link ExposureLedger#lock()}; the ledger owns
+ * only the state and its own {@link ExposureLedger#release}.
+ *
  * <h2>Exposure is released on settlement, not held forever</h2>
  * The running total is gross notional, not a netted mark-to-market figure (see
  * {@code docs/KNOWN_GAPS.md}) - but a trade that has actually settled is no longer a
- * counterparty risk this venue carries, so {@link #release} exists to take it back out.
- * Nothing calls it automatically: {@code docs/KNOWN_GAPS.md}'s "Settlement scheduling" entry
- * already establishes that driving a trade to {@code SETTLED} is a caller's explicit action,
- * and releasing the exposure it created follows the same rule rather than inventing a
+ * counterparty risk anything carries, so {@link ExposureLedger#release} exists to take it back
+ * out. Nothing calls it automatically: {@code docs/KNOWN_GAPS.md}'s "Settlement scheduling"
+ * entry already establishes that driving a trade to {@code SETTLED} is a caller's explicit
+ * action, and releasing the exposure it created follows the same rule rather than inventing a
  * different one. Without this, the limit would be a lifetime trading-volume cap rather than
  * anything resembling live credit exposure - every counterparty would eventually exhaust it
  * permanently regardless of how healthy the relationship actually is.
- *
- * <p>{@link #release} trusts its own records, not the {@link Trade} it is handed. Every
- * {@code negotiate} that executes records exactly what it added to
- * {@code exposureByCounterparty}, keyed by the {@code TradeId} it minted, in
- * {@code exposureAdded}. {@code release} looks a trade up there rather than recomputing an
- * amount from the caller-supplied {@code Trade}'s own {@code consideration} - a {@code Trade}
- * is a public value type that any code in the process can construct and walk to
- * {@code SETTLED} by hand, so trusting its fields directly would let a trade this venue never
- * actually booked subtract from - or wipe out - another counterparty's real exposure.
  *
  * <p>A breach does not throw. {@link #negotiate} returns a {@link NegotiationResult} carrying
  * either the executed trade or the breaches that stopped it - {@code MercuryException}'s own
@@ -107,25 +102,10 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     private final CounterpartyDirectory counterparties;
     private final RiskLimit riskLimit;
     private final EventBus events;
+    private final ExposureLedger exposureLedger;
 
-    /**
-     * Guards the two maps below. A credit check is read-check-commit: two negotiations
-     * interleaving between the read and the commit would each see room for themselves and both
-     * execute - under test, 400 concurrent trades all went through a limit with room for 100.
-     * Pricing happens outside the lock (it is pure and can be slow); only the exposure
-     * arithmetic and the commit are serialised.
-     */
-    private final Object exposureLock = new Object();
-
-    private final Map<CounterpartyId, Money> exposureByCounterparty = new HashMap<>();
-
-    /**
-     * Trades whose exposure is still counted, by id. An entry is removed when it is released,
-     * so this holds open trades only, not every trade the venue has ever done.
-     */
-    private final Map<TradeId, RecordedExposure> exposureAdded = new HashMap<>();
-
-    /** A venue nothing listens to; every execution is still returned to the caller. */
+    /** A venue nothing listens to, with exposure private to it; every execution is still
+     *  returned to the caller. */
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
                                CounterpartyId ownBook, CounterpartyDirectory counterparties,
@@ -142,6 +122,21 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
                                InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
                                CounterpartyId ownBook, CounterpartyDirectory counterparties,
                                RiskLimit riskLimit, EventBus events) {
+        this(pricingService, market, instruments, tradeIdGenerator, ownBook, counterparties,
+                riskLimit, events, new ExposureLedger());
+    }
+
+    /**
+     * @param exposureLedger where the running counterparty exposure this venue checks against
+     *                       lives - construct one and pass the same instance to every venue
+     *                       that should share a counterparty's limit against it (M18); the
+     *                       other constructors give each venue a private one, which is correct
+     *                       as long as only one venue ever trades against a given counterparty
+     */
+    public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
+                               InstrumentCatalog instruments, TradeIdGenerator tradeIdGenerator,
+                               CounterpartyId ownBook, CounterpartyDirectory counterparties,
+                               RiskLimit riskLimit, EventBus events, ExposureLedger exposureLedger) {
         this.events = Objects.requireNonNull(events, "events");
         this.pricingService = Objects.requireNonNull(pricingService, "pricingService");
         this.market = Objects.requireNonNull(market, "market");
@@ -150,6 +145,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
         this.ownBook = Objects.requireNonNull(ownBook, "ownBook");
         this.counterparties = Objects.requireNonNull(counterparties, "counterparties");
         this.riskLimit = Objects.requireNonNull(riskLimit, "riskLimit");
+        this.exposureLedger = Objects.requireNonNull(exposureLedger, "exposureLedger");
     }
 
     @Override
@@ -209,7 +205,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
         Money tradeExposure = Money.fromModelValue(exposureInLimitCurrency, limitCurrency);
         Quantity delta = buy ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
 
-        synchronized (exposureLock) {
+        synchronized (exposureLedger.lock()) {
             Money projectedExposure = exposureTo(counterparty.id()).plus(tradeExposure);
             LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
             if (check.isBreached()) {
@@ -222,8 +218,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
                     .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
                     .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
 
-            exposureByCounterparty.put(counterparty.id(), projectedExposure);
-            exposureAdded.put(trade.id(), new RecordedExposure(trade, counterparty.id(), tradeExposure));
+            exposureLedger.commit(counterparty.id(), projectedExposure, trade, tradeExposure);
 
             // Announced under the same lock that committed the exposure, so a subscriber can
             // never see a trade the venue has not yet counted against its counterparty's
@@ -236,7 +231,8 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     /**
      * The running gross notional traded against {@code counterparty} so far, in that
      * counterparty's own {@code CreditLimit} currency - zero if nothing has executed against
-     * it yet.
+     * it yet. Forwards to this venue's {@link ExposureLedger}, shared or private depending on
+     * which constructor built this venue.
      *
      * <p>Exists so a caller can ask "how much room is left" without attempting a trade first.
      * Read-only: this never itself checks or mutates anything, so calling it has no effect on
@@ -248,29 +244,16 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     public Money exposureTo(CounterpartyId counterparty) {
         Objects.requireNonNull(counterparty, "counterparty");
         Currency limitCurrency = counterparties.require(counterparty).creditLimit().maximum().currency();
-        synchronized (exposureLock) {
-            return exposureByCounterparty.getOrDefault(counterparty, Money.zero(limitCurrency));
-        }
+        return exposureLedger.exposureTo(counterparty, limitCurrency);
     }
 
     /**
      * Takes {@code trade}'s recorded contribution back out of the running exposure it added
-     * when it executed - see the class javadoc on why exposure must be released rather than
-     * held forever, and on why the amount released comes from this venue's own records rather
-     * than from {@code trade.consideration()}.
-     *
-     * <p>A {@link TradeStatus#CANCELLED} trade releases too: it will never settle, so
-     * accepting only {@code SETTLED} would leave a withdrawn trade counted against the limit
-     * for good.
-     *
-     * <p>Matching the id is not enough to trust the caller's trade: ids are sequential and
-     * guessable, so a hand-built {@code Trade} reusing a live trade's id could otherwise claim
-     * it had settled. The trade must carry exactly the terms this venue executed and a history
-     * that extends the one it was handed back - that is, be the executed trade walked forward.
-     *
-     * <p>Every check that can fail is resolved before anything is mutated: a thrown exception
-     * here always leaves {@code exposureByCounterparty} and the open-exposure record exactly
-     * as they were before the call.
+     * when it executed - forwards to this venue's {@link ExposureLedger}; see that class's
+     * javadoc for the trust model and why the amount released comes from its own records
+     * rather than from {@code trade.consideration()}. A {@link TradeStatus#CANCELLED} trade
+     * releases too: it will never settle, so accepting only {@code SETTLED} would leave a
+     * withdrawn trade counted against the limit for good.
      *
      * @throws IllegalArgumentException if {@code trade} is neither {@link TradeStatus#SETTLED}
      *         nor {@link TradeStatus#CANCELLED}, was never recorded as exposure by this venue's
@@ -278,75 +261,12 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
      *         already been released
      */
     public void release(Trade trade) {
-        Objects.requireNonNull(trade, "trade");
-        if (trade.status() != TradeStatus.SETTLED && trade.status() != TradeStatus.CANCELLED) {
-            throw new IllegalArgumentException(
-                    "Only a SETTLED or CANCELLED trade releases exposure, but " + trade.id() + " is "
-                            + trade.status());
-        }
-        synchronized (exposureLock) {
-            RecordedExposure recorded = exposureAdded.get(trade.id());
-            if (recorded == null) {
-                // One message for both causes: once released, a trade's record is dropped (so
-                // the map holds open trades, not all history), which makes "released already"
-                // and "never produced here" the same fact from this venue's point of view.
-                throw new IllegalArgumentException(
-                        "Trade " + trade.id() + " was never recorded as open counterparty exposure by "
-                                + "this venue's own negotiate(), or has already been released. Only a "
-                                + "trade this venue produced can be released, and only once - a foreign "
-                                + "Trade must not subtract from real exposure, and a second release "
-                                + "would understate it");
-            }
-            if (!continues(recorded.executed(), trade)) {
-                throw new IllegalArgumentException(
-                        "Trade " + trade.id() + " is not the trade this venue executed under that id: "
-                                + "its terms or its lifecycle history differ from what negotiate() "
-                                + "produced, so it cannot release that trade's exposure");
-            }
-
-            Money existing = exposureTo(recorded.counterparty());
-            if (existing.isLessThan(recorded.amount())) {
-                // Unreachable under correct bookkeeping: exposureByCounterparty is an exact sum
-                // of exactly what negotiate() recorded, and a record is removed the moment it
-                // is released. Throwing rather than flooring at zero - a running total smaller
-                // than a trade's own recorded contribution means the bookkeeping is already
-                // wrong, and a plausible-looking recovered number would hide that.
-                throw new IllegalStateException(
-                        "Exposure to " + recorded.counterparty() + " (" + existing + ") is smaller than "
-                                + "trade " + trade.id() + "'s own recorded contribution (" + recorded.amount()
-                                + "). This venue's exposure bookkeeping is inconsistent.");
-            }
-
-            exposureAdded.remove(trade.id());
-            exposureByCounterparty.put(recorded.counterparty(), existing.minus(recorded.amount()));
-        }
+        exposureLedger.release(trade);
     }
 
     /** How many trades' exposure is still counted. Package-private, for tests of boundedness. */
     int openExposureCount() {
-        synchronized (exposureLock) {
-            return exposureAdded.size();
-        }
-    }
-
-    /** True if {@code candidate} is {@code executed} with zero or more transitions appended. */
-    private static boolean continues(Trade executed, Trade candidate) {
-        List<?> history = candidate.history();
-        return candidate.instrumentId().equals(executed.instrumentId())
-                && candidate.owner().equals(executed.owner())
-                && candidate.delta().equals(executed.delta())
-                && candidate.consideration().equals(executed.consideration())
-                && candidate.tradeDate().equals(executed.tradeDate())
-                && candidate.settlementDate().equals(executed.settlementDate())
-                && candidate.counterparty().equals(executed.counterparty())
-                && history.size() >= executed.history().size()
-                && history.subList(0, executed.history().size()).equals(executed.history());
-    }
-
-    /** What one executed trade added to {@code exposureByCounterparty}, recorded so {@link
-     * #release} can undo exactly that amount rather than trusting a caller-supplied {@link
-     * Trade}'s own fields. */
-    private record RecordedExposure(Trade executed, CounterpartyId counterparty, Money amount) {
+        return exposureLedger.openExposureCount();
     }
 
     /**

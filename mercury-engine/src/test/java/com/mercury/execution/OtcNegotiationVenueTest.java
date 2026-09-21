@@ -420,7 +420,7 @@ class OtcNegotiationVenueTest {
 
         assertThatThrownBy(() -> venue.release(forged))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not the trade this venue executed");
+                .hasMessageContaining("not the trade recorded under that id");
         assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("10000.00", Currency.USD));
     }
 

@@ -7,6 +7,33 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M18 complete** — **a global counterparty exposure ledger, extracted rather than redesigned.**
+`OtcNegotiationVenue.exposureByCounterparty` had lived on the venue instance since M9 - the
+established shape, the same way `OrderBookVenue` holds its own order books. Correct as long as
+exactly one venue ever traded against a given counterparty, which was true of every wiring in
+this codebase, but the design would have silently under-counted the moment a second instance
+existed against overlapping counterparties: each would track exposure independently, and a
+limit sized for the counterparty as a whole would admit more than it should across the two.
+
+`ExposureLedger` is the same state - the lock, the running totals, the open-exposure records,
+even the same trust model on `release` (it looks up what it actually recorded, never a
+caller-supplied `Trade`'s own fields) - moved wholesale into its own class rather than
+rewritten. `OtcNegotiationVenue` still owns the sequence a credit check needs: read the
+projected exposure, check it against the limit, mint a trade on approval, commit, publish -
+all under `ExposureLedger.lock()`, which is reentrant, so the ledger's own `exposureTo` and
+`release` synchronizing on the same lock internally nest safely inside that outer block. Every
+constructor `OtcNegotiationVenue` had before this milestone is untouched - each still builds a
+private `ExposureLedger` internally - and one new overload accepts a shared one. Zero source
+change for any existing caller, the same additive shape M17 used for `submit`.
+
+The fix is proven rather than only argued for: `ExposureLedgerTest` constructs two
+`OtcNegotiationVenue` instances against one shared ledger and the same counterparty, spends the
+limit through the first, and shows the second sees no room left - the exact scenario the old
+design could not even be exercised against, since nothing in this codebase had ever constructed
+two instances of the venue in the same process. A scaled-down version of the existing 16-thread
+concurrent stress test, split across both venue instances, confirms the combined limit is never
+over-admitted under concurrency either.
+
 **M17 complete** — **asynchronous order submission, narrower than the fix `docs/KNOWN_GAPS.md`
 had priced.** M13's benchmark found `BookConcurrency.THREAD_PER_BOOK` **1.7-3.8× slower** than
 the `INLINE` default, traced to `SingleWriterBookLane.run` wrapping every command in a

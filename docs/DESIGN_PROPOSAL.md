@@ -987,6 +987,25 @@ fix for the queue this opens - see the ADR's "Alternatives rejected" for why bou
 would be sizing against a guess, the same reasoning that already applies to
 `AsynchronousEventBus`.
 
+#### M18 — Global counterparty exposure ledger — ✅ done
+
+`docs/KNOWN_GAPS.md` named the gap directly: `OtcNegotiationVenue.exposureByCounterparty` lived
+on the venue instance, correct only as long as exactly one venue ever traded against a given
+counterparty. `ExposureLedger` (`com.mercury.execution`) is the same state - lock, running
+totals, open-exposure records - extracted wholesale so it can be constructed once and shared.
+`OtcNegotiationVenue` keeps the sequence a credit check needs (read, check, mint a trade on
+approval, commit, publish) under `ExposureLedger.lock()`; the ledger owns only the state and
+its own `release`. Every existing constructor is untouched - each still builds a private ledger
+internally - and one new overload takes a shared one, so this is additive for every caller
+before M18, the same shape M17 already used for `submit`.
+
+Proven, not just asserted: `ExposureLedgerTest` constructs two `OtcNegotiationVenue` instances
+against one shared ledger and the same counterparty, and shows the second sees no room left
+once the first has spent it - the exact scenario the old per-instance design could not even be
+tested against, because nothing in the codebase had ever constructed two. A scaled-down version
+of the existing concurrent stress test, split across both instances, confirms the combined
+limit is never over-admitted.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and

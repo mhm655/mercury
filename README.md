@@ -223,6 +223,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M15 — Extensibility proof & architecture documentation | ✅ complete |
 | M16 — Terminal UI: order book, blotter, P&L and risk replayed one step at a time | ✅ complete |
 | M17 — Asynchronous order submission: `submit()`, additive to `execute()` | ✅ complete |
+| M18 — Global counterparty exposure ledger, extracted and shareable | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -372,6 +373,16 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   unthrottled producer can queue faster than the writer drains — recorded as its own entry in
   `docs/KNOWN_GAPS.md` next to the identical trade-off already accepted for
   `AsynchronousEventBus`, not hidden behind a shorter benchmark window.
+- **A global counterparty exposure ledger, extracted rather than redesigned.**
+  `OtcNegotiationVenue.exposureByCounterparty` had lived on the venue instance since M9 -
+  correct only as long as exactly one venue ever traded against a given counterparty. A second
+  instance against overlapping counterparties would have tracked exposure independently and
+  silently under-counted. `ExposureLedger` is the same lock, running totals and open-exposure
+  records, moved wholesale into a shareable class; every existing constructor is untouched, and
+  one new overload accepts a ledger shared across venues. `ExposureLedgerTest` proves the fix
+  rather than only arguing for it — two venue instances against one shared ledger enforce a
+  single combined limit, the scenario the old per-instance design could never even be tested
+  against.
 
 ### Dead weight, looked for on purpose
 
