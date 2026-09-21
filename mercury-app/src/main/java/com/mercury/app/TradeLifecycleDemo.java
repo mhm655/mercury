@@ -68,7 +68,7 @@ public final class TradeLifecycleDemo {
 
     public static void main(String[] args) {
         InstrumentCatalog catalog = InstrumentCatalog.of(DemoScenario.instruments());
-        SimulationClock clock = SimulationClock.fixedAt(DemoScenario.VALUATION_DATE);
+        SimulationClock.Advancing clock = SimulationClock.advancing(DemoScenario.VALUATION_DATE);
         Counterparty acme = new Counterparty(ACME, "Acme Capital",
                 new CreditLimit(Money.of("50000000.00", Currency.USD)));
         Counterparty tinyLimit = new Counterparty(TINY_LIMIT, "Tiny Capital",
@@ -131,6 +131,7 @@ public final class TradeLifecycleDemo {
         // version it replaces: through M18 only crossed.get(0) was ever walked to SETTLED here,
         // by hand, and every other trade in this demo stayed EXECUTED forever.
         LocalDate settlementDay = crossed.get(0).settlementDate().orElseThrow();
+        clock.advanceTo(settlementDay);
         List<Trade> settledToday = settlementBook.settleDueBy(settlementDay, clock);
         Trade settled = settledToday.stream()
                 .filter(trade -> trade.id().equals(crossed.get(0).id()))
@@ -167,6 +168,7 @@ public final class TradeLifecycleDemo {
         System.out.println("  exposure to " + TINY_LIMIT + ": " + otcVenue.exposureTo(TINY_LIMIT)
                 + " (queryable without attempting a trade)");
         LocalDate bondSettlementDay = approved.trades().get(0).settlementDate().orElseThrow();
+        clock.advanceTo(bondSettlementDay);
         Trade firstBondTradeSettled = settlementBook.settleDueBy(bondSettlementDay, clock).stream()
                 .filter(trade -> trade.id().equals(approved.trades().get(0).id()))
                 .findFirst().orElseThrow();
