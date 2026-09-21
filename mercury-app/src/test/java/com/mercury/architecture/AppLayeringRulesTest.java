@@ -121,7 +121,41 @@ class AppLayeringRulesTest {
         if (isRecordAccessor(clazz, method)) {
             return true;
         }
-        return method.getModifiers().contains(JavaModifier.ABSTRACT) || clazz.isInterface();
+        if (method.getModifiers().contains(JavaModifier.ABSTRACT) || clazz.isInterface()) {
+            return true;
+        }
+        return overridesSupertypeMethod(clazz, method);
+    }
+
+    /**
+     * A method overriding an interface or superclass declaration - invoked polymorphically
+     * through that supertype, which is where the call site is recorded, not against this
+     * class directly.
+     *
+     * <h2>Missing until M16</h2>
+     * The engine's copy of this rule ({@code NoOrphanedApiTest}) has carried this exemption
+     * from the start; this copy did not, because nothing in {@code mercury-app} had
+     * implemented a functional interface across an event-bus subscription until
+     * {@code Blotter implements Consumer<TradeExecuted>} - the same shape
+     * {@code LedgerKeeper} already uses in the engine. {@code SynchronousEventBus.publish}
+     * calls {@code subscriber.accept(event)} against the {@code Consumer} reference it holds,
+     * so the bytecode call site targets {@code Consumer.accept}, not {@code Blotter.accept} -
+     * invisible to a rule that only looks for accesses recorded against the concrete class.
+     * A gap two copies of the same check can drift into, closed the same way §M15's
+     * dead-weight audit closed the last one: by making the two copies agree, not by routing
+     * one call site around the rule.
+     */
+    private static boolean overridesSupertypeMethod(JavaClass clazz, JavaMethod method) {
+        List<String> parameters = method.getRawParameterTypes().stream()
+                .map(JavaClass::getName).toList();
+
+        List<JavaClass> supertypes = new ArrayList<>(clazz.getAllRawInterfaces());
+        supertypes.addAll(clazz.getAllRawSuperclasses());
+
+        return supertypes.stream().anyMatch(supertype -> supertype.getMethods().stream()
+                .anyMatch(candidate -> candidate.getName().equals(method.getName())
+                        && candidate.getRawParameterTypes().stream()
+                                .map(JavaClass::getName).toList().equals(parameters)));
     }
 
     /**

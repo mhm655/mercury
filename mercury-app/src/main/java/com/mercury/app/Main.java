@@ -1,5 +1,6 @@
 package com.mercury.app;
 
+import com.mercury.app.tui.TuiDemo;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
@@ -31,6 +32,7 @@ public final class Main {
         DEMOS.put("lifecycle", TradeLifecycleDemo::main);
         DEMOS.put("risk", RiskEngineDemo::main);
         DEMOS.put("montecarlo", MonteCarloDemo::main);
+        DEMOS.put("tui", TuiDemo::main);
     }
 
     private Main() {
@@ -106,13 +108,14 @@ public final class Main {
      */
     private static void printOtherCommands() {
         System.err.println();
-        System.err.println("Five commands in this jar; this was one. The rest:");
+        System.err.println("Six commands in this jar; this was one. The rest:");
         System.err.println("  walkthrough  orders cross, become trades, become a book, and get");
         System.err.println("               risked - the whole engine in one pass, and the one to");
         System.err.println("               run next if you run only one more");
         System.err.println("  lifecycle    trade state machine, self-trade prevention, a credit breach");
         System.err.println("  risk         Gamma and Vega against their closed forms; historical VaR");
         System.err.println("  montecarlo   Monte Carlo converging on Black-Scholes; VaR and shortfall");
+        System.err.println("  tui          the walkthrough replayed one step at a time (Enter to advance)");
         System.err.println("  report       the valuation report (the default)");
         System.err.println("Run one with: java -jar mercury.jar <command>");
     }
@@ -126,6 +129,7 @@ public final class Main {
                   lifecycle    trade lifecycle, self-trade prevention, credit limits
                   risk         Gamma/Vega against closed form, historical VaR
                   montecarlo   Monte Carlo pricing convergence, VaR and Expected Shortfall
+                  tui          the walkthrough replayed one step at a time (Enter to advance)
                 """;
     }
 }
