@@ -7,6 +7,18 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M22 complete** — **FX triangulation through a single stated vehicle currency, opt-in.**
+`MarketDataSnapshot.fxRate` resolved a directly quoted pair and its inverse, nothing else - a
+snapshot quoting GBP/USD and EUR/USD, the ordinary way a desk quotes everything against a
+dollar vehicle, still could not answer `fxRate(GBP, EUR)`. `Builder.vehicleCurrency(Currency)`
+is the fix, unset by default so every existing snapshot is untouched: when set, a pair still
+missing after the existing direct/inverse resolution gets one retry through the named vehicle.
+Deliberately not a graph search over every currency a snapshot happens to hold - that would
+reintroduce the exact "inferring a rate nobody quoted" failure the gap was raised against, just
+automated instead of manual. [ADR 0010](adr/0010-fx-triangulation-through-a-single-stated-vehicle-currency.md)
+records why one stated hop is the whole rule the gap asked for. A cross that fails even through
+the vehicle still throws loudly, now naming the vehicle it tried.
+
 **M21 complete** — **fault isolation: a worker thread that dies of a fatal `Error` now closes
 its lane or bus loudly, rather than leaving it silently deaf.** Not on the roadmap - found while
 reproducing M17's own documented back-pressure gap for a debugging pass. Running

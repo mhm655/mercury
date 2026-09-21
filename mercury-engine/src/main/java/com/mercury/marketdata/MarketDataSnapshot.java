@@ -56,12 +56,14 @@ public final class MarketDataSnapshot {
     private final LocalDate valuationDate;
     private final Interpolation curveInterpolation;
     private final Map<MarketDataKey, Double> values;
+    private final Currency vehicleCurrency;
 
     private MarketDataSnapshot(LocalDate valuationDate, Interpolation curveInterpolation,
-                               Map<MarketDataKey, Double> values) {
+                               Map<MarketDataKey, Double> values, Currency vehicleCurrency) {
         this.valuationDate = valuationDate;
         this.curveInterpolation = curveInterpolation;
         this.values = values;
+        this.vehicleCurrency = vehicleCurrency;
     }
 
     public static Builder builder(LocalDate valuationDate) {
@@ -71,7 +73,7 @@ public final class MarketDataSnapshot {
     /** An empty market. Useful only in tests asserting that missing data is rejected. */
     public static MarketDataSnapshot empty(LocalDate valuationDate) {
         return new MarketDataSnapshot(Objects.requireNonNull(valuationDate, "valuationDate"),
-                Interpolation.LOG_LINEAR_DISCOUNT, Map.of());
+                Interpolation.LOG_LINEAR_DISCOUNT, Map.of(), null);
     }
 
     /** The moment this market describes. Every curve in it is referenced here. */
@@ -149,13 +151,19 @@ public final class MarketDataSnapshot {
      *       would imply a round-trip profit that exists only in the data.</li>
      * </ol>
      *
-     * <p><b>No triangulation.</b> GBP to USD is not derived from GBP/EUR and EUR/USD; only
-     * the pair itself and its inverse are consulted. Cross rates through a vehicle currency
-     * need a stated base currency and a rule for which crosses are legal, and inferring one
-     * silently would let a portfolio value against a rate nobody quoted. Listed in
-     * {@code KNOWN_GAPS.md}.
+     * <p><b>Triangulation is opt-in, through one stated vehicle currency.</b> GBP to USD is
+     * not derived from GBP/EUR and EUR/USD unless the snapshot was built with
+     * {@link Builder#vehicleCurrency}. Every existing snapshot leaves it unset, so this is the
+     * exact three-step resolution above with nothing else consulted. When a vehicle currency
+     * is set and differs from both {@code from} and {@code to}, a pair still missing after
+     * step 3 is retried as one hop through the vehicle: {@code fxRate(from, vehicle) *
+     * fxRate(vehicle, to)}. Not a graph search over every currency the snapshot happens to
+     * hold - inferring a bridge silently is exactly the "rate nobody quoted" risk this method
+     * used to warn against outright, so only the one currency the snapshot builder explicitly
+     * named is ever tried. See ADR 0010 and {@code KNOWN_GAPS.md}.
      *
-     * @throws MissingMarketDataException if neither direction is present
+     * @throws MissingMarketDataException if neither direction is present, and either no
+     *         vehicle currency is stated or triangulating through it also fails
      */
     public double fxRate(Currency from, Currency to) {
         Objects.requireNonNull(from, "from");
@@ -163,6 +171,23 @@ public final class MarketDataSnapshot {
         if (from == to) {
             return 1.0;
         }
+        try {
+            return directOrInverse(from, to);
+        } catch (MissingMarketDataException direct) {
+            if (vehicleCurrency == null || vehicleCurrency == from || vehicleCurrency == to) {
+                throw direct;
+            }
+            try {
+                return directOrInverse(from, vehicleCurrency) * directOrInverse(vehicleCurrency, to);
+            } catch (MissingMarketDataException viaVehicle) {
+                throw new MissingMarketDataException(
+                        MarketDataKey.fxRate(CurrencyPair.of(from, to)), values.keySet(),
+                        vehicleCurrency);
+            }
+        }
+    }
+
+    private double directOrInverse(Currency from, Currency to) {
         MarketDataKey direct = MarketDataKey.fxRate(CurrencyPair.of(from, to));
         if (values.containsKey(direct)) {
             return values.get(direct);
@@ -213,7 +238,8 @@ public final class MarketDataSnapshot {
             key.requireValidValue(result);
             shocked.put(key, result);
         });
-        return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(shocked));
+        return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(shocked),
+                vehicleCurrency);
     }
 
     @Override
@@ -221,12 +247,13 @@ public final class MarketDataSnapshot {
         return o instanceof MarketDataSnapshot other
                 && valuationDate.equals(other.valuationDate)
                 && curveInterpolation == other.curveInterpolation
-                && values.equals(other.values);
+                && values.equals(other.values)
+                && vehicleCurrency == other.vehicleCurrency;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(valuationDate, curveInterpolation, values);
+        return Objects.hash(valuationDate, curveInterpolation, values, vehicleCurrency);
     }
 
     @Override
@@ -240,6 +267,7 @@ public final class MarketDataSnapshot {
         private final LocalDate valuationDate;
         private final Map<MarketDataKey, Double> values = new HashMap<>();
         private Interpolation curveInterpolation = Interpolation.LOG_LINEAR_DISCOUNT;
+        private Currency vehicleCurrency;
 
         private Builder(LocalDate valuationDate) {
             this.valuationDate = Objects.requireNonNull(valuationDate, "valuationDate");
@@ -248,6 +276,18 @@ public final class MarketDataSnapshot {
         /** How curves assembled from this snapshot fill in the gaps between their pillars. */
         public Builder curveInterpolation(Interpolation interpolation) {
             this.curveInterpolation = Objects.requireNonNull(interpolation, "interpolation");
+            return this;
+        }
+
+        /**
+         * States the one currency {@link MarketDataSnapshot#fxRate} may triangulate a missing
+         * cross through - unset by default, so a snapshot built without calling this never
+         * triangulates. See {@link MarketDataSnapshot#fxRate} and ADR 0010 for why this is a
+         * single named currency rather than a search over every currency the snapshot happens
+         * to hold.
+         */
+        public Builder vehicleCurrency(Currency vehicleCurrency) {
+            this.vehicleCurrency = Objects.requireNonNull(vehicleCurrency, "vehicleCurrency");
             return this;
         }
 
@@ -331,7 +371,8 @@ public final class MarketDataSnapshot {
         }
 
         public MarketDataSnapshot build() {
-            return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(values));
+            return new MarketDataSnapshot(valuationDate, curveInterpolation, Map.copyOf(values),
+                    vehicleCurrency);
         }
     }
 
@@ -351,6 +392,19 @@ public final class MarketDataSnapshot {
                     + (available.isEmpty() ? "nothing" : available.size() + " other observations")
                     + ". Missing data is an error rather than a zero, because a spot price read "
                     + "as zero produces a plausible but wrong valuation.");
+        }
+
+        /**
+         * @param vehicle the vehicle currency triangulation was attempted through, also
+         *                without success
+         */
+        MissingMarketDataException(MarketDataKey key, Set<MarketDataKey> available, Currency vehicle) {
+            super("No market data for " + key.describe() + ". The snapshot holds: "
+                    + (available.isEmpty() ? "nothing" : available.size() + " other observations")
+                    + ". Also tried triangulating through " + vehicle.code() + ", which needs "
+                    + "both legs against " + vehicle.code() + " (or their inverses) and did not "
+                    + "find one. Missing data is an error rather than a zero, because a spot "
+                    + "price read as zero produces a plausible but wrong valuation.");
         }
     }
 }

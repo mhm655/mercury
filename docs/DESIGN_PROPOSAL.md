@@ -1104,6 +1104,30 @@ Proven with the same technique that found the gap: `SingleWriterBookLaneTest` an
 directly, asserting the lane or bus closes and a subsequent call is rejected - deterministic
 unit tests, not benchmarks that happen to reproduce an OOM.
 
+#### M22 — FX triangulation through a single stated vehicle currency — ✅ done
+
+`MarketDataSnapshot.fxRate`'s own javadoc named the gap explicitly: "no triangulation... GBP
+to USD is not derived from GBP/EUR and EUR/USD; only the pair itself and its inverse are
+consulted." `Builder.vehicleCurrency(Currency)` is the fix - unset by default, so every
+existing snapshot is untouched; when set, a pair still missing after the existing direct/
+inverse resolution gets one retry through the named vehicle
+(`fxRate(from, vehicle) * fxRate(vehicle, to)`).
+
+Deliberately one stated hop, not a graph search over every currency a snapshot happens to
+hold - a search would answer "which crosses are legal" implicitly and differently per
+snapshot, which is exactly the "inferring one silently" failure the original javadoc already
+rejected. [ADR 0010](adr/0010-fx-triangulation-through-a-single-stated-vehicle-currency.md)
+records this and the other alternative considered (a per-call vehicle parameter on `fxRate`
+itself, rejected because two callers reading the same snapshot could then disagree about which
+crosses are legal - a market-data consistency property that belongs on the snapshot, not the
+call site).
+
+A cross that fails even through the stated vehicle still throws `MissingMarketDataException`,
+now naming the vehicle currency that was tried - loud, not silently degraded.
+
+**Not in scope:** multi-hop triangulation through more than one bridge currency, and any form
+of automatic vehicle-currency inference - both stay out per the ADR's stated boundary.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and

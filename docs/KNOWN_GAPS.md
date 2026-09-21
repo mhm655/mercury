@@ -8,6 +8,29 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M22
+
+### M-1 · No FX triangulation through a vehicle currency · fixed
+
+`fxRate(from, to)` consulted a directly quoted pair and its inverse, nothing else, so a
+snapshot quoting GBP/USD and EUR/USD - the ordinary way a desk quotes everything against a
+dollar vehicle - still could not answer `fxRate(GBP, EUR)`, even though the cross is fully
+determined by what the snapshot already holds.
+
+**A stated vehicle, not an inferred one.** `MarketDataSnapshot.Builder` gained an optional
+`vehicleCurrency(Currency)`, unset by default so every existing snapshot and test is
+byte-for-byte unchanged. When set, and only when it differs from both currencies asked for, a
+pair still missing after the existing direct/inverse resolution is retried as one hop through
+the named vehicle. Not a graph search over every currency a snapshot happens to hold - see
+[ADR 0010](adr/0010-fx-triangulation-through-a-single-stated-vehicle-currency.md) for why a
+single named currency is the whole rule the original gap asked for, and why anything more
+general would reintroduce the exact "inferring one silently" failure the gap was raised
+against in the first place.
+
+**Failure stays loud.** A cross that fails even through the stated vehicle still throws
+`MissingMarketDataException`, now naming the vehicle currency that was tried, so a
+triangulation failure is debuggable at the point it happens.
+
 ## Fixed during M21
 
 ### L-1 · A writer thread that died of `OutOfMemoryError` left its lane silently deaf · fixed
@@ -322,7 +345,6 @@ decision.
 | Curves | Key-rate risk | The shock family can express a one-pillar bump, and nothing asks for one yet. DV01 is a parallel shift; key-rate duration is the same mechanism with a narrower selector, and arrives when the risk engine needs it. |
 | Order types | Fill-or-kill, good-till-date, stop, iceberg | Each adds a branch in the matching loop and no new insight. Limit, market and IOC cover price-time priority, resting, partial fills and cancellation. |
 | Order book | Tick-indexed price array | O(1) for everything and what a real exchange uses, but it assumes a bounded tick grid the simulation does not fix. See ADR 0005. |
-| FX | Triangulation through a vehicle currency | `fxRate(from, to)` consults the pair and its inverse, nothing else, so GBP to USD fails even when GBP/EUR and EUR/USD are both present. A cross rate needs a stated vehicle currency and a rule for which crosses are legal; inferring one silently would value a book against a rate nobody quoted. Fails loudly today. |
 | Portfolio | A trade that carries a position through zero | Selling fifteen when long ten is two trades: closing ten at the old cost basis and opening a short five at today's price. `PositionLots` refuses it rather than inventing where the boundary falls. Book the two legs separately. |
 | Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store; still deferred and unscheduled after M8. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
