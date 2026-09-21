@@ -32,6 +32,21 @@ class MainTest {
     }
 
     @Test
+    void theLifecycleDemoSettlesAutomaticallyRatherThanByHand() {
+        String output = run("lifecycle");
+
+        // M19: TradeSettlementBook sweeps every trade due, not just the one section 4
+        // showcases - all three trades minted by that point in the script (two from the AAPL
+        // cross, one OTC swap) share a settlement date, since nothing advances the clock.
+        assertThat(output).contains("3 trade(s) due settled automatically, not walked to SETTLED by hand");
+        assertThat(output).contains("CONFIRMED -> SETTLED");
+        // Section 5's bond trade settling and releasing its exposure is what lets the same
+        // negotiation that was rejected moments earlier succeed on retry.
+        assertThat(output).contains("settled automatically and released: exposure to CPTY-TINYLIMIT now 0.00 USD");
+        assertThat(output).contains("same 4 units, retried: executed");
+    }
+
+    @Test
     void helpListsEveryCommand() {
         assertThat(run("help"))
                 .contains("report", "walkthrough", "lifecycle", "risk", "montecarlo");

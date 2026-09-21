@@ -213,7 +213,9 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
             }
 
             Trade trade = Trade.newTrade(tradeIdGenerator.next(), instrument.id(), ownBook, delta,
-                    consideration, clock.today(), Optional.empty(), Optional.of(otc.counterparty()));
+                    consideration, clock.today(),
+                    Optional.of(SettlementConvention.settlementDateFor(clock.today())),
+                    Optional.of(otc.counterparty()));
             trade = trade.transitionTo(TradeStatus.VALIDATED, "priced on request", clock)
                     .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
                     .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);

@@ -8,6 +8,42 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M19
+
+### J-1 · Settlement scheduling · fixed
+
+`Trade` carried a `settlementDate` and supported the `SETTLED` state, but nothing moved a
+trade there automatically on clock advancement (`docs/DESIGN_PROPOSAL.md` A2.7). Driving a
+trade to `SETTLED` was a caller's explicit action, by hand, every time - `TradeLifecycleDemo`
+carried two copies of the same two-line `.transitionTo(CONFIRMED).transitionTo(SETTLED)`.
+
+**The prerequisite this entry didn't mention: nothing ever set a settlement date at all.**
+Neither `OrderBookVenue` nor `OtcNegotiationVenue` ever populated `Trade.settlementDate()` -
+every trade minted by either venue carried `Optional.empty()`. A scheduler has nothing to
+schedule against an empty date, so `SettlementConvention` (T+2 calendar days, a stated
+simplification - see its own javadoc for why calendar days rather than a `HolidayCalendar`
+roll was the right amount of scope for this milestone) now gives every minted trade a real one.
+This was not a separate gap bolted on beside the scheduler; it is the reason the scheduler had
+nothing real to settle before now.
+
+**`TradeSettlementBook`** (`com.mercury.trade`) is the scheduler A2.7 described: a
+`Consumer<TradeExecuted>`, the same shape `LedgerKeeper` already is, holding open trades in a
+`LinkedHashMap` for deterministic order. `settleDueBy(asOf, clock)` is a step a caller invokes
+explicitly after advancing a clock - the same pull-based shape `Schedule.unpaidPeriodsAsOf`
+already uses elsewhere in this engine for date-driven logic, rather than a push/listener wired
+into `SimulationClock` itself, which has no precedent anywhere in this codebase and would have
+been new architecture this milestone did not need. It returns the trades it just settled
+directly to its caller, who decides what to do next - releasing an OTC trade's exposure through
+M18's `ExposureLedger`, for instance - rather than a new event type nothing yet consumes.
+
+**Wired into a real consumer**, not left as machinery nobody calls: `TradeLifecycleDemo`'s two
+manual settlement call sites are gone, replaced by a `TradeSettlementBook` subscribed to a real
+event bus (previously `EventBus.ignoring()`, since this demo books from returned trade lists
+rather than the bus). `MainTest.theLifecycleDemoSettlesAutomaticallyRatherThanByHand` asserts
+the refactor actually settles every trade due - three at once, in the demo's section 4, since
+nothing advances the clock and every trade up to that point shares one settlement date - not
+just the single trade the old hand-written version walked through by name.
+
 ## Fixed during M18
 
 ### I-1 · Exposure was per-venue-instance, not global · fixed
@@ -197,8 +233,7 @@ decision.
 | Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store; still deferred and unscheduled after M8. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |
-| Risk limits | Exposure measured beyond gross notional by counterparty | M9's `CounterpartyExposureLimit` checks the running sum of absolute trade considerations against a counterparty, released via `OtcNegotiationVenue.release` once a trade settles (see below) — not a mark-to-market or potential-future-exposure figure, so a trade still outstanding is counted at its full traded consideration rather than its current replacement cost. A stated, narrower choice than `ExposureCalculator`'s full gross/net/by-currency/by-asset-class design in `docs/DESIGN_PROPOSAL.md` §5.5, built only as far as a credit check needs. Only OTC trades are checked; a CLOB fill has no named counterparty to check against (see `TradabilityProfile`). |
-| Trade lifecycle | Settlement scheduling | `Trade` carries a `settlementDate` and supports the `SETTLED` state, but nothing moves a trade there automatically on clock advancement (`docs/DESIGN_PROPOSAL.md` A2.7). Driving a trade to `SETTLED` is a caller's explicit action until a real scheduler exists; adding one now, with no consumer, would be exactly the speculative machinery the project's restraint principle (A2.9) argues against. |
+| Risk limits | Exposure measured beyond gross notional by counterparty | M9's `CounterpartyExposureLimit` checks the running sum of absolute trade considerations against a counterparty, released via `OtcNegotiationVenue.release`/`ExposureLedger.release` once a trade settles (`TradeSettlementBook`, M19) — not a mark-to-market or potential-future-exposure figure, so a trade still outstanding is counted at its full traded consideration rather than its current replacement cost. A stated, narrower choice than `ExposureCalculator`'s full gross/net/by-currency/by-asset-class design in `docs/DESIGN_PROPOSAL.md` §5.5, built only as far as a credit check needs. Only OTC trades are checked; a CLOB fill has no named counterparty to check against (see `TradabilityProfile`). |
 | OTC negotiation | A separate, expiring quote step | `OtcNegotiationVenue` prices and executes in one call. A real RFQ workflow quotes a price that can expire before it is accepted. Collapsing the two is a stated simplification, in the same spirit as the project's existing single-curve and vanilla-swap simplifications — not a gap that was missed. |
 | OTC negotiation | A percentage-of-mid spread on NPV instruments | `OtcNegotiationVenue` applies its spread as a fraction of the priced mid, which is the right convention for a clean per-unit price and the wrong one for a swap or forward's net present value — see F-1. A correct version needs `PricingModel` to reprice at a shocked rate input, which the interface does not support generically today; adding it for one caller would be speculative. For now, F-1 makes the venue refuse a spread that would have had no effect rather than pretend one was applied. |
 | Risk engine | No `AnalyticGreeks` capability interface or runtime "prefer analytic" dispatch | `docs/DESIGN_PROPOSAL.md` §5.3 describes a pricer optionally implementing `AnalyticGreeks`, with the risk engine preferring it over bump-and-revalue when available. M10 does not build that interface - `BlackScholesModel` instead exposes static `delta`/`gamma`/`vega` formulas, exactly the shape its own `price(...)` javadoc had already forward-declared ("so the analytic Greeks at M10 can share exactly these conventions"), used only for cross-validation tests. `SensitivityCalculator` always uses bump-and-revalue in production. Building the runtime-dispatch interface now would need per-position analytic-vs-numeric branching inside what is currently a uniform portfolio-level shock-and-revalue, for an optimisation with no measured performance problem behind it - exactly the speculative machinery A2.9 argues against. Revisit if a real performance case for it ever shows up. |

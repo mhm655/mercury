@@ -268,7 +268,8 @@ public final class OrderBookVenue implements ExecutionVenue<OrderBookInstruction
                 fill.price().value().multiply(BigDecimal.valueOf(signedQuantity)), currency);
 
         Trade trade = Trade.newTrade(tradeIdGenerator.next(), fill.instrumentId(), owner, delta,
-                consideration, clock.today(), Optional.empty(), Optional.empty());
+                consideration, clock.today(),
+                Optional.of(SettlementConvention.settlementDateFor(clock.today())), Optional.empty());
         return trade.transitionTo(TradeStatus.VALIDATED, "matched on the order book", clock)
                 .transitionTo(TradeStatus.BOOKED, "booked to the ledger", clock)
                 .transitionTo(TradeStatus.EXECUTED, "matched in full at " + fill.price(), clock);

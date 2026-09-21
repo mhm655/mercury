@@ -224,6 +224,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M16 — Terminal UI: order book, blotter, P&L and risk replayed one step at a time | ✅ complete |
 | M17 — Asynchronous order submission: `submit()`, additive to `execute()` | ✅ complete |
 | M18 — Global counterparty exposure ledger, extracted and shareable | ✅ complete |
+| M19 — Settlement scheduling: `TradeSettlementBook`, and real settlement dates for every trade | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -383,6 +384,17 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   rather than only arguing for it — two venue instances against one shared ledger enforce a
   single combined limit, the scenario the old per-instance design could never even be tested
   against.
+- **Settlement scheduling, and the gap under the gap it depended on.** §A2.7 decided at design
+  time that settlement should trigger on clock advancement, not a real timer; nothing had built
+  it — driving a trade to `SETTLED` was always a caller's explicit action, twice hand-written in
+  `TradeLifecycleDemo`. Building the scheduler surfaced a prerequisite no gap entry had named:
+  neither venue had ever actually populated a trade's settlement date, so `SettlementConvention`
+  (T+2 calendar days, a stated simplification rather than a `HolidayCalendar` roll) now gives
+  every minted trade a real one. `TradeSettlementBook` is the scheduler — pull-based, the same
+  shape `Schedule.unpaidPeriodsAsOf` already uses for date logic elsewhere, rather than a push
+  notification `SimulationClock` has no precedent for — and it replaced the two manual call
+  sites it was built to retire: running `lifecycle` now settles three trades in one call, not
+  the single hand-picked one the old code walked through by name.
 
 ### Dead weight, looked for on purpose
 

@@ -7,6 +7,40 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M19 complete** — **settlement scheduling, and the gap under the gap it depended on.** §A2.7
+decided years earlier that "settlement is triggered by clock advancement, not by a real timer";
+nothing had built it. `Trade` carried a `settlementDate` and the `SETTLED` state since M8, but
+driving a trade there was always a caller's explicit action, by hand - `TradeLifecycleDemo`
+carried two copies of the identical two-line `.transitionTo(CONFIRMED).transitionTo(SETTLED)`.
+
+Building the scheduler surfaced a prerequisite `docs/KNOWN_GAPS.md`'s old entry never
+mentioned: neither `OrderBookVenue` nor `OtcNegotiationVenue` had ever actually populated
+`Trade.settlementDate()` - every trade either venue minted carried `Optional.empty()`. A
+scheduler has nothing to schedule against a date that is never set, so this milestone could not
+stop at "build the scheduler" without also closing that - `SettlementConvention` (T+2 calendar
+days) now gives every minted trade a real settlement date, a stated simplification rather than
+a `HolidayCalendar` roll, because this milestone is about the scheduler firing correctly, not
+about which calendar convention decides the date.
+
+`TradeSettlementBook` (`com.mercury.trade`) is the scheduler itself: a `Consumer<TradeExecuted>`
+holding open trades in a `LinkedHashMap` for deterministic order, the same subscription shape
+`LedgerKeeper` already uses. `settleDueBy(asOf, clock)` is pull-based - a step a caller invokes
+explicitly after advancing a clock, mirroring `Schedule.unpaidPeriodsAsOf`'s existing pattern
+for date-driven logic elsewhere in this engine - rather than a push notification wired into
+`SimulationClock` itself, which has no precedent anywhere in this codebase and would have been
+new architecture this milestone did not need. It hands the trades it just settled back to its
+caller directly; no new event type, since nothing yet needs one.
+
+Wired into a real consumer rather than left unused: `TradeLifecycleDemo`'s two manual
+settlement call sites are gone, replaced by a `TradeSettlementBook` subscribed to a real event
+bus - the demo had been passing `EventBus.ignoring()`, since it books from returned trade lists
+rather than the bus, so wiring the scheduler in meant giving it something to subscribe to for
+the first time. Running the refactored demo settles three trades in one call at its section 4 -
+every trade minted up to that point, since nothing advances the demo's clock and they all share
+one settlement date - which is the scheduler actually sweeping everything due, not a narrower
+echo of the single hand-picked trade the old code walked through by name.
+`MainTest.theLifecycleDemoSettlesAutomaticallyRatherThanByHand` asserts exactly that.
+
 **M18 complete** — **a global counterparty exposure ledger, extracted rather than redesigned.**
 `OtcNegotiationVenue.exposureByCounterparty` had lived on the venue instance since M9 - the
 established shape, the same way `OrderBookVenue` holds its own order books. Correct as long as

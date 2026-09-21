@@ -9,6 +9,7 @@ import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.core.time.SimulationClock;
 import com.mercury.event.EventBus;
+import com.mercury.event.SynchronousEventBus;
 import com.mercury.execution.ExecutionRouter;
 import com.mercury.execution.OrderBookInstruction;
 import com.mercury.execution.OtcInstruction;
@@ -27,8 +28,10 @@ import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.trade.CreditLimit;
 import com.mercury.trade.Counterparty;
 import com.mercury.trade.Trade;
+import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeLifecycleEvent;
-import com.mercury.trade.TradeStatus;
+import com.mercury.trade.TradeSettlementBook;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -42,7 +45,10 @@ import java.util.List;
  * nothing here is a new scenario, and {@code Main}'s golden-master output is untouched.
  *
  * <p>Section 5 is M9's: a counterparty credit limit rejecting a trade that would breach it,
- * with the breach printed rather than inferred - see {@code OtcNegotiationVenue}.
+ * with the breach printed rather than inferred - see {@code OtcNegotiationVenue}. Sections 4
+ * and 5 both settle through a {@link TradeSettlementBook} (M19) rather than the two hand-written
+ * {@code transitionTo(CONFIRMED).transitionTo(SETTLED)} calls this file used to make - the real
+ * consumer {@code docs/KNOWN_GAPS.md}'s "Settlement scheduling" entry was waiting for.
  *
  * <pre>
  *   mvn -q -DskipTests package
@@ -68,11 +74,14 @@ public final class TradeLifecycleDemo {
         Counterparty tinyLimit = new Counterparty(TINY_LIMIT, "Tiny Capital",
                 new CreditLimit(Money.of("5000.00", Currency.USD)));
         CounterpartyDirectory counterparties = CounterpartyDirectory.of(acme, tinyLimit);
-        // This demo books each trade from the list router.execute() returns, rather than
-        // subscribing to the bus the way EndToEndDemo and DemoScenario.ledger() do - so it
-        // passes EventBus.ignoring() rather than a bus with nothing to subscribe.
-        DemoScenario.Venues venues = DemoScenario.venues(catalog, MERCURY_BOOK, counterparties,
-                EventBus.ignoring());
+        // This demo still books each trade it prints from the list router.execute() returns,
+        // the way it always has - but a real bus is wired now (M19) so a TradeSettlementBook
+        // can subscribe and settle trades automatically, rather than EventBus.ignoring() with
+        // nothing to subscribe.
+        EventBus events = new SynchronousEventBus();
+        TradeSettlementBook settlementBook = new TradeSettlementBook();
+        events.subscribe(TradeExecuted.class, settlementBook);
+        DemoScenario.Venues venues = DemoScenario.venues(catalog, MERCURY_BOOK, counterparties, events);
         ExecutionRouter router = venues.router();
         OtcNegotiationVenue otcVenue = venues.otc();
 
@@ -114,11 +123,20 @@ public final class TradeLifecycleDemo {
         otcTrades.forEach(TradeLifecycleDemo::printTrade);
 
         System.out.println();
-        System.out.println("4. THE FULL STATE MACHINE, AND BOOKING INTO A PORTFOLIO LEDGER");
+        System.out.println("4. THE FULL STATE MACHINE, SETTLED AUTOMATICALLY (M19), THEN BOOKED");
         System.out.println("-".repeat(78));
-        Trade settled = crossed.get(0)
-                .transitionTo(TradeStatus.CONFIRMED, "confirmation sent", clock)
-                .transitionTo(TradeStatus.SETTLED, "cash and securities exchanged", clock);
+        // Every trade above executed on the same fixed clock, so they share one settlement
+        // date - settleDueBy sweeps all of them, not just the one this section showcases. That
+        // is TradeSettlementBook actually working, not a narrower demo than the hand-written
+        // version it replaces: through M18 only crossed.get(0) was ever walked to SETTLED here,
+        // by hand, and every other trade in this demo stayed EXECUTED forever.
+        LocalDate settlementDay = crossed.get(0).settlementDate().orElseThrow();
+        List<Trade> settledToday = settlementBook.settleDueBy(settlementDay, clock);
+        Trade settled = settledToday.stream()
+                .filter(trade -> trade.id().equals(crossed.get(0).id()))
+                .findFirst().orElseThrow();
+        System.out.println("  advanced to " + settlementDay + ": " + settledToday.size()
+                + " trade(s) due settled automatically, not walked to SETTLED by hand");
         System.out.println("  " + settled.id() + " audit trail:");
         for (TradeLifecycleEvent event : settled.history()) {
             System.out.println("    " + event);
@@ -148,12 +166,13 @@ public final class TradeLifecycleDemo {
 
         System.out.println("  exposure to " + TINY_LIMIT + ": " + otcVenue.exposureTo(TINY_LIMIT)
                 + " (queryable without attempting a trade)");
-        Trade firstBondTradeSettled = approved.trades().get(0)
-                .transitionTo(TradeStatus.CONFIRMED, "confirmation sent", clock)
-                .transitionTo(TradeStatus.SETTLED, "cash and securities exchanged", clock);
+        LocalDate bondSettlementDay = approved.trades().get(0).settlementDate().orElseThrow();
+        Trade firstBondTradeSettled = settlementBook.settleDueBy(bondSettlementDay, clock).stream()
+                .filter(trade -> trade.id().equals(approved.trades().get(0).id()))
+                .findFirst().orElseThrow();
         otcVenue.release(firstBondTradeSettled);
-        System.out.println("  " + firstBondTradeSettled.id() + " settled and released: exposure to "
-                + TINY_LIMIT + " now " + otcVenue.exposureTo(TINY_LIMIT));
+        System.out.println("  " + firstBondTradeSettled.id() + " settled automatically and released: "
+                + "exposure to " + TINY_LIMIT + " now " + otcVenue.exposureTo(TINY_LIMIT));
         NegotiationResult retried = otcVenue.negotiate(breachesTheLimit, clock);
         System.out.println("  same 4 units, retried: " + (retried.isRejected() ? "rejected" : "executed")
                 + " - exposure is released on settlement, not held forever");

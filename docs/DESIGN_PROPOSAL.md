@@ -1006,6 +1006,37 @@ tested against, because nothing in the codebase had ever constructed two. A scal
 of the existing concurrent stress test, split across both instances, confirms the combined
 limit is never over-admitted.
 
+#### M19 — Settlement scheduling — ✅ done
+
+§A2.7 decided "settlement is triggered by clock advancement, not by a real timer" back at M1's
+design pass; nothing built it. `Trade` carried a `settlementDate` and the `SETTLED` state, but
+driving a trade there was always a caller's explicit action - `TradeLifecycleDemo` carried two
+copies of the same manual `.transitionTo(CONFIRMED).transitionTo(SETTLED)`.
+
+The gap under the gap: neither venue ever actually populated `Trade.settlementDate()` - every
+trade minted by `OrderBookVenue` or `OtcNegotiationVenue` carried `Optional.empty()`. A
+scheduler has nothing to schedule against an empty date, so `SettlementConvention` (T+2
+calendar days - a stated simplification, not a `HolidayCalendar` roll, since this milestone is
+about the scheduler firing, not the convention deciding the date) gives every trade a real one
+first. `TradeSettlementBook` (`com.mercury.trade`) is the scheduler itself: a
+`Consumer<TradeExecuted>` holding open trades in insertion order, and `settleDueBy(asOf, clock)`
+a pull-based step a caller invokes after advancing a clock - the same shape
+`Schedule.unpaidPeriodsAsOf` already uses for date logic elsewhere, not a push/listener wired
+into `SimulationClock`, which has no precedent in this codebase. It returns the trades it just
+settled to its caller rather than publishing a new event type nothing yet consumes.
+
+**Wired into a real consumer, not left as unused machinery.** `TradeLifecycleDemo`'s two manual
+settlement call sites are gone, replaced by a `TradeSettlementBook` subscribed to a real event
+bus (the demo previously passed `EventBus.ignoring()`, since it books from returned trade lists
+rather than the bus). Running it settles three trades at once in one section - every trade
+minted up to that point, since nothing advances the demo's clock and they all share one
+settlement date - which is `TradeSettlementBook` actually sweeping everything due, not a
+narrower demo than the hand-written version it replaced.
+
+**Not in scope:** business-day-aware settlement (a `HolidayCalendar` roll), a push notification
+when `SimulationClock` advances, and a new event type for settlement itself - `settleDueBy`'s
+return value is the only channel this milestone needed.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and
