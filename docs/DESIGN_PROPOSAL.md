@@ -902,6 +902,65 @@ Observability (Micrometer/OpenTelemetry, Prometheus/Grafana) also lands here, an
 Grafana screenshot delivers most of the "real system" visual impact a dashboard would,
 without the frontend risk.
 
+#### M16 — Terminal UI (in progress)
+
+Scoped in [ADR 0007](adr/0007-hand-rolled-ansi-terminal-ui.md): hand-rolled ANSI, not a
+library, replaying the same deterministic demo scenario one step at a time rather than
+simulating a live feed the engine has no way to produce. Lives entirely in `mercury-app` —
+`mercury-engine` gains nothing for this feature alone to consume, the same boundary
+`Main`'s own javadoc already states.
+
+What it renders, and where each panel's data comes from:
+
+| Panel | Source | Per-tick cost |
+|---|---|---|
+| Order book depth | a `ShadowBook` per instrument, mirroring the real venue's instructions | cheap |
+| Blotter | `TradeExecuted` events off the `EventBus`, plus rejections recorded locally | cheap |
+| P&L | `ledger.toPortfolio()` + one `PortfolioValuationService.value(...)` | cheap |
+| Greeks / DV01 | `SensitivityCalculator` | cheap |
+| VaR | `MonteCarloVaRCalculator` (20k paths in the demo) | expensive — throttled, not per tick |
+
+Breakdown:
+
+- **M16a — stepping model** — ✅ done. `ScenarioStepper` runs a fixed list of
+  `ScenarioStep`s in order, one per `advance()`; `TuiDemo` drives it from a
+  `SimulationClock.fixedAt` (the same clock `EndToEndDemo` uses — this replays
+  `EndToEndDemo`'s single-day sequence, not the golden master's multi-day one) and blocks on
+  a line of stdin between steps.
+- **M16b — book and blotter panels** — ✅ done. `OrderBookVenue` keeps its per-instrument
+  books in a private map, by design (§5.6) — reachable from nowhere outside its own lane,
+  which ruled out reading depth from the real venue without adding a method to
+  `mercury-engine`. Resolved without one: `ShadowBook` wraps a second, display-only
+  `OrderBook` per instrument, built from types that were already public
+  (`OrderBook`, `Order`, `OrderId`), and mirrors every instruction the real venue receives —
+  an `OrderBook` is a deterministic function of the orders it gets, so an identical sequence
+  produces identical depth. `BookDepthView` formats it as plain text, tested without a
+  terminal. The blotter's open question resolved the same way: a rejected negotiation never
+  reaches the bus as an event, but `TuiDemo`'s own step already holds the
+  `NegotiationResult` that says so, so `Blotter.recordRejection(...)` is called directly
+  from there — no new event type needed.
+- **M16c — P&L and risk panel** — ✅ done. `PnlRiskPanel` wires the same
+  `PortfolioValuationService`, `SensitivityCalculator` and `MonteCarloVaRCalculator` calls
+  `EndToEndDemo` makes, against `TuiDemo`'s own evolving ledger rather than the fixed golden-
+  master book. Valuation, P&L, delta and DV01 are cheap and recompute on every redraw; VaR is
+  not (20,000 paths), so it is recomputed only every *N* steps — cadence chosen over "off the
+  render thread" for the same reason the whole UI blocks on stdin between steps: a replay has
+  no frame the user is waiting on while a background thread finishes, so there is nothing a
+  second thread buys here that a cadence does not. Between recomputes the last result is
+  shown, labelled `(as of step N)` rather than silently going stale.
+- **M16d — a way to test it** — done, now that M16c gave it a panel worth the split.
+  `ScenarioStepper`, `ShadowBook`, `BookDepthView`, `Blotter` and `PnlRiskPanel` are each
+  tested without a terminal; only `TuiDemo.printFrame` writes raw ANSI, and it stays as thin
+  as `Main`'s own console-facing methods, assembling nothing itself.
+
+New command: `java -jar mercury.jar tui`, dispatched the same way `walkthrough`,
+`lifecycle`, `risk` and `montecarlo` already are.
+
+**Not in scope:** a live external market feed, new order types, or any change to
+`mercury-engine`'s public surface beyond what M16b's blotter decision requires. The
+README's milestone table and "Built so far" section gain an M16 row only once this ships —
+the same rule that has applied to every milestone before it.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and
