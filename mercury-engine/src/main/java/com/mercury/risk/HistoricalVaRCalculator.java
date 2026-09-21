@@ -7,8 +7,10 @@ import com.mercury.marketdata.MarketShock;
 import com.mercury.portfolio.Portfolio;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.SplittableRandom;
 
 /**
  * Value at Risk and Expected Shortfall by historical simulation: revalue the portfolio under
@@ -80,6 +82,16 @@ public final class HistoricalVaRCalculator {
 
     /** The two-sided z-score for {@link #CONFIDENCE_INTERVAL_LEVEL}. */
     private static final double CONFIDENCE_INTERVAL_Z = 1.959964;
+
+    /**
+     * Bootstrap resamples {@link #expectedShortfallConfidenceInterval} draws. A magic number,
+     * named rather than left bare: large enough that the percentile estimate itself does not
+     * add meaningful noise on top of the historical scenario sample's own uncertainty, small
+     * enough to run in milliseconds against the hundreds-to-low-thousands of scenarios this
+     * class is actually called with - see that method's javadoc for why this class does not
+     * parallelise the resampling.
+     */
+    private static final int BOOTSTRAP_RESAMPLES = 1000;
 
     private final SensitivityCalculator sensitivities;
 
@@ -237,6 +249,90 @@ public final class HistoricalVaRCalculator {
         // Returning that unmarked reads as "the loss is at most this" when it means "this
         // sample holds nothing worse". See QuantileConfidenceInterval.
         return new QuantileConfidenceInterval(milder, worse, wantedUpper > n, wantedLower < 1);
+    }
+
+    /**
+     * A {@value #CONFIDENCE_INTERVAL_LEVEL}-confidence band around {@link #expectedShortfall}'s
+     * own estimate - the same question {@link #valueAtRiskConfidenceInterval} answers for VaR,
+     * asked of Expected Shortfall instead.
+     *
+     * <h2>The method: bootstrap, not rank uncertainty</h2>
+     * {@code valueAtRisk} is one order statistic, so its confidence interval falls out of the
+     * rank's own sampling distribution - no resampling needed, see
+     * {@link #valueAtRiskConfidenceInterval}'s javadoc. Expected Shortfall averages a whole
+     * tail of variable size, not one order statistic, so that trick does not carry over: there
+     * is no single rank whose uncertainty this could be derived from. A bootstrap needs no
+     * distributional assumption either, which is why it was "considered and set aside" for VaR
+     * only because the cheaper rank trick existed there - for Expected Shortfall it does not,
+     * so the trade-off resolves the other way here.
+     *
+     * <p>Resamples the scenario P&amp;Ls with replacement {@value #BOOTSTRAP_RESAMPLES} times,
+     * computes Expected Shortfall on each resample via the same {@link #expectedShortfall}
+     * this class's point estimate uses, and reports the
+     * {@value #CONFIDENCE_INTERVAL_LEVEL}-percentile band of the resulting distribution -
+     * the same fixed meta-confidence level {@link #valueAtRiskConfidenceInterval} uses, and
+     * for the identical reason: keeping it distinct from a caller's own {@code confidenceLevel}
+     * so the two are never confused for the same knob.
+     *
+     * <h2>Reproducibility</h2>
+     * Bootstrap resampling needs randomness this class otherwise has none of, so every overload
+     * takes an explicit {@code seed} - the same convention
+     * {@code com.mercury.simulation.MonteCarloVaRCalculator} already uses, and required by the
+     * same project-wide rule: the same seed against the same scenarios gives the same interval,
+     * bit for bit, regardless of when or how many times it is called.
+     *
+     * <h2>Sequential, not parallel - a stated scope choice</h2>
+     * Historical scenario counts are hundreds to low thousands, nothing like Monte Carlo's
+     * tens of thousands of paths, so {@value #BOOTSTRAP_RESAMPLES} resamples of a list this
+     * size runs in milliseconds on one thread. Reaching for
+     * {@code com.mercury.simulation.SimulationWorkers} would be new cross-package coupling for
+     * a benefit nothing has measured a need for - the same restraint this project applies
+     * elsewhere rather than machinery built ahead of a caller that needs it.
+     *
+     * <p>Unlike {@link #valueAtRiskConfidenceInterval}'s bound, a bootstrap percentile index
+     * into {@value #BOOTSTRAP_RESAMPLES} resamples is always well-defined, so
+     * {@link QuantileConfidenceInterval#mildBoundAtSampleEdge} and
+     * {@link QuantileConfidenceInterval#severeBoundAtSampleEdge} are always {@code false} here
+     * - those flags describe VaR's rank-clamping edge case specifically, which has no analogue
+     * in a bootstrap distribution of fixed size.
+     *
+     * @throws IllegalArgumentException if {@code historicalScenarios} is empty or
+     *                                  {@code confidenceLevel} is not strictly between 0 and 1
+     */
+    public QuantileConfidenceInterval expectedShortfallConfidenceInterval(
+            Portfolio portfolio, List<MarketShock> historicalScenarios, MarketDataSnapshot market,
+            LocalDate asOf, double confidenceLevel, long seed) {
+        return expectedShortfallConfidenceInterval(
+                rank(portfolio, historicalScenarios, market, asOf, confidenceLevel), seed);
+    }
+
+    private static QuantileConfidenceInterval expectedShortfallConfidenceInterval(
+            RankedScenarios ranked, long seed) {
+        List<Money> sorted = ranked.sorted();
+        int n = sorted.size();
+        SplittableRandom random = new SplittableRandom(seed);
+
+        List<Money> bootstrapEstimates = new ArrayList<>(BOOTSTRAP_RESAMPLES);
+        for (int b = 0; b < BOOTSTRAP_RESAMPLES; b++) {
+            List<Money> resample = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                resample.add(sorted.get(random.nextInt(n)));
+            }
+            resample.sort(null);
+            bootstrapEstimates.add(expectedShortfall(new RankedScenarios(resample, ranked.rank())));
+        }
+        bootstrapEstimates.sort(null);
+
+        int lowerIndex = percentileIndex((1.0 - CONFIDENCE_INTERVAL_LEVEL) / 2.0, BOOTSTRAP_RESAMPLES);
+        int upperIndex = percentileIndex(1.0 - (1.0 - CONFIDENCE_INTERVAL_LEVEL) / 2.0, BOOTSTRAP_RESAMPLES);
+        Money milder = bootstrapEstimates.get(lowerIndex);
+        Money worse = bootstrapEstimates.get(upperIndex);
+        return new QuantileConfidenceInterval(milder, worse, false, false);
+    }
+
+    private static int percentileIndex(double percentile, int size) {
+        int index = (int) Math.floor(percentile * size);
+        return Math.max(0, Math.min(index, size - 1));
     }
 
     private static int clampRank(int rank, int n) {

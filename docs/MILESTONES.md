@@ -7,6 +7,23 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M24 complete** — **a confidence interval on Expected Shortfall, by bootstrap.**
+`HistoricalVaRCalculator.valueAtRiskConfidenceInterval` already priced VaR's own uncertainty
+cheaply, from rank alone - no resampling, since VaR is one order statistic. Expected Shortfall
+averages a whole tail, not one order statistic, so that trick has no equivalent; a correct
+answer needed the "genuinely different, harder statistical problem" `docs/KNOWN_GAPS.md`
+named and deferred. `expectedShortfallConfidenceInterval(Portfolio, ..., long seed)` resamples
+the scenario list 1,000 times with replacement, computes ES on each resample through the exact
+method the point estimate already uses, and reports the percentile band - seeded, so the same
+seed against the same scenarios reproduces the same interval bit for bit, matching every other
+stochastic figure this engine produces. Sequential rather than parallel, a stated choice:
+historical scenario counts are nothing like Monte Carlo's path counts, so
+`SimulationWorkers` stays untouched. A symmetric precomputed-`List<Money>` overload, added "for
+consistency" with `measure`'s shape, was removed again once `NoOrphanedApiTest` caught that
+nothing called it - proof the rule still does exactly what it was built for.
+[ADR 0011](adr/0011-bootstrap-confidence-interval-for-expected-shortfall.md) records the full
+reasoning.
+
 **M22 complete** — **FX triangulation through a single stated vehicle currency, opt-in.**
 `MarketDataSnapshot.fxRate` resolved a directly quoted pair and its inverse, nothing else - a
 snapshot quoting GBP/USD and EUR/USD, the ordinary way a desk quotes everything against a

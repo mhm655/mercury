@@ -228,6 +228,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M20 — Multi-factor correlated Monte Carlo VaR: `CorrelatedMonteCarloVaRCalculator` | ✅ complete |
 | M21 — Fault isolation: a fatal `Error` on a worker thread now closes its lane/bus loudly, not silently | ✅ complete |
 | M22 — FX triangulation through a single stated vehicle currency, opt-in | ✅ complete |
+| M24 — Confidence interval on Expected Shortfall, by seeded bootstrap | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the

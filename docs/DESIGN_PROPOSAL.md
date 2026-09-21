@@ -1128,6 +1128,34 @@ now naming the vehicle currency that was tried - loud, not silently degraded.
 **Not in scope:** multi-hop triangulation through more than one bridge currency, and any form
 of automatic vehicle-currency inference - both stay out per the ADR's stated boundary.
 
+#### M24 — Confidence interval on Expected Shortfall — ✅ done
+
+`HistoricalVaRCalculator.valueAtRiskConfidenceInterval` already priced VaR's own estimation
+uncertainty cheaply, straight from rank - VaR is one order statistic, so no resampling is
+needed. Expected Shortfall averages a whole tail of variable size, not one order statistic, so
+that trick has no equivalent - `docs/KNOWN_GAPS.md` named this explicitly as "a genuinely
+different, harder statistical problem... not a small extension of the VaR one," deferred
+rather than approximated incorrectly.
+
+`expectedShortfallConfidenceInterval(Portfolio, List<MarketShock>, MarketDataSnapshot,
+LocalDate, double confidenceLevel, long seed)` closes it with a seeded bootstrap: resample the
+scenario list with replacement 1,000 times, compute Expected Shortfall on each resample through
+the exact method the point estimate already uses, and report the percentile band of the
+result. [ADR 0011](adr/0011-bootstrap-confidence-interval-for-expected-shortfall.md) records
+why a bootstrap rather than an asymptotic formula (the same distribution-free convention the
+rest of this class already follows), why it stays sequential rather than reaching into
+`SimulationWorkers` (historical scenario counts are nothing like Monte Carlo's path counts, so
+the cross-package coupling would serve no confirmed need), and why a symmetric
+precomputed-`List<Money>` overload built "for consistency" with `measure`'s shape was removed
+again once `NoOrphanedApiTest` caught that nothing called it.
+
+Reproducible like every other stochastic figure this engine produces: the same seed against
+the same scenarios gives the same interval, bit for bit, proven directly in
+`HistoricalVaRCalculatorTest`.
+
+**Not in scope:** a configurable bootstrap resample count, and a precomputed-`List<Money>`
+overload - both stay out until a real caller needs them.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and

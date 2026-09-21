@@ -8,6 +8,32 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M24
+
+### N-1 · No confidence interval on Expected Shortfall · fixed
+
+`HistoricalVaRCalculator.valueAtRiskConfidenceInterval` already brackets VaR cheaply, because
+VaR is one order statistic whose rank uncertainty has a well-known Binomial/Normal
+approximation - no resampling needed. Expected Shortfall averages a whole tail of variable
+size, not one order statistic, so that trick does not carry over: a correct ES confidence
+interval is a genuinely different, harder statistical problem.
+
+**Bootstrap, not an asymptotic formula.** `expectedShortfallConfidenceInterval(Portfolio, ...,
+long seed)` resamples the scenario list with replacement 1,000 times, computes ES on each
+resample via the same method the point estimate uses, and reports the percentile band of the
+result - the exact trade-off the VaR method's own javadoc names as "considered and set aside...
+only because the cheaper trick existed there." For ES it doesn't, so a bootstrap is the right
+answer here. Sequential rather than parallel, a stated scope choice: historical scenario counts
+are hundreds to low thousands, nothing like Monte Carlo's path counts, so wiring in
+`SimulationWorkers` would be new cross-package coupling for an unconfirmed need.
+[ADR 0011](adr/0011-bootstrap-confidence-interval-for-expected-shortfall.md) records the full
+reasoning, including a symmetric precomputed-`List<Money>` overload that was built, then
+removed once `NoOrphanedApiTest` confirmed nothing called it.
+
+**Reproducible, like every other stochastic figure in this engine.** Every overload takes an
+explicit seed - the same convention `MonteCarloVaRCalculator` already uses - so the same seed
+against the same scenarios gives the same interval, bit for bit.
+
 ## Fixed during M22
 
 ### M-1 · No FX triangulation through a vehicle currency · fixed
@@ -364,7 +390,6 @@ decision.
 | Event bus | Unbounded queue, no back-pressure | `AsynchronousEventBus` queues without limit, because bounding it means blocking the publisher - the thing an async bus exists not to do - or dropping events, which needs a stated policy. *(This entry originally said "nothing in Mercury produces faster than the dispatcher consumes, so a bound would be sized against a guess." `docs/BENCHMARKS.md` §7's own measurement run is a counterexample: a publisher at ~0.24 µs against a ~4 ms subscriber enqueued faster than the dispatcher could drain, and `close()` timed out mid-drain inside a two-second JMH iteration - reproducible, not hypothetical, once something actually publishes that fast. It took a synthetic benchmark to produce that producer, not a real caller, so the underlying claim - no *production* wiring does this yet - still holds; only "would be sized against a guess" was wrong, since the failure mode is now on record with a number attached.)* A real deployment needs the bound and the policy together. |
 | Event bus | A subscriber failing on the async bus is counted, not reported | The default `AsynchronousEventBus` counts failures and otherwise swallows them; the engine has no logger and no framework to get one from (`LayeringRulesTest`), so the default cannot be "log it". A caller that cares passes a handler. Counting is the floor, not a good production answer. |
 | Access control | No notion of who is calling | The engine has no caller identity, so it cannot decide *who* may negotiate, release exposure or book a trade - that belongs to the API layer planned for phase 2, which knows the caller. What the engine can check without one, it does: `OtcNegotiationVenue.release` accepts only a continuation of a trade it executed itself, the venues are safe under concurrent callers, and error messages no longer list counterparties, instruments or market data. The phase-2 layer still has to authenticate callers, authorise each operation, and map `MercuryException`s to responses rather than echoing messages. |
-| Risk engine | No confidence interval on Expected Shortfall | `HistoricalVaRCalculator.valueAtRiskConfidenceInterval` brackets VaR - one order statistic, whose rank uncertainty has a well-known large-sample (Binomial/Normal) approximation. Expected Shortfall averages a whole tail of variable size, not one order statistic, so the same rank-uncertainty trick does not carry over directly - a correct ES confidence interval is a genuinely different, harder statistical problem (its own asymptotic theory, or a bootstrap), not a small extension of the VaR one. Deferred rather than approximated incorrectly. |
 
 ---
 

@@ -256,6 +256,86 @@ class HistoricalVaRCalculatorTest {
     }
 
     @Test
+    void theExpectedShortfallConfidenceIntervalBracketsThePointEstimate() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(100);
+
+        Money expectedShortfall = calculator()
+                .expectedShortfall(portfolio, days, market(), VALUATION, 0.95);
+        QuantileConfidenceInterval interval = calculator().expectedShortfallConfidenceInterval(
+                portfolio, days, market(), VALUATION, 0.95, 42L);
+
+        assertThat(interval.lowerBound().isGreaterThan(expectedShortfall)).isFalse();
+        assertThat(interval.upperBound().isLessThan(expectedShortfall)).isFalse();
+    }
+
+    @Test
+    void theExpectedShortfallConfidenceIntervalNarrowsAsScenarioCountGrows() {
+        // Same reasoning as theConfidenceIntervalNarrowsAsScenarioCountGrows for VaR - a
+        // bootstrap band should also pin the same quantile down more tightly as the underlying
+        // sample grows, even though it is resampled rather than derived from rank uncertainty.
+        Portfolio portfolio = book(1_000);
+
+        QuantileConfidenceInterval coarse = calculator().expectedShortfallConfidenceInterval(
+                portfolio, uniformScenarios(100), market(), VALUATION, 0.95, 42L);
+        QuantileConfidenceInterval fine = calculator().expectedShortfallConfidenceInterval(
+                portfolio, uniformScenarios(5_000), market(), VALUATION, 0.95, 42L);
+
+        Money coarseWidth = coarse.upperBound().minus(coarse.lowerBound());
+        Money fineWidth = fine.upperBound().minus(fine.lowerBound());
+        assertThat(fineWidth.isLessThan(coarseWidth)).isTrue();
+    }
+
+    @Test
+    void theExpectedShortfallConfidenceIntervalIsDeterministicForTheSameSeed() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(200);
+
+        QuantileConfidenceInterval first = calculator()
+                .expectedShortfallConfidenceInterval(portfolio, days, market(), VALUATION, 0.95, 7L);
+        QuantileConfidenceInterval second = calculator()
+                .expectedShortfallConfidenceInterval(portfolio, days, market(), VALUATION, 0.95, 7L);
+
+        assertThat(second).isEqualTo(first);
+    }
+
+    @Test
+    void theExpectedShortfallConfidenceIntervalDiffersAcrossSeeds() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> days = uniformScenarios(200);
+
+        QuantileConfidenceInterval seedOne = calculator()
+                .expectedShortfallConfidenceInterval(portfolio, days, market(), VALUATION, 0.95, 1L);
+        QuantileConfidenceInterval seedTwo = calculator()
+                .expectedShortfallConfidenceInterval(portfolio, days, market(), VALUATION, 0.95, 2L);
+
+        assertThat(seedTwo).isNotEqualTo(seedOne);
+    }
+
+    @Test
+    void theExpectedShortfallConfidenceIntervalIsAPointWithOnlyOneScenario() {
+        Portfolio portfolio = book(1_000);
+        List<MarketShock> oneDay = scenariosFromDailyFactors(0.90);
+
+        QuantileConfidenceInterval interval = calculator().expectedShortfallConfidenceInterval(
+                portfolio, oneDay, market(), VALUATION, 0.95, 42L);
+
+        // Every bootstrap resample of a single scenario is that same scenario, so the Expected
+        // Shortfall computed on each resample is identical - the interval collapses to a point,
+        // the same degenerate case theConfidenceIntervalCollapsesToAPointWithOnlyOneScenario
+        // asserts for VaR, for the analogous reason.
+        assertThat(interval.lowerBound()).isEqualTo(interval.upperBound());
+    }
+
+    @Test
+    void expectedShortfallConfidenceIntervalRejectsAnEmptyScenarioList() {
+        assertThatThrownBy(() -> calculator().expectedShortfallConfidenceInterval(
+                book(1_000), List.of(), market(), VALUATION, 0.95, 42L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one");
+    }
+
+    @Test
     void measureAgreesWithEachStatisticAskedForSeparately() {
         // measure() exists only to revalue once instead of three times; it must not be a
         // second implementation of any of the three answers.
