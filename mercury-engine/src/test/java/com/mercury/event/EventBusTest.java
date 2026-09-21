@@ -229,6 +229,42 @@ class EventBusTest {
         }
 
         @Test
+        @DisplayName("a subscriber that throws an Error closes the bus rather than leaving it silently deaf")
+        void subscriberErrorClosesTheBus() throws InterruptedException {
+            CountDownLatch threwFatally = new CountDownLatch(1);
+            AsynchronousEventBus bus = new AsynchronousEventBus();
+            bus.subscribe(Priced.class, event -> {
+                threwFatally.countDown();
+                throw new OutOfMemoryError("simulated");
+            });
+
+            bus.publish(new Priced("AAPL"));
+
+            assertThat(threwFatally.await(10, TimeUnit.SECONDS)).isTrue();
+            // The dispatcher thread is dying asynchronously from the Error above; give it a
+            // moment to mark the bus closed before asserting publish() now rejects rather than
+            // silently queuing onto a dispatcher that no longer exists.
+            awaitClosed(bus);
+
+            assertThatThrownBy(() -> bus.publish(new Traded("MSFT")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("closed");
+        }
+
+        private void awaitClosed(AsynchronousEventBus bus) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (System.nanoTime() < deadline) {
+                try {
+                    bus.publish(new Priced("polling-for-close"));
+                } catch (IllegalStateException e) {
+                    return;
+                }
+                Thread.sleep(20);
+            }
+            throw new AssertionError("bus did not close after its dispatcher thread died");
+        }
+
+        @Test
         @DisplayName("close delivers what was already queued")
         void closeDrains() {
             List<Object> delivered = new CopyOnWriteArrayList<>();

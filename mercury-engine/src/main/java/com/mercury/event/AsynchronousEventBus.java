@@ -36,6 +36,17 @@ import java.util.function.Consumer;
  * stated drop-or-block policy; nothing here produces at that rate, and inventing the policy
  * before there is a producer to size it against would be guesswork.
  *
+ * <h2>A dispatcher that dies of an {@code Error} used to leave this bus silently deaf</h2>
+ * {@link Dispatch#to} catches only {@code RuntimeException} around a subscriber call - an
+ * {@code Error} (an {@code OutOfMemoryError} is the realistic case, given the queue above is
+ * unbounded) used to propagate straight through {@link #dispatchUntilClosed}, killing the
+ * dispatcher thread while leaving {@link #closed} unset. {@link #publish} only checks that
+ * flag, so it kept accepting events into a queue nothing would ever drain, forever, with no
+ * signal back to the publisher (see {@code docs/KNOWN_GAPS.md}). Now the dispatcher marks the
+ * bus closed before it dies, so {@code publish} rejects loudly afterward instead of silently
+ * queuing onto a dispatcher that no longer exists; the {@code Error} itself is still rethrown,
+ * so it is reported the way an uncaught exception on any other thread would be.
+ *
  * <p>Thread-safe. {@link #close()} stops the dispatcher after the events already queued have
  * been delivered, so a caller that wants to see their effects can close and then look.
  */
@@ -142,7 +153,12 @@ public final class AsynchronousEventBus implements EventBus, AutoCloseable {
             if (event == POISON) {
                 return;
             }
-            Dispatch.to(subscribers, event, this::recordFailure);
+            try {
+                Dispatch.to(subscribers, event, this::recordFailure);
+            } catch (Error e) {
+                closed = true;
+                throw e;
+            }
         }
     }
 

@@ -7,6 +7,36 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M21 complete** — **fault isolation: a worker thread that dies of a fatal `Error` now closes
+its lane or bus loudly, rather than leaving it silently deaf.** Not on the roadmap - found while
+reproducing M17's own documented back-pressure gap for a debugging pass. Running
+`submitCrossingPairAsync` under a capped heap confirmed the `OutOfMemoryError`
+`docs/BENCHMARKS.md` §6 already recorded, and something it didn't: `SingleWriterBookLane`'s
+writer thread ran a submitted command with no exception boundary at all, so the `Error` killed
+it uncaught while leaving `closed` unset - `submit()` only checks that flag, so it kept
+silently accepting work onto a writer thread that no longer existed, forever, with nothing to
+tell the caller. A minimal reproduction of `AsynchronousEventBus` found the identical shape:
+`Dispatch.to` catches only `RuntimeException` around a subscriber call, never `Error`, so the
+same failure kills the dispatcher thread while `publish()` keeps accepting events into a queue
+nothing will ever drain.
+
+Both are now closed the same way. A `RuntimeException` from `SingleWriterBookLane.submit`'s
+work is counted (`failureCount()`) and the writer keeps going - the same "nowhere to throw"
+answer `AsynchronousEventBus` already gives its own subscribers, since fire-and-forget work has
+no caller left to fail. A fatal `Error` is not survivable, so the writer or dispatcher thread
+now marks its lane or bus closed *before* it dies, so a later `submit`/`publish` rejects loudly
+instead of silently queuing onto a thread that is gone - and the `Error` itself is still
+rethrown, so it is reported the way an uncaught exception on any other thread would be, not
+swallowed. Every other worker-thread-owning class in the codebase was checked for the same
+shape: `SimulationWorkers` is unaffected, because it runs blocks through
+`ExecutorService`/`FutureTask`, which the JDK already makes capture `Throwable` rather than let
+it kill the pool thread.
+
+Both fixes are proven with the same technique that found the gap: a test subscriber/submitted
+command that throws `OutOfMemoryError` directly, asserting the lane or bus closes and a
+subsequent call is rejected rather than silently swallowed - not just a benchmark that happens
+to reproduce an OOM, but a deterministic unit test.
+
 **M20 complete** — **multi-factor correlated Monte Carlo VaR, built beside the single-factor
 calculator rather than in place of it.** `MonteCarloVaRCalculator`'s own javadoc had named the
 gap since M12: "a real multi-factor portfolio VaR would need correlated draws across every

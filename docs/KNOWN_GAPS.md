@@ -8,6 +8,63 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M21
+
+### L-1 · A writer thread that died of `OutOfMemoryError` left its lane silently deaf · fixed
+
+Found while reproducing M17's own documented back-pressure gap, not while looking for this one:
+re-running `submitCrossingPairAsync` directly (12 books, `THREAD_PER_BOOK`, a capped heap to
+force the failure fast) confirmed the entry above, and something it didn't say. `SingleWriterBookLane.runUntilClosed`
+called `command.run()` with no exception boundary at all, so an `OutOfMemoryError` inside a
+submitted command killed the writer thread outright - it never went through `close()`, so
+`closed` was never set. Every one of the twelve writer threads died this way in the
+reproduction. After that, `submit()` did not throw `RejectedExecutionException` (that check
+only read the `closed` flag) - it queued onto a lane whose writer thread no longer existed, so
+the command was accepted and then never ran, forever, with nothing telling the caller. Worse
+than "no back-pressure" alone: a book that goes quiet under load rather than one that visibly
+refuses more work.
+
+**The fix distinguishes recoverable from fatal.** `runUntilClosed` now catches a submitted
+command's `RuntimeException` and counts it (`failureCount()`) rather than letting it kill the
+writer thread - fire-and-forget work has no caller left to fail, the same "nowhere to throw"
+answer `AsynchronousEventBus` already gives its own subscribers, so one bad command no longer
+takes the whole book down with it. An `Error` is different: not survivable, so the writer marks
+the lane closed *before* it dies, then rethrows - a later `submit`/`run` now rejects loudly
+instead of silently queuing onto a thread that is gone, and the `Error` is still reported the
+way an uncaught exception on any other thread would be, not swallowed. `run()`'s own
+`FutureTask` was never affected - it already catches `Throwable` internally and hands failures
+back through `get()` - so only the fire-and-forget path needed this.
+
+**Proven with the technique that found it:** `SingleWriterBookLaneTest` has a submitted command
+that throws `OutOfMemoryError` directly, asserting the lane closes and a subsequent `submit()`
+is rejected - a deterministic unit test, not a benchmark that happens to reproduce an OOM.
+
+### L-2 · A dispatcher thread that died of an `Error` left `AsynchronousEventBus` silently deaf · fixed
+
+The identical shape, checked for deliberately once L-1 was found: every worker-thread-owning
+class in the codebase was reviewed for it. `Dispatch.to` caught only `RuntimeException` around
+a subscriber call, never `Error`, so a subscriber that threw `OutOfMemoryError` - plausible
+precisely because the queue below is unbounded - killed `dispatchUntilClosed`'s thread
+uncaught. A minimal reproduction (a subscriber that throws `OutOfMemoryError` directly)
+confirmed it: the dispatcher thread died, `bus.failureCount()` stayed at zero because
+`recordFailure` never ran, and a `publish()` call afterward succeeded with no exception -
+`publish` only checked the `closed` flag, which nothing set when the dispatcher died outside of
+an explicit `close()`.
+
+**Same fix, same reasoning as L-1.** `dispatchUntilClosed` now catches an `Error` propagating
+out of `Dispatch.to`, marks the bus closed, and rethrows - `publish` rejects loudly afterward
+instead of silently queuing onto a dead dispatcher, and the `Error` is still reported rather
+than swallowed. `RuntimeException` handling needed no change: `Dispatch.to` already caught it
+per subscriber and routed it to `recordFailure`, which is the behaviour the entry below
+("A subscriber failing on the async bus is counted, not reported") already describes.
+
+**`SimulationWorkers` was checked and is not affected.** It runs blocks through
+`ExecutorService.invokeAll`/`FutureTask`, and the JDK's `FutureTask.run()` already catches
+`Throwable` internally and delivers it via `ExecutionException` on `.get()` rather than letting
+it kill the pool thread - which `SimulationWorkers.run()` already unwraps correctly. The gap
+was specific to the two places this codebase hand-rolls a worker thread instead of going
+through `java.util.concurrent`'s `Future`-based machinery.
+
 ## Fixed during M20
 
 ### K-1 · One risk factor at a time, no correlation · fixed
@@ -280,12 +337,10 @@ decision.
 | Monte Carlo | No correlation estimator | `CorrelationMatrix` (M20) validates and decomposes a caller-supplied correlation structure; it does not estimate one from historical returns. The same reasoning as "No historical-data loader" above applies a second time here - this engine has no historical time series anywhere to estimate a correlation from, so a caller states the correlation the same way `DemoScenario.scenarios()` states which stress scenarios a book is measured against. |
 | Monte Carlo | `CorrelationMatrix` requires positive *definite*, not merely semi-definite | An exact `+1`/`-1` pairwise correlation, or any other singular correlation structure, is rejected rather than decomposed - see [ADR 0009](adr/0009-correlation-matrix-positive-definite-not-semi-definite.md) for why a pivoted/rank-revealing decomposition was judged out of scope for the milestone. A caller that genuinely needs an exact pairwise correlation can express it as one shared risk factor instead of two correlated ones. |
 | Execution | `OrderBookVenue.submit` has no back-pressure | The M17 fix for the gap above (see "Fixed during M17") is itself unbounded: `SingleWriterBookLane`'s command queue has no limit, the same choice `AsynchronousEventBus` already made below and for the same reason - bounding it means blocking the submitter, which is what `submit` exists not to impose, or dropping work, which needs a stated policy this class does not have. `docs/BENCHMARKS.md` §6's own M17 run reproduced the failure mode directly: a twelve-thread JMH loop queuing faster than the writer could drain ran the JVM out of heap. No production caller in this codebase submits anywhere near that rate today. |
-| Execution | A writer thread that dies of `OutOfMemoryError` leaves its lane silently deaf | Re-running `submitCrossingPairAsync` directly (12 books, `THREAD_PER_BOOK`, a capped heap to force the failure fast) confirmed this is worse than "no back-pressure" alone suggests: `SingleWriterBookLane.runUntilClosed` calls `command.run()` with no exception boundary, so an `OutOfMemoryError` inside a command kills the writer thread outright - it does not go through `close()`, so `closed` is never set. Every one of the twelve writer threads died this way in the reproduction, one `OutOfMemoryError` per book. After that, `submit()` does not throw `RejectedExecutionException` (that check only reads the `closed` flag) - it queues onto a lane whose writer thread no longer exists, so the command is accepted and then never runs, forever, with nothing telling the caller. The gap above is "the queue can grow without bound"; this is the sharper failure it opens onto - a book that goes quiet under load rather than one that visibly refuses more work. Recorded rather than fixed here, for the same reason as the entry above: no production caller submits anywhere near that rate today. |
 | Execution | The command queue is not a command *log* | §5.6 a) says deterministic replay "falls out for free" from feeding each book from a queue. It does not fall out yet: `SingleWriterBookLane`'s queue is in memory and each command is discarded once it has run, so nothing can be replayed from it. Recording commands durably, and replaying them into a fresh book, is real work (a serialisation format for instructions, and a decision about what a replay does to the event bus) that no consumer has asked for. The structure the replay would need is in place; the recording is not. |
 | Event bus | No production subscriber runs asynchronously | `AsynchronousEventBus` is built, tested and documented, but every wiring in this codebase uses `SynchronousEventBus`, because a deterministic demo and a golden-master test want their subscribers finished before the next line runs. Listed in the README's dead-weight table for the same reason `RiskLimit.and()` is: real machinery with tests, waiting for the live simulation that will use it. `docs/BENCHMARKS.md` §7 measures the choice directly rather than leaving it asserted: against a subscriber costing a few milliseconds, decoupling the publisher is worth roughly 17,000× on `publish`'s own latency, which is the number this table used to claim without showing. |
 | Event bus | Unbounded queue, no back-pressure | `AsynchronousEventBus` queues without limit, because bounding it means blocking the publisher - the thing an async bus exists not to do - or dropping events, which needs a stated policy. *(This entry originally said "nothing in Mercury produces faster than the dispatcher consumes, so a bound would be sized against a guess." `docs/BENCHMARKS.md` §7's own measurement run is a counterexample: a publisher at ~0.24 µs against a ~4 ms subscriber enqueued faster than the dispatcher could drain, and `close()` timed out mid-drain inside a two-second JMH iteration - reproducible, not hypothetical, once something actually publishes that fast. It took a synthetic benchmark to produce that producer, not a real caller, so the underlying claim - no *production* wiring does this yet - still holds; only "would be sized against a guess" was wrong, since the failure mode is now on record with a number attached.)* A real deployment needs the bound and the policy together. |
 | Event bus | A subscriber failing on the async bus is counted, not reported | The default `AsynchronousEventBus` counts failures and otherwise swallows them; the engine has no logger and no framework to get one from (`LayeringRulesTest`), so the default cannot be "log it". A caller that cares passes a handler. Counting is the floor, not a good production answer. |
-| Event bus | A dispatcher thread that dies of an `Error` leaves `AsynchronousEventBus` silently deaf | The same shape as the `OrderBookVenue.submit` entry above, confirmed the same way: `Dispatch.to` catches only `RuntimeException` around a subscriber call, never `Error`, so a subscriber that throws `OutOfMemoryError` - plausible precisely because the queue above is unbounded and can grow without limit - kills `dispatchUntilClosed`'s thread uncaught. A minimal reproduction (a subscriber that throws `OutOfMemoryError` directly) confirmed it: the dispatcher thread dies, `bus.failureCount()` stays at zero because `recordFailure` never runs, and a `publish()` call afterward succeeds with no exception - `publish` only checks the `closed` flag, which nothing sets when the dispatcher dies outside of an explicit `close()`. Every later event is accepted and queued forever, delivered to nobody, with no signal to the publisher that anything is wrong. Recorded rather than fixed here, for the same reason as the entry it mirrors: no production wiring in this codebase runs a subscriber capable of throwing an `Error` today. |
 | Access control | No notion of who is calling | The engine has no caller identity, so it cannot decide *who* may negotiate, release exposure or book a trade - that belongs to the API layer planned for phase 2, which knows the caller. What the engine can check without one, it does: `OtcNegotiationVenue.release` accepts only a continuation of a trade it executed itself, the venues are safe under concurrent callers, and error messages no longer list counterparties, instruments or market data. The phase-2 layer still has to authenticate callers, authorise each operation, and map `MercuryException`s to responses rather than echoing messages. |
 | Risk engine | No confidence interval on Expected Shortfall | `HistoricalVaRCalculator.valueAtRiskConfidenceInterval` brackets VaR - one order statistic, whose rank uncertainty has a well-known large-sample (Binomial/Normal) approximation. Expected Shortfall averages a whole tail of variable size, not one order statistic, so the same rank-uncertainty trick does not carry over directly - a correct ES confidence interval is a genuinely different, harder statistical problem (its own asymptotic theory, or a bootstrap), not a small extension of the VaR one. Deferred rather than approximated incorrectly. |
 

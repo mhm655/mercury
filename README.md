@@ -226,6 +226,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M18 — Global counterparty exposure ledger, extracted and shareable | ✅ complete |
 | M19 — Settlement scheduling: `TradeSettlementBook`, and real settlement dates for every trade | ✅ complete |
 | M20 — Multi-factor correlated Monte Carlo VaR: `CorrelatedMonteCarloVaRCalculator` | ✅ complete |
+| M21 — Fault isolation: a fatal `Error` on a worker thread now closes its lane/bus loudly, not silently | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the

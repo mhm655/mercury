@@ -88,6 +88,54 @@ class SingleWriterBookLaneTest {
         assertThat(ran.await(5, TimeUnit.SECONDS)).isTrue();
     }
 
+    @Test
+    void aRuntimeExceptionFromSubmittedWorkIsCountedAndTheWriterKeepsGoing() throws InterruptedException {
+        SingleWriterBookLane lane = new SingleWriterBookLane(AAPL);
+        CountDownLatch ranAfter = new CountDownLatch(1);
+
+        lane.submit(() -> {
+            throw new IllegalStateException("submitted work failed");
+        });
+        lane.submit(ranAfter::countDown);
+
+        assertThat(ranAfter.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(lane.failureCount()).isEqualTo(1);
+        lane.close();
+    }
+
+    @Test
+    void anErrorFromSubmittedWorkClosesTheLaneRatherThanLeavingItSilentlyDeaf() throws InterruptedException {
+        SingleWriterBookLane lane = new SingleWriterBookLane(AAPL);
+        CountDownLatch failed = new CountDownLatch(1);
+
+        lane.submit(() -> {
+            failed.countDown();
+            throw new OutOfMemoryError("simulated");
+        });
+
+        assertThat(failed.await(5, TimeUnit.SECONDS)).isTrue();
+        // The writer thread is dying asynchronously from the Error above; give it a moment to
+        // mark the lane closed before asserting submit() now rejects rather than silently
+        // queuing onto a writer that no longer exists.
+        awaitClosed(lane);
+
+        assertThatThrownBy(() -> lane.submit(() -> { }))
+                .isInstanceOf(RejectedExecutionException.class);
+    }
+
+    private static void awaitClosed(SingleWriterBookLane lane) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            try {
+                lane.submit(() -> { });
+            } catch (RejectedExecutionException e) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("lane did not close after its writer thread died");
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             latch.await();

@@ -6,6 +6,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
@@ -45,6 +46,21 @@ import java.util.function.Supplier;
  *
  * <p>The thread is a daemon, so a caller that forgets to {@link #close()} cannot keep a JVM
  * alive; closing is still how a lane is meant to end.
+ *
+ * <h2>A submitted command's failure used to have nowhere to go</h2>
+ * {@code run()}'s own {@link FutureTask} already survives a failing command - it catches
+ * {@code Throwable} itself and hands the failure back through {@code get()} - so this only ever
+ * affected {@link #submit}'s fire-and-forget path, which had no exception boundary around
+ * {@code command.run()} at all: a plain {@code RuntimeException} from submitted work killed the
+ * writer thread outright, and an {@code Error} did too while leaving {@link #closed} unset, so
+ * {@link #submit} kept silently queuing onto a writer that no longer existed, forever, with
+ * nothing to tell the caller (see {@code docs/KNOWN_GAPS.md}). Now: a {@code RuntimeException}
+ * is counted ({@link #failureCount()}) and the writer keeps going - {@code submit}'s caller has
+ * no result to fail, so this is the same "nowhere to throw" answer
+ * {@code AsynchronousEventBus} already gives its own subscribers. An {@code Error} is not
+ * survivable, so the lane is closed first - rejecting every later {@code submit}/{@code run}
+ * loudly rather than silently - and then rethrown, so it is still reported the way an uncaught
+ * exception on any other thread would be.
  */
 final class SingleWriterBookLane implements BookLane {
 
@@ -54,6 +70,7 @@ final class SingleWriterBookLane implements BookLane {
 
     private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
     private final Thread writer;
+    private final AtomicInteger failureCount = new AtomicInteger();
     private volatile boolean closed;
 
     SingleWriterBookLane(InstrumentId instrumentId) {
@@ -148,8 +165,21 @@ final class SingleWriterBookLane implements BookLane {
                 cancelQueued();
                 return;
             }
-            command.run();
+            try {
+                command.run();
+            } catch (RuntimeException e) {
+                failureCount.incrementAndGet();
+            } catch (Error e) {
+                closed = true;
+                cancelQueued();
+                throw e;
+            }
         }
+    }
+
+    /** How many submitted commands have failed with a {@code RuntimeException}. */
+    int failureCount() {
+        return failureCount.get();
     }
 
     private void cancelQueued() {

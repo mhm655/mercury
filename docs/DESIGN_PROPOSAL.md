@@ -1074,6 +1074,36 @@ time series anywhere to estimate one from - the same reasoning `docs/KNOWN_GAPS.
 "No historical-data loader" entry already gives), and a pivoted/rank-revealing decomposition
 for the singular case ADR 0009 declines.
 
+#### M21 — Fault isolation on worker threads — ✅ done
+
+Not on the roadmap - found while reproducing M17's own documented back-pressure gap for a
+debugging pass, not while looking for a new gap. Running `submitCrossingPairAsync` under a
+capped heap confirmed the `OutOfMemoryError` `docs/BENCHMARKS.md` §6 already recorded, and
+something it didn't: `SingleWriterBookLane.runUntilClosed` ran a submitted command with no
+exception boundary at all, so the `Error` killed the writer thread uncaught while leaving
+`closed` unset - `submit()` only checks that flag, so it kept silently accepting work onto a
+writer thread that no longer existed, forever, with nothing to tell the caller. Every other
+worker-thread-owning class in the codebase was then checked deliberately for the same shape,
+and `AsynchronousEventBus` had it too: `Dispatch.to` catches only `RuntimeException` around a
+subscriber call, never `Error`, so the same failure killed the dispatcher thread while
+`publish()` kept accepting events into a queue nothing would ever drain.
+
+Both are fixed the same way. A `RuntimeException` from `SingleWriterBookLane.submit`'s work is
+now counted (`failureCount()`) and the writer keeps going - fire-and-forget work has no caller
+left to fail, the same "nowhere to throw" answer `AsynchronousEventBus` already gives its own
+subscribers. An `Error` is not survivable, so the writer or dispatcher thread now marks its
+lane or bus closed *before* it dies, so a later `submit`/`publish` rejects loudly instead of
+silently queuing onto a thread that is gone - and the `Error` itself is still rethrown, so it
+is reported the way an uncaught exception on any other thread would be, not swallowed.
+`SimulationWorkers` was checked and is not affected: it runs blocks through
+`ExecutorService`/`FutureTask`, which the JDK already makes capture `Throwable` rather than let
+it kill the pool thread.
+
+Proven with the same technique that found the gap: `SingleWriterBookLaneTest` and
+`EventBusTest` each have a submitted command/subscriber that throws `OutOfMemoryError`
+directly, asserting the lane or bus closes and a subsequent call is rejected - deterministic
+unit tests, not benchmarks that happen to reproduce an OOM.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and
