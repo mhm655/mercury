@@ -7,6 +7,43 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M20 complete** — **multi-factor correlated Monte Carlo VaR, built beside the single-factor
+calculator rather than in place of it.** `MonteCarloVaRCalculator`'s own javadoc had named the
+gap since M12: "a real multi-factor portfolio VaR would need correlated draws across every
+risk factor at once - a covariance matrix, a Cholesky decomposition, a joint distribution this
+class does not have." `CorrelatedMonteCarloVaRCalculator` is that answer - a book with only one
+real driver of risk still has no correlation to draw, so the simpler class keeps its place
+rather than being replaced.
+
+`CorrelationMatrix` is the new validated type: square, symmetric, unit diagonal, every
+off-diagonal entry in `[-1, 1]`, and - the check the other four cannot substitute for -
+positive definite, computed into a Cholesky factor once at construction rather than per path
+(a run draws it tens of thousands of times). `GeometricBrownianMotion` gained
+`terminalValueFromStandardNormal`, the existing `terminalValue` formula extracted so a
+pre-correlated draw can be fed to it directly - `terminalValue` itself becomes a one-line
+wrapper, bit-identical to its old self, confirmed by the existing test suite passing unchanged.
+Each simulated path draws one independent standard normal per risk factor, correlates them
+through the matrix's Cholesky factor (`L * Z`), and combines every factor's resulting shock
+into one `MarketShock.composite` - reusing `MarketShock`'s existing composability rather than a
+new joint shock type. Everything downstream of "one shock per path" - `SensitivityCalculator`,
+`HistoricalVaRCalculator`, `SimulationWorkers`, `PathBlocks` - is unchanged, so the correlated
+calculator inherits the same bit-identical-on-any-worker-count reproducibility for free.
+
+[ADR 0009](adr/0009-correlation-matrix-positive-definite-not-semi-definite.md) records the one
+real numerical decision: `CorrelationMatrix` requires positive *definite*, not merely
+semi-definite, so an exactly singular correlation (the simplest case: an exact `+1`/`-1`
+pairwise correlation) is rejected with a clear message rather than silently producing `NaN`
+three function calls deep inside a simulated shock. A pivoted or rank-revealing decomposition
+would handle that case correctly, at real cost, for a caller nothing in this codebase has -
+recorded in `docs/KNOWN_GAPS.md` rather than built speculatively, the same restraint this
+project's other milestones already practice.
+
+Wired into a real demo: `MonteCarloDemo` gained a third section, AAPL and MSFT simulated
+jointly against the naive uncorrelated sum of each leg's own standalone VaR, so the
+diversification effect a single-factor calculator cannot show at all is visible in actual
+output - a real diversification benefit around 640 on this book's own numbers, not just a
+property proven in a test.
+
 **M19 complete** — **settlement scheduling, and the gap under the gap it depended on.** §A2.7
 decided years earlier that "settlement is triggered by clock advancement, not by a real timer";
 nothing had built it. `Trade` carried a `settlementDate` and the `SETTLED` state since M8, but

@@ -225,6 +225,7 @@ recorded as [ADRs](docs/adr) as they are made, not reconstructed afterwards.
 | M17 — Asynchronous order submission: `submit()`, additive to `execute()` | ✅ complete |
 | M18 — Global counterparty exposure ledger, extracted and shareable | ✅ complete |
 | M19 — Settlement scheduling: `TradeSettlementBook`, and real settlement dates for every trade | ✅ complete |
+| M20 — Multi-factor correlated Monte Carlo VaR: `CorrelatedMonteCarloVaRCalculator` | ✅ complete |
 
 What each milestone delivered, and what its reviews found, is in the
 [milestone log](docs/MILESTONES.md). Everything from M4 on is in the
@@ -395,6 +396,21 @@ plateau is an allocation ceiling rather than the parallel structure, and the
   notification `SimulationClock` has no precedent for — and it replaced the two manual call
   sites it was built to retire: running `lifecycle` now settles three trades in one call, not
   the single hand-picked one the old code walked through by name.
+- **Multi-factor correlated Monte Carlo VaR, built beside the single-factor calculator.**
+  `MonteCarloVaRCalculator`'s own javadoc had named the gap since M12 — one risk factor at a
+  time, no correlation. `CorrelatedMonteCarloVaRCalculator` is the answer, not a replacement: a
+  book with only one real driver of risk still has no correlation to draw. `CorrelationMatrix`
+  validates a correlation structure and computes its Cholesky factor once; each simulated path
+  draws one independent standard normal per factor, correlates them through it, and combines
+  every factor's shock into one `MarketShock.composite` — reusing existing composability rather
+  than a new joint shock type, and inheriting the same bit-identical-on-any-worker-count
+  reproducibility the single-factor calculator already has.
+  [ADR 0009](docs/adr/0009-correlation-matrix-positive-definite-not-semi-definite.md) records
+  the one real numerical decision: an exactly singular correlation (an exact `+1`/`-1` pairwise
+  correlation) is rejected with a clear message rather than silently producing `NaN` deep inside
+  a simulated shock. `MonteCarloDemo` gained a third section showing the effect on real
+  numbers — AAPL and MSFT simulated jointly against the naive uncorrelated sum of each leg's own
+  VaR, a diversification benefit visible in actual output.
 
 ### Dead weight, looked for on purpose
 

@@ -36,7 +36,8 @@ public final class GeometricBrownianMotion {
     }
 
     /**
-     * One terminal value, {@code years} forward from {@code spot}.
+     * One terminal value, {@code years} forward from {@code spot}, drawing its own standard
+     * normal from {@code rng}.
      *
      * @param spot       the starting value; must be positive
      * @param drift      the annualised drift {@code mu} - the risk-neutral rate for
@@ -52,6 +53,32 @@ public final class GeometricBrownianMotion {
      */
     public static double terminalValue(double spot, double drift, double volatility,
                                        double years, RandomGenerator rng) {
+        Objects.requireNonNull(rng, "rng");
+        return terminalValueFromStandardNormal(spot, drift, volatility, years, rng.nextGaussian());
+    }
+
+    /**
+     * {@link #terminalValue}, given an already-drawn standard normal {@code z} rather than
+     * drawing one itself.
+     *
+     * <h2>Why this exists separately, M20</h2>
+     * A single-factor simulation ({@link #terminalValue}) can draw its own {@code Z} because
+     * nothing else needs to see it first. A <em>correlated</em> multi-factor simulation cannot:
+     * {@code CorrelatedMonteCarloVaRCalculator} draws one independent standard normal per risk
+     * factor, multiplies the vector through a correlation matrix's Cholesky factor to produce
+     * correlated normals, and only then needs this formula applied to each factor's own
+     * correlated {@code z} - the drawing and the formula are genuinely two different steps
+     * once more than one factor is involved, so this method is the formula alone, exposed
+     * rather than duplicated.
+     *
+     * @param z the standard normal driving this draw - {@code Z ~ N(0, 1)} in the class javadoc's
+     *          formula, whether drawn independently or produced by correlating several draws
+     * @throws IllegalArgumentException if any argument is {@code NaN} or infinite, {@code spot}
+     *                                  is not positive, {@code volatility} or {@code years} is
+     *                                  negative, or {@code z} is not finite
+     */
+    public static double terminalValueFromStandardNormal(double spot, double drift,
+                                                          double volatility, double years, double z) {
         // Checked as !(x >= lowerBound), not x < lowerBound: a NaN argument fails every
         // ordinary comparison, including x < lowerBound, and would otherwise flow silently
         // through Math.sqrt and Math.exp into a NaN result rather than being rejected here.
@@ -70,16 +97,17 @@ public final class GeometricBrownianMotion {
         if (!Double.isFinite(years) || !(years >= 0.0)) {
             throw new IllegalArgumentException("years must be finite and non-negative, but was " + years);
         }
-        Objects.requireNonNull(rng, "rng");
+        if (!Double.isFinite(z)) {
+            throw new IllegalArgumentException("z must be finite, but was " + z);
+        }
 
         if (years == 0.0) {
             // No time has passed - the terminal value is the spot, and sigma*sqrt(0) is zero
-            // regardless of volatility, so drawing Z would multiply a real random number by
-            // zero for no reason.
+            // regardless of volatility, so a nonzero z would multiply against zero for no
+            // reason.
             return spot;
         }
 
-        double z = rng.nextGaussian();
         double exponent = (drift - 0.5 * volatility * volatility) * years
                 + volatility * Math.sqrt(years) * z;
         return spot * Math.exp(exponent);

@@ -43,10 +43,11 @@ import java.util.function.Supplier;
  *
  * <h2>One risk factor at a time</h2>
  * Simulates a single underlying's spot, the same way {@code SensitivityCalculator.delta} /
- * {@code .gamma} / {@code .vega} are all per-factor rather than joint. A real multi-factor
- * portfolio VaR would need correlated draws across every risk factor at once - a covariance
- * matrix, a Cholesky decomposition, a joint distribution this class does not have and no
- * caller needs yet. Recorded in {@code docs/KNOWN_GAPS.md} rather than built speculatively.
+ * {@code .gamma} / {@code .vega} are all per-factor rather than joint. {@link
+ * CorrelatedMonteCarloVaRCalculator} (M20) is the multi-factor answer - correlated draws across
+ * several risk factors at once, via a {@link CorrelationMatrix}'s Cholesky decomposition - built
+ * alongside this class rather than in place of it: a book with only one real driver of risk has
+ * no correlation to draw, and this simpler, cheaper class stays the right tool for that case.
  *
  * <h2>Reproducibility</h2>
  * {@code seed} is fixed at construction; {@link #simulate} splits fresh generators from it

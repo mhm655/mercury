@@ -1037,6 +1037,43 @@ narrower demo than the hand-written version it replaced.
 when `SimulationClock` advances, and a new event type for settlement itself - `settleDueBy`'s
 return value is the only channel this milestone needed.
 
+#### M20 — Multi-factor correlated Monte Carlo VaR — ✅ done
+
+`MonteCarloVaRCalculator`'s own javadoc named the gap: "a real multi-factor portfolio VaR would
+need correlated draws across every risk factor at once - a covariance matrix, a Cholesky
+decomposition, a joint distribution this class does not have."
+`CorrelatedMonteCarloVaRCalculator` (`com.mercury.simulation`) is that answer, built alongside
+the single-factor class rather than in place of it - a book with only one real driver of risk
+has no correlation to draw, and the simpler, cheaper class stays right for that case.
+
+`CorrelationMatrix` validates a caller-supplied correlation structure (square, symmetric, unit
+diagonal, entries in `[-1, 1]`, and - the check the other four cannot substitute for - positive
+definite) and computes its Cholesky factor once at construction. Each simulated path draws one
+independent standard normal per risk factor, correlates them through that factor
+(`L * Z`), and feeds each factor's own correlated normal to a new
+`GeometricBrownianMotion.terminalValueFromStandardNormal` - the existing `terminalValue`
+formula, extracted so a pre-correlated draw can be fed to it directly rather than the method
+drawing its own. Every factor's resulting shock composes into one `MarketShock.composite` per
+path, reusing `MarketShock`'s existing composability rather than a new joint shock type.
+Reproducibility carries over for free: same `SensitivityCalculator`/
+`HistoricalVaRCalculator`/seed/`SimulationWorkers`/`PathBlocks` machinery as the single-factor
+calculator, so a correlated run is bit-identical on any worker count too.
+
+[ADR 0009](adr/0009-correlation-matrix-positive-definite-not-semi-definite.md) records one
+narrowing: `CorrelationMatrix` requires positive *definite*, not merely semi-definite, so an
+exactly singular correlation (an exact `+1`/`-1` pairwise correlation is the simplest case) is
+rejected rather than decomposed with a pivoted algorithm - a real, well-understood fix, but for
+a caller nothing in this codebase has yet.
+
+Wired into a real demo, not left only tested: `MonteCarloDemo` gained a third section - AAPL
+and MSFT simulated jointly, next to the naive uncorrelated sum of each leg's own standalone
+VaR - so the diversification effect is visible in actual output, not just asserted in a test.
+
+**Not in scope:** correlation estimation from historical data (this engine has no historical
+time series anywhere to estimate one from - the same reasoning `docs/KNOWN_GAPS.md`'s
+"No historical-data loader" entry already gives), and a pivoted/rank-revealing decomposition
+for the singular case ADR 0009 declines.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and

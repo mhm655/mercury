@@ -1,15 +1,20 @@
 package com.mercury.app;
 
 import com.mercury.core.money.Currency;
+import com.mercury.core.money.Money;
 import com.mercury.core.money.Price;
 import com.mercury.instrument.EuropeanOption;
 import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.pricing.PricingService;
 import com.mercury.pricing.model.BlackScholesModel;
 import com.mercury.risk.SensitivityCalculator;
+import com.mercury.simulation.CorrelatedMonteCarloVaRCalculator;
+import com.mercury.simulation.CorrelatedMonteCarloVaRCalculator.RiskFactor;
+import com.mercury.simulation.CorrelationMatrix;
 import com.mercury.simulation.MonteCarloOptionModel;
 import com.mercury.simulation.MonteCarloRiskResult;
 import com.mercury.simulation.MonteCarloVaRCalculator;
+import java.util.List;
 
 /**
  * A fourth, milestone-specific runnable - not the project's entrypoint - that proves M12's
@@ -21,6 +26,11 @@ import com.mercury.simulation.MonteCarloVaRCalculator;
  * nothing here is a new scenario, and {@code Main}'s golden-master output is completely
  * untouched by it, following the precedent {@code RiskEngineDemo} already set for VaR-style
  * calculators (a demo, not a RISK-section line).
+ *
+ * <p>Section 3 is M20's: {@link CorrelatedMonteCarloVaRCalculator}, the multi-factor sibling
+ * to section 2's single-factor {@link MonteCarloVaRCalculator} - AAPL and MSFT simulated
+ * jointly rather than one at a time, showing the naive (uncorrelated) sum of each leg's own
+ * VaR against the correlated joint figure.
  *
  * <pre>
  *   mvn -q -DskipTests package
@@ -46,6 +56,11 @@ public final class MonteCarloDemo {
         System.out.println("2. MONTE CARLO VALUE AT RISK AND EXPECTED SHORTFALL - AAPL EXPOSURE ONLY");
         System.out.println("-".repeat(78));
         monteCarloValueAtRisk();
+
+        System.out.println();
+        System.out.println("3. MULTI-FACTOR: CORRELATED AAPL/MSFT VALUE AT RISK");
+        System.out.println("-".repeat(78));
+        correlatedValueAtRisk();
     }
 
     /**
@@ -120,5 +135,60 @@ public final class MonteCarloDemo {
                 + "scenario at least as bad as the VaR threshold, not just the threshold itself. The "
                 + "confidence interval is a different '95%' from the VaR's own '99%' - see "
                 + "HistoricalVaRCalculator's javadoc for why the two must not be conflated.");
+    }
+
+    /**
+     * AAPL and MSFT simulated jointly, correlated, against the naive (uncorrelated) sum of
+     * each leg's own standalone VaR - the diversification effect a single-factor calculator
+     * cannot show, because it never sees more than one risk factor at once.
+     *
+     * <p>Both the MSFT volatility and the AAPL/MSFT correlation are assumed here, for this
+     * demo alone, not read from anywhere in the engine: {@code DemoScenario.market()} quotes
+     * no MSFT volatility, since nothing in this book prices an MSFT option; and this engine has
+     * no correlation estimator at all (no historical-data loader - see
+     * {@code docs/KNOWN_GAPS.md}). Which correlation a book is risked against is the same kind
+     * of reporting decision {@code DemoScenario.scenarios()} already makes explicit for stress
+     * scenarios, not an engine constant.
+     */
+    private static void correlatedValueAtRisk() {
+        var aaplId = DemoScenario.AAPL;
+        var msftId = DemoScenario.MSFT;
+        SensitivityCalculator sensitivities = DemoScenario.sensitivityCalculator();
+        double oneDay = 1.0 / 365.0;
+        double aaplVol = DemoScenario.market().volatility(aaplId);
+        double msftVol = 0.24;
+        double correlation = 0.6;
+
+        MonteCarloVaRCalculator singleFactor = new MonteCarloVaRCalculator(sensitivities, 7);
+        Money aaplAlone = singleFactor.simulate(DemoScenario.portfolio(), aaplId, 0.0, aaplVol,
+                oneDay, 200_000, DemoScenario.market(), DemoScenario.VALUATION_DATE, 0.99)
+                .valueAtRisk();
+        Money msftAlone = singleFactor.simulate(DemoScenario.portfolio(), msftId, 0.0, msftVol,
+                oneDay, 200_000, DemoScenario.market(), DemoScenario.VALUATION_DATE, 0.99)
+                .valueAtRisk();
+        Money naiveSum = aaplAlone.plus(msftAlone);
+
+        CorrelatedMonteCarloVaRCalculator correlatedVaR =
+                new CorrelatedMonteCarloVaRCalculator(sensitivities, 7);
+        List<RiskFactor> factors = List.of(
+                new RiskFactor(aaplId, 0.0, aaplVol), new RiskFactor(msftId, 0.0, msftVol));
+        CorrelationMatrix correlationMatrix = CorrelationMatrix.of(
+                new double[][] {{1.0, correlation}, {correlation, 1.0}});
+        MonteCarloRiskResult joint = correlatedVaR.simulate(DemoScenario.portfolio(), factors,
+                correlationMatrix, oneDay, 200_000, DemoScenario.market(),
+                DemoScenario.VALUATION_DATE, 0.99);
+
+        System.out.println("  AAPL vol " + String.format("%.0f%%", aaplVol * 100) + " (quoted), MSFT vol "
+                + String.format("%.0f%%", msftVol * 100) + " (assumed - no MSFT option in this book "
+                + "quotes one), correlation " + correlation + " (assumed - no correlation estimator "
+                + "in this engine; see docs/KNOWN_GAPS.md)");
+        System.out.println("  99% VaR, AAPL alone:            " + aaplAlone);
+        System.out.println("  99% VaR, MSFT alone:            " + msftAlone);
+        System.out.println("  naive sum (no diversification): " + naiveSum);
+        System.out.println("  99% VaR, correlated jointly:    " + joint.valueAtRisk());
+        System.out.println("  diversification benefit:        " + naiveSum.minus(joint.valueAtRisk())
+                + " (the naive sum overstates risk whenever correlation is below 1 - two "
+                + "imperfectly-correlated risks are never as bad together as their worst cases "
+                + "added up)");
     }
 }

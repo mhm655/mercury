@@ -8,6 +8,43 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M20
+
+### K-1 · One risk factor at a time, no correlation · fixed
+
+`MonteCarloVaRCalculator` (M12) simulated a single underlying's spot in isolation, the same
+per-factor shape `SensitivityCalculator.delta`/`gamma`/`vega`/`dv01` already have. A real
+multi-factor portfolio VaR needs correlated draws across every risk factor at once - a
+covariance matrix, a Cholesky decomposition, a joint distribution - which this class's own
+javadoc named as the gap.
+
+**Built alongside the single-factor calculator, not in place of it.**
+`CorrelatedMonteCarloVaRCalculator` (`com.mercury.simulation`) has the identical shape - same
+`SensitivityCalculator`/`HistoricalVaRCalculator`/seed/`SimulationWorkers`/`PathBlocks`
+machinery, so it inherits the same bit-identical-on-any-worker-count reproducibility for free.
+What changes is what one simulated path's shock is: `CorrelationMatrix` (new) validates a
+caller-supplied correlation structure and computes its Cholesky factor once; each path draws
+one independent standard normal per risk factor, correlates them through that factor, and feeds
+each factor's own correlated normal to a new
+`GeometricBrownianMotion.terminalValueFromStandardNormal` (the existing `terminalValue`'s
+formula, extracted so a pre-correlated draw can be fed to it directly) - one
+`MarketShock.composite` per path across every factor, reusing `MarketShock`'s existing
+composability rather than a new joint shock type.
+
+**Positive definite, not merely positive semi-definite.** `CorrelationMatrix` rejects a
+singular correlation structure (an exact `+1`/`-1` pairwise correlation is the simplest
+example) rather than attempting a pivoted decomposition - see
+[ADR 0009](adr/0009-correlation-matrix-positive-definite-not-semi-definite.md). A caller
+computing an inconsistent set of pairwise correlations is a real, if less common, correctness
+question `CorrelationMatrixTest` proves the fix catches (three pairwise correlations that
+cannot jointly hold), not just the singular boundary case.
+
+**Wired into a real demo**, not left only tested: `MonteCarloDemo` gained a third section -
+AAPL and MSFT simulated jointly, next to the naive uncorrelated sum of each leg's own
+standalone VaR - so the diversification effect a single-factor calculator cannot show is
+visible in actual demo output. `docs/GoldenMasterTest`/README's pinned report is untouched,
+since it is driven by `Main`/`walkthrough`, not `montecarlo`.
+
 ## Fixed during M19
 
 ### J-1 · Settlement scheduling · fixed
@@ -239,8 +276,9 @@ decision.
 | Risk engine | No `AnalyticGreeks` capability interface or runtime "prefer analytic" dispatch | `docs/DESIGN_PROPOSAL.md` §5.3 describes a pricer optionally implementing `AnalyticGreeks`, with the risk engine preferring it over bump-and-revalue when available. M10 does not build that interface - `BlackScholesModel` instead exposes static `delta`/`gamma`/`vega` formulas, exactly the shape its own `price(...)` javadoc had already forward-declared ("so the analytic Greeks at M10 can share exactly these conventions"), used only for cross-validation tests. `SensitivityCalculator` always uses bump-and-revalue in production. Building the runtime-dispatch interface now would need per-position analytic-vs-numeric branching inside what is currently a uniform portfolio-level shock-and-revalue, for an optimisation with no measured performance problem behind it - exactly the speculative machinery A2.9 argues against. Revisit if a real performance case for it ever shows up. |
 | Risk engine | No historical-data loader | `HistoricalVaRCalculator` takes historical scenarios as caller-supplied `MarketShock`s, not loaded from any feed. This engine has no live or historical market-data source anywhere - every `MarketDataSnapshot` in Mercury is already caller-constructed - so a loader would be new infrastructure this class has no need to own. |
 | Scenarios | No scenario library shipped by the engine | `Scenario` (M11) is a general factory/Composite primitive in `com.mercury.marketdata`; Market Crash, Rate Shock and Currency Crisis are defined in `DemoScenario`, not the engine. Same reasoning `RiskFactors` already states: which scenarios a book is measured against is a reporting decision, and inferring or hardcoding a "standard" set into the engine would make that decision for every caller rather than leave it to whoever is doing the reporting. |
-| Monte Carlo | One risk factor at a time, no correlation | `MonteCarloVaRCalculator` (M12) simulates a single underlying's spot in isolation, the same per-factor shape `SensitivityCalculator.delta`/`gamma`/`vega`/`dv01` already have. A real multi-factor portfolio VaR needs correlated draws across every risk factor at once - a covariance matrix, a Cholesky decomposition, a joint distribution - which nothing here builds, since no caller needs it yet and getting correlation estimation right is a substantial piece of work on its own. |
 | Monte Carlo | VaR stops scaling at 4 workers | Parallel Monte Carlo landed at M13 and option pricing reaches 5.9× on 12 workers, but VaR flattens at 2.6× - each path allocates ~5.7 KB (a shocked snapshot, valuation lines, `BigDecimal`-backed `Money` per position) and the allocation rate hits a ceiling of ~4.6 GB/s exactly where throughput stops (`docs/BENCHMARKS.md` §5). The fixes would be a `double`-domain revaluation path for risk - ADR 0001 already separates ledger from model arithmetic - or reusing shocked snapshots per block. Both trade clarity for speed, and nothing needs VaR faster than 60 ms yet. |
+| Monte Carlo | No correlation estimator | `CorrelationMatrix` (M20) validates and decomposes a caller-supplied correlation structure; it does not estimate one from historical returns. The same reasoning as "No historical-data loader" above applies a second time here - this engine has no historical time series anywhere to estimate a correlation from, so a caller states the correlation the same way `DemoScenario.scenarios()` states which stress scenarios a book is measured against. |
+| Monte Carlo | `CorrelationMatrix` requires positive *definite*, not merely semi-definite | An exact `+1`/`-1` pairwise correlation, or any other singular correlation structure, is rejected rather than decomposed - see [ADR 0009](adr/0009-correlation-matrix-positive-definite-not-semi-definite.md) for why a pivoted/rank-revealing decomposition was judged out of scope for the milestone. A caller that genuinely needs an exact pairwise correlation can express it as one shared risk factor instead of two correlated ones. |
 | Execution | `OrderBookVenue.submit` has no back-pressure | The M17 fix for the gap above (see "Fixed during M17") is itself unbounded: `SingleWriterBookLane`'s command queue has no limit, the same choice `AsynchronousEventBus` already made below and for the same reason - bounding it means blocking the submitter, which is what `submit` exists not to impose, or dropping work, which needs a stated policy this class does not have. `docs/BENCHMARKS.md` §6's own M17 run reproduced the failure mode directly: a twelve-thread JMH loop queuing faster than the writer could drain ran the JVM out of heap. No production caller in this codebase submits anywhere near that rate today. |
 | Execution | The command queue is not a command *log* | §5.6 a) says deterministic replay "falls out for free" from feeding each book from a queue. It does not fall out yet: `SingleWriterBookLane`'s queue is in memory and each command is discarded once it has run, so nothing can be replayed from it. Recording commands durably, and replaying them into a fresh book, is real work (a serialisation format for instructions, and a decision about what a replay does to the event bus) that no consumer has asked for. The structure the replay would need is in place; the recording is not. |
 | Event bus | No production subscriber runs asynchronously | `AsynchronousEventBus` is built, tested and documented, but every wiring in this codebase uses `SynchronousEventBus`, because a deterministic demo and a golden-master test want their subscribers finished before the next line runs. Listed in the README's dead-weight table for the same reason `RiskLimit.and()` is: real machinery with tests, waiting for the live simulation that will use it. `docs/BENCHMARKS.md` §7 measures the choice directly rather than leaving it asserted: against a subscriber costing a few milliseconds, decoupling the publisher is worth roughly 17,000× on `publish`'s own latency, which is the number this table used to claim without showing. |
