@@ -9,6 +9,8 @@ import com.mercury.core.money.Price;
 import com.mercury.core.money.Quantity;
 import com.mercury.trade.Trade;
 import com.mercury.trade.TradeStatus;
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -135,7 +137,7 @@ public final class PortfolioLedger {
 
         PositionLots before = positions.getOrDefault(instrumentId, PositionLots.empty());
         PositionLots.Applied applied =
-                before.apply(delta, cashFlow, tradeDate, costBasisMethod, instrumentId);
+                applySplittingAtZero(before, delta, cashFlow, tradeDate, instrumentId);
 
         Map<InstrumentId, PositionLots> updated = new LinkedHashMap<>(positions);
         if (applied.position().isEmpty()) {
@@ -152,6 +154,48 @@ public final class PortfolioLedger {
         return new PortfolioLedger(id, reportingCurrency, costBasisMethod,
                 Collections.unmodifiableMap(updated), cash.with(cashFlow),
                 Collections.unmodifiableMap(updatedRealised), bookedTrades);
+    }
+
+    /**
+     * Applies {@code delta} to {@code before}, splitting it into a closing leg and an opening
+     * leg first if it would carry the position through zero.
+     *
+     * <p>{@link PositionLots#apply} refuses that in one call, and rightly so - a position's
+     * lots all share one sign, and a single call that both closes and opens would have to
+     * invent where the boundary falls. This is the layer the refusal's own message says the
+     * split belongs in: an executed trade already arrived here as one signed delta and one
+     * consideration, so the split happens entirely in how this ledger books it, not by minting
+     * a second {@link Trade}. Retroactively declaring "this was actually two trades" after the
+     * trade's own lifecycle history is already sealed would contradict the audit trail that
+     * history exists to keep honest - see ADR 0012.
+     *
+     * <p>The consideration is prorated between the two legs by quantity, rounded once on the
+     * part taken - the same "round the part taken, the remainder is a subtraction" rule
+     * {@link CostBasisMethod#AVERAGE_COST} already uses, so the two legs' cash sums back to
+     * the original consideration exactly, to the last cent.
+     */
+    private PositionLots.Applied applySplittingAtZero(PositionLots before, Quantity delta,
+            Money cashFlow, LocalDate tradeDate, InstrumentId instrumentId) {
+        Quantity held = before.quantity();
+        boolean crossesZero = !held.isZero() && held.signum() != delta.signum()
+                && delta.value().abs().compareTo(held.value().abs()) > 0;
+        if (!crossesZero) {
+            return before.apply(delta, cashFlow, tradeDate, costBasisMethod, instrumentId);
+        }
+
+        // Closing leg: flattens exactly to zero. Opening leg: whatever delta had left over.
+        Quantity closingDelta = Quantity.of(held.value().negate());
+        BigDecimal closingFraction = closingDelta.value().abs()
+                .divide(delta.value().abs(), MathContext.DECIMAL128);
+        Money closingCash = cashFlow.multipliedBy(closingFraction);
+        Money openingCash = cashFlow.minus(closingCash);
+        Quantity openingDelta = Quantity.of(delta.value().subtract(closingDelta.value()));
+
+        PositionLots.Applied closed =
+                before.apply(closingDelta, closingCash, tradeDate, costBasisMethod, instrumentId);
+        PositionLots.Applied opened = closed.position()
+                .apply(openingDelta, openingCash, tradeDate, costBasisMethod, instrumentId);
+        return new PositionLots.Applied(opened.position(), closed.realised().plus(opened.realised()));
     }
 
     /** Statuses a {@link Trade} must have reached before {@link #book} will accept it. */

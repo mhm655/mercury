@@ -7,6 +7,21 @@ and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
 lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
 
+**M23 complete** — **a trade that carries a position through zero settles instead of being
+refused.** Selling fifteen when long ten is really two trades - closing ten at the old cost
+basis, opening a short five at today's price - and `PositionLots.apply` refused it rather than
+inventing where the boundary falls, exactly as it always said it would. A new private
+`PortfolioLedger.applySplittingAtZero` does the actual splitting the refusal's own message
+pointed to: it detects a through-zero delta before it reaches `PositionLots`, splits it into a
+closing quantity and an opening one, prorates the consideration between them, and calls the
+*unchanged* `PositionLots.apply` twice. Deliberately not two `Trade` objects - a trade arriving
+at the ledger is already a sealed, audited execution, and minting a second `TradeId` would need
+the same shared generator the previously-fixed G-1 bug already made venues share, for a caller
+that doesn't exist. [ADR 0012](adr/0012-through-zero-trades-split-at-the-ledger-not-the-trade.md)
+records the full reasoning. Proven by direct comparison against booking the same two legs
+separately - a check that caught a real sign error (adding instead of subtracting the closing
+delta) during implementation, before it reached a commit.
+
 **M24 complete** — **a confidence interval on Expected Shortfall, by bootstrap.**
 `HistoricalVaRCalculator.valueAtRiskConfidenceInterval` already priced VaR's own uncertainty
 cheaply, from rank alone - no resampling, since VaR is one order statistic. Expected Shortfall

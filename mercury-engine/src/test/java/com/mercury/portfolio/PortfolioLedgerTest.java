@@ -186,20 +186,81 @@ class PortfolioLedgerTest {
     }
 
     @Nested
-    @DisplayName("what it refuses")
-    class Refusals {
+    @DisplayName("a trade that carries a position through zero")
+    class ThroughZero {
 
         @Test
-        @DisplayName("a trade that would carry a position through zero")
+        @DisplayName("settles both implied legs rather than being refused")
         void crossingZero() {
-            PortfolioLedger held = opening()
-                    .buy(AAPL, Quantity.of(10), Price.of("180"), Currency.USD, JANUARY);
+            PortfolioLedger after = opening()
+                    .buy(AAPL, Quantity.of(10), Price.of("180"), Currency.USD, JANUARY)
+                    .sell(AAPL, Quantity.of(15), Price.of("200"), Currency.USD, JUNE);
 
-            assertThatThrownBy(() -> held.sell(AAPL, Quantity.of(15), Price.of("200"),
-                    Currency.USD, JUNE))
-                    .isInstanceOf(PositionLots.PositionCrossesZeroException.class)
-                    .hasMessageContaining("two trades, not one");
+            assertThat(after.quantityOf(AAPL)).isEqualTo(Quantity.of(-5));
+            assertThat(after.realisedPnl(Currency.USD)).isEqualTo(Money.of("200.00", Currency.USD));
         }
+
+        @Test
+        @DisplayName("selling through zero matches booking the close and the open as two trades")
+        void sellingThroughZeroMatchesBookingTheTwoLegsSeparately() {
+            PortfolioLedger crossed = opening()
+                    .buy(AAPL, Quantity.of(20), Price.of("150"), Currency.USD, JANUARY)
+                    .sell(AAPL, Quantity.of(35), Price.of("160"), Currency.USD, JUNE);
+
+            PortfolioLedger bookedSeparately = opening()
+                    .buy(AAPL, Quantity.of(20), Price.of("150"), Currency.USD, JANUARY)
+                    .sell(AAPL, Quantity.of(20), Price.of("160"), Currency.USD, JUNE)
+                    .sell(AAPL, Quantity.of(15), Price.of("160"), Currency.USD, JUNE);
+
+            assertThat(crossed.quantityOf(AAPL)).isEqualTo(bookedSeparately.quantityOf(AAPL));
+            assertThat(crossed.costBasisOf(AAPL)).isEqualTo(bookedSeparately.costBasisOf(AAPL));
+            assertThat(crossed.realisedPnl(Currency.USD))
+                    .isEqualTo(bookedSeparately.realisedPnl(Currency.USD));
+            assertThat(crossed.cash().balance(Currency.USD))
+                    .isEqualTo(bookedSeparately.cash().balance(Currency.USD));
+        }
+
+        @Test
+        @DisplayName("buying through a short matches booking the close and the open as two trades")
+        void buyingThroughAShortMatchesBookingTheTwoLegsSeparately() {
+            PortfolioLedger crossed = opening()
+                    .sell(AAPL, Quantity.of(20), Price.of("150"), Currency.USD, JANUARY)
+                    .buy(AAPL, Quantity.of(35), Price.of("160"), Currency.USD, JUNE);
+
+            PortfolioLedger bookedSeparately = opening()
+                    .sell(AAPL, Quantity.of(20), Price.of("150"), Currency.USD, JANUARY)
+                    .buy(AAPL, Quantity.of(20), Price.of("160"), Currency.USD, JUNE)
+                    .buy(AAPL, Quantity.of(15), Price.of("160"), Currency.USD, JUNE);
+
+            assertThat(crossed.quantityOf(AAPL)).isEqualTo(bookedSeparately.quantityOf(AAPL));
+            assertThat(crossed.costBasisOf(AAPL)).isEqualTo(bookedSeparately.costBasisOf(AAPL));
+            assertThat(crossed.realisedPnl(Currency.USD))
+                    .isEqualTo(bookedSeparately.realisedPnl(Currency.USD));
+            assertThat(crossed.cash().balance(Currency.USD))
+                    .isEqualTo(bookedSeparately.cash().balance(Currency.USD));
+        }
+
+        @Test
+        @DisplayName("conserves the original consideration to the last cent")
+        void crossingZeroConservesConsiderationExactly() {
+            // 10 of 15 does not divide evenly - the case that would leak a cent if the two
+            // legs' cash were rounded independently instead of the second being a subtraction
+            // of the first from the whole.
+            PortfolioLedger before = opening()
+                    .buy(AAPL, Quantity.of(10), Price.of("180"), Currency.USD, JANUARY);
+            Money cashBeforeSelling = before.cash().balance(Currency.USD);
+
+            PortfolioLedger after =
+                    before.sell(AAPL, Quantity.of(15), Price.of("200"), Currency.USD, JUNE);
+
+            Money cashMoved = after.cash().balance(Currency.USD).minus(cashBeforeSelling);
+            assertThat(cashMoved).isEqualTo(Money.of("3000.00", Currency.USD));
+        }
+    }
+
+    @Nested
+    @DisplayName("what it refuses")
+    class Refusals {
 
         @Test
         @DisplayName("a cost basis for something the book does not hold")

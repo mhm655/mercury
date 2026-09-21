@@ -106,6 +106,28 @@ class PortfolioLedgerBookingTest {
     }
 
     @Test
+    void bookingATradeThatCrossesZeroMatchesTheEquivalentDirectCall() {
+        Trade sellThroughZero = Trade.newTrade(TradeId.of("TRD-2"), AAPL, OWNER, Quantity.of(-1_500),
+                        Money.of("-300000.00", Currency.USD), TRADE_DATE.plusDays(1), Optional.empty(),
+                        Optional.empty())
+                .transitionTo(TradeStatus.VALIDATED, "matched", CLOCK)
+                .transitionTo(TradeStatus.BOOKED, "booked", CLOCK)
+                .transitionTo(TradeStatus.EXECUTED, "filled", CLOCK);
+
+        PortfolioLedger viaBooking = opening().book(executedBuy()).book(sellThroughZero);
+        PortfolioLedger viaDirectCall = opening()
+                .buy(AAPL, Quantity.of(1_000), Price.of("180"), Currency.USD, TRADE_DATE)
+                .sell(AAPL, Quantity.of(1_500), Price.of("200"), Currency.USD, TRADE_DATE.plusDays(1));
+
+        assertThat(viaBooking.quantityOf(AAPL)).isEqualTo(viaDirectCall.quantityOf(AAPL));
+        assertThat(viaBooking.quantityOf(AAPL)).isEqualTo(Quantity.of(-500));
+        assertThat(viaBooking.costBasisOf(AAPL)).isEqualTo(viaDirectCall.costBasisOf(AAPL));
+        assertThat(viaBooking.realisedPnl(Currency.USD)).isEqualTo(viaDirectCall.realisedPnl(Currency.USD));
+        assertThat(viaBooking.cash().balance(Currency.USD))
+                .isEqualTo(viaDirectCall.cash().balance(Currency.USD));
+    }
+
+    @Test
     void bookAllFoldsEveryTradeInOrder() {
         Trade buy = executedBuy();
         Trade sell = Trade.newTrade(TradeId.of("TRD-2"), AAPL, OWNER, Quantity.of(-200),

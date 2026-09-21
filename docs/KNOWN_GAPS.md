@@ -8,6 +8,35 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M23
+
+### O-1 · A trade that carries a position through zero was refused rather than split · fixed
+
+Selling fifteen when long ten is really two trades - closing ten at the old cost basis and
+opening a short five at today's price - and `PositionLots.apply` refused it rather than
+inventing where the boundary falls, exactly as its javadoc says it should. Nothing above it
+ever did the actual splitting, so a trade that crossed zero simply failed to book.
+
+**The split lives in the ledger's bookkeeping, not in a second `Trade`.** A new private
+`PortfolioLedger.applySplittingAtZero` detects a through-zero delta before it reaches
+`PositionLots`, splits it into a closing quantity (flattening the existing position to exactly
+zero) and an opening quantity (whatever remains), prorates the consideration between the two
+by quantity, and calls the *unchanged* `PositionLots.apply` twice. `PositionLots` itself was
+not touched - it keeps refusing a through-zero delta in one call, and now simply never receives
+one. See [ADR 0012](adr/0012-through-zero-trades-split-at-the-ledger-not-the-trade.md) for why
+this deliberately does *not* mint a second `Trade`/`TradeId`, even though the gap's own wording
+("book the two legs separately") reads like it should - the short version: a `Trade` arriving
+here is already a sealed, audited execution, and a second id would need the same shared
+`TradeIdGenerator` instance the G-1 fix already made venues share, for a caller that does not
+exist.
+
+**Proven by direct comparison, not hand-derived numbers.** The strongest test available: the
+one-call crossing trade is asserted to produce *identical* ledger state (quantity, cost basis,
+realised P&L, cash) to booking the same two legs as separate calls at the same price. That
+comparison caught a real sign error during implementation (the opening leg's remaining
+quantity was computed by adding the closing delta instead of subtracting it) before it ever
+reached a commit.
+
 ## Fixed during M24
 
 ### N-1 · No confidence interval on Expected Shortfall · fixed
@@ -371,7 +400,6 @@ decision.
 | Curves | Key-rate risk | The shock family can express a one-pillar bump, and nothing asks for one yet. DV01 is a parallel shift; key-rate duration is the same mechanism with a narrower selector, and arrives when the risk engine needs it. |
 | Order types | Fill-or-kill, good-till-date, stop, iceberg | Each adds a branch in the matching loop and no new insight. Limit, market and IOC cover price-time priority, resting, partial fills and cancellation. |
 | Order book | Tick-indexed price array | O(1) for everything and what a real exchange uses, but it assumes a bounded tick grid the simulation does not fix. See ADR 0005. |
-| Portfolio | A trade that carries a position through zero | Selling fifteen when long ten is two trades: closing ten at the old cost basis and opening a short five at today's price. `PositionLots` refuses it rather than inventing where the boundary falls. Book the two legs separately. |
 | Portfolio | Realised P&L converted at today's rate, not the trade's | A foreign gain is reported at the current FX rate, so it includes the currency move since the position was opened — which is what the holder actually made. Splitting price return from currency return needs the rate on each trade date, which is a fixing store; still deferred and unscheduled after M8. |
 | Currencies | Only 7 ISO codes | `Currency` is an enum for exhaustive `switch` and cheap `EnumMap` keys. Adding one is a single line. See ADR 0002. |
 | Equities | Dividends | Would change option pricing (the dividend yield term in Black-Scholes). Currently a zero-dividend assumption, to be stated explicitly when pricing lands at M6. |

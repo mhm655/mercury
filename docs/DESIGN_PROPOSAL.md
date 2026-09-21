@@ -1156,6 +1156,32 @@ the same scenarios gives the same interval, bit for bit, proven directly in
 **Not in scope:** a configurable bootstrap resample count, and a precomputed-`List<Money>`
 overload - both stay out until a real caller needs them.
 
+#### M23 — A trade that carries a position through zero — ✅ done
+
+`PositionLots.apply` always refused a trade that would carry a position through zero - selling
+fifteen when long ten is really two trades, closing ten at the old cost basis and opening a
+short five at today's price - and nothing above it ever did the actual splitting.
+
+A new private `PortfolioLedger.applySplittingAtZero` does it: detects a through-zero delta
+before it reaches `PositionLots`, splits it into a closing quantity (flattening to exactly
+zero) and an opening quantity (the remainder), prorates the consideration between the two by
+quantity, and calls the *unchanged* `PositionLots.apply` twice.
+
+Deliberately not two `Trade` objects, even though the gap's own wording ("book the two legs
+separately") reads like it should be.
+[ADR 0012](adr/0012-through-zero-trades-split-at-the-ledger-not-the-trade.md) records why: a
+`Trade` arriving at the ledger has already walked its full lifecycle at a venue, under one id,
+as one audited execution - splitting that retroactively would edit a sealed history. Minting a
+second id would also need the same shared `TradeIdGenerator` instance the previously-fixed G-1
+bug already made venues share, for a caller that does not exist.
+
+Proven by direct comparison, not hand-derived numbers: the one-call crossing trade is asserted
+to produce identical ledger state to booking the same two legs separately at the same price -
+a check that caught a real sign error during implementation before it reached a commit.
+
+**Not in scope:** a second, independently auditable `Trade` for the opening leg - real,
+additional design work for the day a caller actually needs one.
+
 ### 10.5 Phase 5 — Optional, only if justified
 
 Kafka / distributed Monte Carlo. **Default recommendation: do not build it** — and
