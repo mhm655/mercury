@@ -59,23 +59,46 @@ public final class TradeSettlementBook implements Consumer<TradeExecuted> {
     private final Map<TradeId, Trade> open = new LinkedHashMap<>();
 
     /**
-     * Records {@code event}'s trade as open, unless a trade with that id is already recorded -
-     * {@link com.mercury.core.MercuryException} aside, a repeat delivery on this codebase's
-     * event bus is not this class's problem to detect twice, the same reasoning
-     * {@code LedgerKeeper}'s own javadoc gives for leaving duplicate-id detection to
-     * {@code PortfolioLedger.book}.
+     * Records {@code event}'s trade as open. A repeat delivery of the same execution, at the
+     * same or a later status, changes nothing. A trade announced already {@code SETTLED} has
+     * nothing left to settle and is not recorded.
+     *
+     * @throws IllegalArgumentException if a different execution is already open under the same
+     *         id. Silently keeping the first would let a forged announcement that arrived first
+     *         settle in place of the real trade, whose own exposure release would then fail.
      */
     @Override
     public synchronized void accept(TradeExecuted event) {
         Objects.requireNonNull(event, "event");
         Trade trade = event.trade();
-        open.putIfAbsent(trade.id(), trade);
+        Trade existing = open.get(trade.id());
+        if (existing != null && !sameExecution(existing, trade)) {
+            throw new IllegalArgumentException(
+                    "Trade " + trade.id() + " is already open with different terms (" + existing
+                            + "); refusing " + trade + " rather than settling one in place of the other");
+        }
+        if (existing == null && trade.status() != TradeStatus.SETTLED) {
+            open.put(trade.id(), trade);
+        }
+    }
+
+    private static boolean sameExecution(Trade a, Trade b) {
+        return a.instrumentId().equals(b.instrumentId())
+                && a.owner().equals(b.owner())
+                && a.delta().equals(b.delta())
+                && a.consideration().equals(b.consideration())
+                && a.tradeDate().equals(b.tradeDate())
+                && a.settlementDate().equals(b.settlementDate())
+                && a.counterparty().equals(b.counterparty());
     }
 
     /**
      * Walks every open trade whose {@link Trade#settlementDate()} is on or before {@code asOf}
-     * through {@link TradeStatus#CONFIRMED} then {@link TradeStatus#SETTLED}, in the order they
-     * were recorded, and returns the ones just settled. A trade with no settlement date, or one
+     * to {@link TradeStatus#SETTLED} - through {@link TradeStatus#CONFIRMED} first unless it was
+     * announced already confirmed - in the order they were recorded, and returns the ones just
+     * settled. Every transition is formed before any trade leaves {@link #open}, so a sweep that
+     * fails part-way loses nothing: an earlier trade removed and never returned would never have
+     * its exposure released. A trade with no settlement date, or one
      * still in the future, is left open. Idempotent: a trade this method already settled is no
      * longer in {@link #open}, so calling it again with the same or a later date never re-settles
      * anything.
@@ -85,15 +108,16 @@ public final class TradeSettlementBook implements Consumer<TradeExecuted> {
         Objects.requireNonNull(clock, "clock");
 
         List<Trade> settled = new ArrayList<>();
-        for (Trade trade : List.copyOf(open.values())) {
+        for (Trade trade : open.values()) {
             if (trade.settlementDate().isPresent() && !trade.settlementDate().get().isAfter(asOf)) {
-                Trade confirmed = trade.transitionTo(TradeStatus.CONFIRMED, "confirmation sent", clock);
-                Trade justSettled = confirmed.transitionTo(
-                        TradeStatus.SETTLED, "cash and securities exchanged", clock);
-                open.remove(trade.id());
-                settled.add(justSettled);
+                Trade confirmed = trade.status() == TradeStatus.CONFIRMED
+                        ? trade
+                        : trade.transitionTo(TradeStatus.CONFIRMED, "confirmation sent", clock);
+                settled.add(confirmed.transitionTo(
+                        TradeStatus.SETTLED, "cash and securities exchanged", clock));
             }
         }
+        settled.forEach(trade -> open.remove(trade.id()));
         return List.copyOf(settled);
     }
 

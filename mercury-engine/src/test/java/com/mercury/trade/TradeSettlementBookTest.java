@@ -1,6 +1,7 @@
 package com.mercury.trade;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mercury.core.id.CounterpartyId;
 import com.mercury.core.id.InstrumentId;
@@ -129,5 +130,82 @@ class TradeSettlementBookTest {
         book.accept(new TradeExecuted(trade));
 
         assertThat(book.openTrades()).hasSize(1);
+    }
+
+    @Test
+    void aTradeAnnouncedAlreadyConfirmedSettlesWithoutBeingConfirmedTwice() {
+        // TradeExecuted accepts a CONFIRMED trade, so the book must too: re-confirming it is
+        // an illegal transition that used to throw out of the whole sweep.
+        TradeSettlementBook book = new TradeSettlementBook();
+        Trade confirmed = executedTrade("TRD-1", Optional.of(SETTLEMENT_DATE))
+                .transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK);
+        book.accept(new TradeExecuted(confirmed));
+
+        List<Trade> settled = book.settleDueBy(SETTLEMENT_DATE, CLOCK);
+
+        assertThat(settled).singleElement().extracting(Trade::status).isEqualTo(TradeStatus.SETTLED);
+        assertThat(settled.get(0).history()).filteredOn(e -> e.to() == TradeStatus.CONFIRMED).hasSize(1);
+    }
+
+    @Test
+    void aTradeAnnouncedAlreadySettledIsNotHeldOpen() {
+        TradeSettlementBook book = new TradeSettlementBook();
+        Trade settled = executedTrade("TRD-1", Optional.of(SETTLEMENT_DATE))
+                .transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK);
+
+        book.accept(new TradeExecuted(settled));
+
+        assertThat(book.openTrades()).isEmpty();
+        assertThat(book.settleDueBy(SETTLEMENT_DATE, CLOCK)).isEmpty();
+    }
+
+    @Test
+    void anAlreadyConfirmedTradeDoesNotCostTheSweepTheTradesBeforeIt() {
+        // The sweep removed each trade from the open book as it went, so a throw on the second
+        // trade lost the first: gone from openTrades, never returned, its exposure never released.
+        TradeSettlementBook book = new TradeSettlementBook();
+        Trade first = executedTrade("TRD-1", Optional.of(SETTLEMENT_DATE));
+        Trade second = executedTrade("TRD-2", Optional.of(SETTLEMENT_DATE))
+                .transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK);
+        book.accept(new TradeExecuted(first));
+        book.accept(new TradeExecuted(second));
+
+        assertThat(book.settleDueBy(SETTLEMENT_DATE, CLOCK)).extracting(Trade::id)
+                .containsExactly(first.id(), second.id());
+        assertThat(book.openTrades()).isEmpty();
+    }
+
+    @Test
+    void aDifferentTradeReusingAnOpenTradesIdIsRefused() {
+        // putIfAbsent kept whichever arrived first and silently dropped the other: a forged
+        // announcement reusing a real trade's id would have settled in its place.
+        TradeSettlementBook book = new TradeSettlementBook();
+        Trade genuine = executedTrade("TRD-1", Optional.of(SETTLEMENT_DATE));
+        Trade impostor = Trade.newTrade(TradeId.of("TRD-1"), AAPL, OWNER, Quantity.of(1),
+                        Money.of("1.00", Currency.USD), TRADE_DATE, Optional.of(SETTLEMENT_DATE),
+                        Optional.empty())
+                .transitionTo(TradeStatus.VALIDATED, "v", CLOCK)
+                .transitionTo(TradeStatus.BOOKED, "b", CLOCK)
+                .transitionTo(TradeStatus.EXECUTED, "e", CLOCK);
+        book.accept(new TradeExecuted(genuine));
+
+        assertThatThrownBy(() -> book.accept(new TradeExecuted(impostor)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("TRD-1");
+        assertThat(book.openTrades()).containsExactly(genuine);
+    }
+
+    @Test
+    void aLaterStatusOfTheSameExecutionIsNotAConflict() {
+        TradeSettlementBook book = new TradeSettlementBook();
+        Trade executed = executedTrade("TRD-1", Optional.of(SETTLEMENT_DATE));
+        book.accept(new TradeExecuted(executed));
+
+        book.accept(new TradeExecuted(executed.transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)));
+
+        assertThat(book.openTrades()).hasSize(1);
+        assertThat(book.settleDueBy(SETTLEMENT_DATE, CLOCK)).singleElement()
+                .extracting(Trade::status).isEqualTo(TradeStatus.SETTLED);
     }
 }
