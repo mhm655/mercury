@@ -5,7 +5,15 @@ README; it moved here so the README can lead with what Mercury is and how to run
 and deliberate omissions are written up separately in [KNOWN_GAPS.md](KNOWN_GAPS.md).
 
 The runnables named below are now commands on one jar - java -jar mercury-app/target/mercury.jar
-lifecycle, isk, montecarlo, or walkthrough for all of it in sequence.
+lifecycle, risk, montecarlo, or walkthrough for all of it in sequence.
+
+**M26 complete**: **an adversarial pass that tried to break the engine from outside.** Four
+real holes, each reproduced by a failing test before it was fixed. `OtcNegotiationVenue.accept`
+honoured quotes it had never issued, so a hand-built `Quote` could buy past a credit limit at
+any price, and it honoured genuine ones any number of times. A sub-tick `Price` rounded to
+zero. Resting quantity could wrap a price level's depth negative. Identifiers accepted terminal
+escapes, newlines and look-alike characters that print identically to another instrument. The
+CLI also stopped silently ignoring stray arguments. [KNOWN_GAPS.md](KNOWN_GAPS.md) has S-1 to S-5.
 
 **M25 complete** — **OTC negotiation splits into a quote step and an accept step, with
 `negotiate` kept as sugar for both.** `OtcNegotiationVenue.negotiate` always priced and

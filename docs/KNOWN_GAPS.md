@@ -8,6 +8,66 @@ Found during the pre-M4 audit unless noted otherwise.
 
 ---
 
+## Fixed during M26 (adversarial review)
+
+An attack-minded pass over every public entry point, looking for inputs a hostile or careless
+caller could use to move money, dodge a limit, or corrupt what the engine prints. Each fix
+landed with a test that failed first.
+
+### S-1 · `accept` honoured any `Quote`, including one the venue never issued · fixed
+
+`Quote` is a public record, so anyone can construct one, and `accept` trusted whatever it was
+given. A forged quote naming a one-cent price and zero exposure bought a bond past its
+counterparty's credit limit, and a genuine quote could be replayed after the market moved,
+or accepted on a different venue. The venue now keeps the quotes it has issued and not yet
+executed. `accept` refuses anything else with `UnknownQuoteException`, and executing a quote
+consumes it. The issued-check and the commit share one critical section, so 64 threads racing
+to accept one quote execute it exactly once. A quote the credit check rejects stays open until
+it expires, because a released exposure can legitimately make it acceptable. Lapsed quotes are
+dropped on the next `quote()`, so a caller who requests quotes and walks away cannot grow the
+venue without bound. A negative validity is refused.
+
+### S-2 · A positive price below one hundred-millionth rounded to a zero price · fixed
+
+`Price` checked for a positive value *before* scaling to eight places, so `0.000000001` passed
+the check and was then stored as exactly zero, which is an ask that gives the stock away. The
+sign is now checked after scaling.
+
+### S-3 · Resting quantity could overflow a price level's `long` total · fixed
+
+Two resting orders of `Long.MAX_VALUE` at one price wrapped the level's depth negative. `OrderBook`
+now refuses such an order before matching anything, which is sound because matching only
+consumes the opposite side. `totalQuantity(Side)` fails loudly rather than returning a wrapped
+sum. `OrderBookVenue` also registered an order's owner before the book had accepted it, so a
+refused order left an entry that nothing would ever remove. It now registers the owner after
+the book accepts the order.
+
+### S-4 · Identifiers accepted any text, including terminal escapes and look-alikes · fixed
+
+Ids are printed verbatim into the report, the TUI and every exception message, and compared by
+exact text. `ΑAPL`, with a Greek capital alpha, printed identically to `AAPL` while keying a
+separate book. An embedded ANSI escape could clear the reader's terminal, a newline could forge
+a line of output, and a bidi override could reverse what followed. Every id is now limited to
+printable ASCII, 64 characters at most. A counterparty *name* may still use any script but
+cannot contain control or format characters. Rejection messages give the offending character
+as a code point and never echo it.
+
+### S-5 · The CLI ignored stray arguments and disagreed with itself about help · fixed
+
+`report --csv` printed the ordinary report and exited 0, which told the reader an option they
+asked for had been honoured. `-h` exited 2 while `--help` exited 0, `REPORT` was an unknown
+command, and an unknown command printed usage without saying which word was wrong. Extra
+arguments and unknown commands are now usage errors that name the offending word. Commands are
+case-insensitive, and `help`, `--help` and `-h` behave the same. The same pass found
+`MainTest`'s stdout guard asserting the absence of "Five commands in this jar" when the hint
+had said "Six" since `tui` arrived, so the assertion could never fail. It now checks for the
+wording that is actually printed.
+
+**Not changed, deliberately:** anyone holding an executed `Trade` can walk it to `CANCELLED`
+and release its exposure, because the engine has no notion of who the caller is. Authorisation
+belongs to whatever service fronts the engine, not to an in-process library. Monte Carlo path
+counts are also left uncapped, since the caller chooses its own memory budget.
+
 ## Fixed during M25
 
 ### P-1 · OTC negotiation collapsed a quote and its execution into one call · fixed
