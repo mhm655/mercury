@@ -21,7 +21,9 @@ import com.mercury.trade.TradeExecuted;
 import com.mercury.trade.TradeStatus;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -121,6 +123,16 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     private final EventBus events;
     private final ExposureLedger exposureLedger;
 
+    /**
+     * Every quote this venue has issued and not yet executed, with a count because a fixed
+     * clock can issue two equal quotes. Guarded by {@code exposureLedger.lock()}, the same lock
+     * that makes accepting atomic. {@link Quote} is a public record anyone can construct, so
+     * {@link #accept} must not trust one it did not issue: a forged quote could name any price
+     * and zero exposure, and a genuine one replayed after the market moved would execute a
+     * second time at a stale price.
+     */
+    private final Map<Quote, Integer> outstandingQuotes = new HashMap<>();
+
     /** A venue nothing listens to, with exposure private to it; every execution is still
      *  returned to the caller. */
     public OtcNegotiationVenue(PricingService pricingService, MarketDataSnapshot market,
@@ -181,7 +193,16 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
      *         counterparty this venue does not know
      */
     public NegotiationResult negotiate(OtcInstruction otc, SimulationClock clock) {
-        return accept(quote(otc, clock), clock);
+        Quote quote = quote(otc, clock);
+        NegotiationResult result = accept(quote, clock);
+        if (result.isRejected()) {
+            // Nobody else holds this quote, so leaving it open would only hold memory - forever,
+            // under a fixed clock that never lets it expire.
+            synchronized (exposureLedger.lock()) {
+                consume(quote);
+            }
+        }
+        return result;
     }
 
     /**
@@ -207,6 +228,10 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
         Objects.requireNonNull(otc, "otc");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(validity, "validity");
+        if (validity.isNegative()) {
+            throw new IllegalArgumentException(
+                    "Quote validity must not be negative, but was " + validity);
+        }
 
         FinancialInstrument instrument = instruments.require(otc.instrumentId());
         ValuationResult priced = pricingService.price(instrument, market, clock.today());
@@ -247,7 +272,16 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
                 consideration.abs().amount().doubleValue() * market.fxRate(currency, limitCurrency);
         Money tradeExposure = Money.fromModelValue(exposureInLimitCurrency, limitCurrency);
 
-        return new Quote(otc, instrument, consideration, tradeExposure, clock.now().plus(validity));
+        Instant now = clock.now();
+        Quote quote = new Quote(otc, instrument, consideration, tradeExposure, now.plus(validity));
+        synchronized (exposureLedger.lock()) {
+            // Lapsed quotes can never execute, so they are dropped here rather than kept until
+            // someone tries to accept them - otherwise every quote requested and walked away
+            // from would be held forever.
+            outstandingQuotes.keySet().removeIf(issued -> issued.isExpiredAt(now));
+            outstandingQuotes.merge(quote, 1, Integer::sum);
+        }
+        return quote;
     }
 
     /**
@@ -255,6 +289,12 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
      * entire point of a quote - checking the projected exposure it would create against
      * {@code riskLimit} before anything executes.
      *
+     * <p>A quote executes at most once, and only on the venue that issued it. One rejected by
+     * the credit check stays open until it expires, since releasing exposure elsewhere can
+     * legitimately make it acceptable.
+     *
+     * @throws UnknownQuoteException if this venue did not issue {@code quote}, or it has
+     *         already been executed
      * @throws QuoteExpiredException if {@code clock.now()} has reached or passed
      *         {@code quote.expiresAt()}
      * @throws CounterpartyDirectory.UnknownCounterpartyException if {@code quote} names a
@@ -263,15 +303,20 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
     public NegotiationResult accept(Quote quote, SimulationClock clock) {
         Objects.requireNonNull(quote, "quote");
         Objects.requireNonNull(clock, "clock");
-        if (quote.isExpiredAt(clock.now())) {
-            throw new QuoteExpiredException(quote, clock.now());
-        }
-
         OtcInstruction otc = quote.instruction();
-        Counterparty counterparty = counterparties.require(otc.counterparty());
         Quantity delta = otc.side().isBuy() ? otc.quantity() : Quantity.of(otc.quantity().value().negate());
 
+        // One critical section from the issued-check to the commit: checking in one block and
+        // executing in another would let two threads both see the last issue of a quote.
         synchronized (exposureLedger.lock()) {
+            if (!outstandingQuotes.containsKey(quote)) {
+                throw new UnknownQuoteException(quote);
+            }
+            if (quote.isExpiredAt(clock.now())) {
+                consume(quote);
+                throw new QuoteExpiredException(quote, clock.now());
+            }
+            Counterparty counterparty = counterparties.require(otc.counterparty());
             Money projectedExposure = exposureTo(counterparty.id()).plus(quote.tradeExposure());
             LimitCheckResult check = riskLimit.check(counterparty, projectedExposure);
             if (check.isBreached()) {
@@ -287,6 +332,7 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
                     .transitionTo(TradeStatus.EXECUTED, "negotiated against " + otc.counterparty(), clock);
 
             exposureLedger.commit(counterparty.id(), projectedExposure, trade, quote.tradeExposure());
+            consume(quote);
 
             // Announced under the same lock that committed the exposure, so a subscriber can
             // never see a trade the venue has not yet counted against its counterparty's
@@ -360,6 +406,19 @@ public final class OtcNegotiationVenue implements ExecutionVenue<OtcInstruction>
      * that method's javadoc for why this venue refuses rather than silently honouring a stale
      * price or silently re-pricing.
      */
+    /** Removes one issue of {@code quote}. Caller holds {@code exposureLedger.lock()}. */
+    private void consume(Quote quote) {
+        outstandingQuotes.computeIfPresent(quote, (issued, count) -> count == 1 ? null : count - 1);
+    }
+
+    public static final class UnknownQuoteException extends MercuryException {
+        UnknownQuoteException(Quote quote) {
+            super("Quote for " + quote.instruction().instrumentId() + " was not issued by this "
+                    + "venue, or has already been executed. A quote is honoured once, exactly as "
+                    + "it was issued - request a fresh one.");
+        }
+    }
+
     public static final class QuoteExpiredException extends MercuryException {
 
         QuoteExpiredException(Quote quote, Instant now) {

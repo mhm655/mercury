@@ -714,4 +714,119 @@ class OtcNegotiationVenueTest {
             assertThat(venue.exposureTo(COUNTERPARTY)).isEqualTo(Money.of("100000.00", Currency.USD));
         }
     }
+
+    @Test
+    void aQuoteTheVenueNeverIssuedIsRefused() {
+        // Quote is a public record, so anyone can construct one. A forged quote naming a price
+        // of one cent and zero exposure must not buy 100 units past the credit check.
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("5000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Quote forged = new Quote(instruction, INSTRUMENT, Money.of("0.01", Currency.USD),
+                Money.zero(Currency.USD), CLOCK.now().plus(Duration.ofDays(365)));
+
+        assertThatThrownBy(() -> venue.accept(forged, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.UnknownQuoteException.class);
+        assertThat(venue.openExposureCount()).isZero();
+    }
+
+    @Test
+    void aGenuineQuoteWithItsPriceAlteredIsRefused() {
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Quote genuine = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+        Quote tampered = new Quote(genuine.instruction(), genuine.instrument(),
+                Money.of("1.00", Currency.USD), genuine.tradeExposure(), genuine.expiresAt());
+
+        assertThatThrownBy(() -> venue.accept(tampered, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.UnknownQuoteException.class);
+    }
+
+    @Test
+    void aQuoteIsAcceptedAtMostOnce() {
+        // A frozen price replayed after the market moved is free money for whoever holds it.
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+
+        assertThat(venue.accept(quote, CLOCK).isRejected()).isFalse();
+        assertThatThrownBy(() -> venue.accept(quote, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.UnknownQuoteException.class);
+        assertThat(venue.openExposureCount()).isEqualTo(1);
+    }
+
+    @Test
+    void racingAcceptsOfOneQuoteExecuteItExactlyOnce() throws Exception {
+        for (int round = 0; round < 20; round++) {
+            OtcNegotiationVenue venue = newVenue();
+            Quote quote = venue.quote(new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                    COUNTERPARTY, BasisPoints.ZERO), CLOCK, Duration.ofMinutes(5));
+
+            java.util.concurrent.ExecutorService pool =
+                    java.util.concurrent.Executors.newFixedThreadPool(16);
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<Boolean>> attempts = new ArrayList<>();
+            for (int i = 0; i < 64; i++) {
+                attempts.add(pool.submit(() -> {
+                    start.await();
+                    try {
+                        return !venue.accept(quote, CLOCK).isRejected();
+                    } catch (OtcNegotiationVenue.UnknownQuoteException alreadyTaken) {
+                        return false;
+                    }
+                }));
+            }
+            start.countDown();
+            int executed = 0;
+            for (java.util.concurrent.Future<Boolean> attempt : attempts) {
+                if (attempt.get()) {
+                    executed++;
+                }
+            }
+            pool.shutdown();
+
+            assertThat(executed).as("round %d", round).isEqualTo(1);
+            assertThat(venue.openExposureCount()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void aQuoteFromAnotherVenueIsRefused() {
+        OtcNegotiationVenue issuer = newVenue();
+        OtcNegotiationVenue other = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Quote quote = issuer.quote(instruction, CLOCK, Duration.ofMinutes(5));
+
+        assertThatThrownBy(() -> other.accept(quote, CLOCK))
+                .isInstanceOf(OtcNegotiationVenue.UnknownQuoteException.class);
+    }
+
+    @Test
+    void aQuoteRejectedOnCreditCanBeAcceptedOnceExposureIsReleased() {
+        OtcNegotiationVenue venue = newVenue(new FixedPriceModel(),
+                new CreditLimit(Money.of("15000.00", Currency.USD)));
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+        Trade first = venue.negotiate(instruction, CLOCK).trades().get(0);
+        Quote quote = venue.quote(instruction, CLOCK, Duration.ofMinutes(5));
+
+        assertThat(venue.accept(quote, CLOCK).isRejected()).isTrue();
+        venue.release(first.transitionTo(TradeStatus.CONFIRMED, "confirmed", CLOCK)
+                .transitionTo(TradeStatus.SETTLED, "settled", CLOCK));
+        assertThat(venue.accept(quote, CLOCK).isRejected()).isFalse();
+    }
+
+    @Test
+    void aNegativeValidityIsRefused() {
+        OtcNegotiationVenue venue = newVenue();
+        OtcInstruction instruction = new OtcInstruction(INSTRUMENT.id(), Side.BUY, Quantity.of(100),
+                COUNTERPARTY, BasisPoints.ZERO);
+
+        assertThatThrownBy(() -> venue.quote(instruction, CLOCK, Duration.ofMinutes(-5)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
