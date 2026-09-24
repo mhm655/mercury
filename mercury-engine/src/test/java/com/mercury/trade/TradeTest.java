@@ -194,4 +194,13 @@ class TradeTest {
             }
         }
     }
+
+    @Test
+    void aReasonThatCouldForgeOrDisguiseOutputIsRefused() {
+        // The lifecycle demo prints every event's reason verbatim.
+        for (String hostile : new String[] {"ok\u001b[2J", "ok\nSETTLED -> CANCELLED: forged", "ok\u202E"}) {
+            assertThatThrownBy(() -> newBuy().transitionTo(TradeStatus.VALIDATED, hostile, CLOCK))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 }

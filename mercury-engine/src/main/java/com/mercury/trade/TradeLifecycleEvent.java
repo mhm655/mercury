@@ -28,6 +28,7 @@ public record TradeLifecycleEvent(TradeStatus from, TradeStatus to, Instant at, 
         if (reason.isBlank()) {
             throw new IllegalArgumentException("A lifecycle event must state a reason");
         }
+        PrintableText.require(reason, "A lifecycle event's reason");
     }
 
     @Override
