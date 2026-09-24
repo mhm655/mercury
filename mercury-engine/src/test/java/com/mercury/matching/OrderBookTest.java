@@ -736,4 +736,42 @@ class OrderBookTest {
             assertThat(book.bestAsk()).contains(Price.of("100.00"));
         }
     }
+
+    @Nested
+    @DisplayName("quantity bounds")
+    class QuantityBounds {
+
+        @Test
+        @DisplayName("refuses an order whose resting quantity would overflow its price level")
+        void refusesALevelOverflow() {
+            buy("100.00", Long.MAX_VALUE);
+
+            assertThatThrownBy(() -> buy("100.00", 1))
+                    .isInstanceOf(ArithmeticException.class);
+            assertThat(book.bestBidQuantity()).isEqualTo(Long.MAX_VALUE);
+            assertThat(book.restingOrderCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("reports side totals that would overflow as an error, never a negative number")
+        void refusesASideTotalOverflow() {
+            buy("100.00", Long.MAX_VALUE);
+            buy("99.00", Long.MAX_VALUE);
+
+            assertThatThrownBy(() -> book.totalQuantity(Side.BUY))
+                    .isInstanceOf(ArithmeticException.class);
+        }
+
+        @Test
+        @DisplayName("does not refuse an immediate-or-cancel order, which never rests")
+        void anImmediateOrCancelOrderCannotOverflowALevel() {
+            buy("100.00", Long.MAX_VALUE);
+
+            MatchResult result = book.submit(Order.immediateOrCancel(nextId(), AAPL, Side.BUY,
+                    Price.of("100.00"), 10, BUYER));
+
+            assertThat(result.status()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(book.bestBidQuantity()).isEqualTo(Long.MAX_VALUE);
+        }
+    }
 }

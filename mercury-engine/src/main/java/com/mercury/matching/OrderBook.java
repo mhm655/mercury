@@ -120,6 +120,7 @@ public final class OrderBook {
             throw new IllegalArgumentException(
                     "Order id " + order.id() + " is already resting in the book");
         }
+        requireRestingQuantityFits(order);
 
         List<Fill> fills = new ArrayList<>();
         List<SelfTradePrevention> selfTradePrevented = new ArrayList<>();
@@ -224,6 +225,26 @@ public final class OrderBook {
      * "cancel newest" STP mode venues commonly default to; fills already made against other
      * owners stand.
      */
+    /**
+     * Refuses, before anything is matched, an order whose remainder would overflow the
+     * {@code long} total of the price level it would rest at - which would otherwise wrap to a
+     * negative depth. Checked up front because failing after matching would leave fills applied
+     * with no result returned. Sound to check before matching: matching only ever consumes the
+     * opposite side, so the same-side level this order joins is unchanged by it.
+     */
+    private void requireRestingQuantityFits(Order order) {
+        if (!order.timeInForce().restsInBook() || order.limitPrice().isEmpty()) {
+            return;
+        }
+        PriceLevel level = (order.isBuy() ? bids : asks).get(order.limitPrice().get());
+        if (level != null && level.totalQuantity() > Long.MAX_VALUE - order.quantity()) {
+            throw new ArithmeticException(
+                    "Order " + order.id() + " for " + order.quantity() + " would overflow the "
+                            + level.totalQuantity() + " already resting at "
+                            + order.limitPrice().get());
+        }
+    }
+
     private boolean wouldCrossAfterMatching(Order order) {
         PriceLevel oppositeBest = order.isBuy() ? bestAsk : bestBid;
         return oppositeBest != null && order.acceptsPrice(oppositeBest.price());
@@ -366,7 +387,7 @@ public final class OrderBook {
     public long totalQuantity(Side side) {
         long total = 0;
         for (PriceLevel level : (side.isBuy() ? bids : asks).values()) {
-            total += level.totalQuantity();
+            total = Math.addExact(total, level.totalQuantity());
         }
         return total;
     }

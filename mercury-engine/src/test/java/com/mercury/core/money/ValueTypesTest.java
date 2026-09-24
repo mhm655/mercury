@@ -28,6 +28,17 @@ class ValueTypesTest {
         }
 
         @Test
+        @DisplayName("rejects a positive price too small to survive rounding to eight places")
+        void rejectsPricesThatRoundToZero() {
+            // Positive as typed, zero once scaled: a sell at this price gives the stock away.
+            assertThatThrownBy(() -> Price.of("0.000000001"))
+                    .isInstanceOf(Price.NonPositivePriceException.class);
+            assertThatThrownBy(() -> Price.of("0.000000005"))
+                    .isInstanceOf(Price.NonPositivePriceException.class);
+            assertThat(Price.of("0.000000006").value()).isEqualByComparingTo("0.00000001");
+        }
+
+        @Test
         @DisplayName("normalises scale so equality and map keying behave")
         void normalisesScale() {
             assertThat(Price.of("10.5")).isEqualTo(Price.of("10.50"));

@@ -189,9 +189,10 @@ public final class OrderBookVenue implements ExecutionVenue<OrderBookInstruction
                               CounterpartyId participant, Currency currency, SimulationClock clock) {
         OrderBook book = instrumentLane.book();
         Map<OrderId, CounterpartyId> owners = instrumentLane.owners();
-        owners.put(order.id(), participant);
-
         MatchResult result = book.submit(order);
+        // Registered only once the book has accepted the order: one it refuses must not leave
+        // an owner behind that nothing would ever remove.
+        owners.put(order.id(), participant);
 
         List<Trade> trades = new ArrayList<>();
         for (Fill fill : result.fills()) {

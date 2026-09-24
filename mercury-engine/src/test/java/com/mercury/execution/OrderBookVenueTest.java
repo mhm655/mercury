@@ -227,6 +227,17 @@ class OrderBookVenueTest {
     }
 
     @Test
+    void anOrderTheBookRefusesLeavesNoOwnerBehind() {
+        OrderBookVenue venue = newVenue();
+        venue.execute(OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), Long.MAX_VALUE, BUYER), CLOCK);
+
+        assertThatThrownBy(() -> venue.execute(
+                OrderBookInstruction.limit(AAPL, Side.BUY, Price.of("100.00"), 1, BUYER), CLOCK))
+                .isInstanceOf(ArithmeticException.class);
+        assertThat(venue.trackedOwnerCount()).isEqualTo(1);
+    }
+
+    @Test
     void ownersAreForgottenOnceTheirOrdersLeaveTheBook() {
         // The venue remembered the owner of every order it had ever submitted, for its whole
         // lifetime. It only needs them while an order can still be filled.

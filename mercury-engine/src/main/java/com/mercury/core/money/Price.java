@@ -34,10 +34,13 @@ public record Price(BigDecimal value) implements Comparable<Price> {
     public Price {
         Objects.requireNonNull(value, "value");
         DecimalBounds.requireReasonable(value, "Price");
-        if (value.signum() <= 0) {
+        // Checked after scaling, not before: 0.000000001 is positive as typed but rounds to
+        // exactly zero, and a zero ask gives the instrument away.
+        BigDecimal scaled = value.setScale(SCALE, RoundingMode.HALF_EVEN);
+        if (scaled.signum() <= 0) {
             throw new NonPositivePriceException(value);
         }
-        value = value.setScale(SCALE, RoundingMode.HALF_EVEN);
+        value = scaled;
     }
 
     public static Price of(BigDecimal value) {
