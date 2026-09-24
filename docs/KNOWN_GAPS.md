@@ -63,10 +63,34 @@ case-insensitive, and `help`, `--help` and `-h` behave the same. The same pass f
 had said "Six" since `tui` arrived, so the assertion could never fail. It now checks for the
 wording that is actually printed.
 
-**Not changed, deliberately:** anyone holding an executed `Trade` can walk it to `CANCELLED`
-and release its exposure, because the engine has no notion of who the caller is. Authorisation
-belongs to whatever service fronts the engine, not to an in-process library. Monte Carlo path
-counts are also left uncapped, since the caller chooses its own memory budget.
+### S-6 · One already-confirmed trade made the settlement sweep lose the trades before it · fixed
+
+A follow-up pass went through every public method that acts on an object its caller could have
+built, which is how S-1 happened. `ExposureLedger.release` and `PortfolioLedger.book` held up.
+`TradeSettlementBook` did not. `TradeExecuted` allows a trade that is already `CONFIRMED`, but
+`settleDueBy` confirmed every trade again. That is an illegal transition, so it threw partway
+through the sweep. By then the sweep had already removed the earlier trades from its open book.
+They were never returned, so their exposure was never released. A `SETTLED` announcement was
+also held open forever. And `putIfAbsent` quietly kept whichever trade arrived first under an
+id, so a forged announcement that reused a real trade's id would settle instead of the real
+one. The sweep now settles from whichever status a trade arrived in, and builds every
+transition before removing anything. A trade announced as `SETTLED` is not recorded. A
+different trade under an open id is refused with an exception.
+
+### S-7 · A lifecycle event's reason could carry terminal escapes · fixed
+
+The lifecycle demo prints every event's reason verbatim, so a reason could do everything S-4
+stopped an id from doing. Reasons now follow the same rule as counterparty names, which lives
+in one place, `PrintableText`: any script, but no control or format characters.
+
+**Not changed, deliberately:** the engine has no idea who is calling it, so two things stay
+open. First, anyone holding an executed `Trade` can walk it to `CANCELLED` and release its
+exposure. Second, anyone holding the event bus can publish a `TradeExecuted` for a trade no
+venue made, and `LedgerKeeper` will book it. Reusing a real trade's id is refused (S-6, and
+`PortfolioLedger.book`). A made-up trade under a fresh id can only be caught by knowing who
+published it. Authorisation belongs to whatever service fronts the engine, not to an
+in-process library, where holding the bus reference already *is* the publisher's authority.
+Monte Carlo path counts are also left uncapped, since the caller chooses its own memory budget.
 
 ## Fixed during M25
 

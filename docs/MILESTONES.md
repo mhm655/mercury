@@ -13,7 +13,10 @@ honoured quotes it had never issued, so a hand-built `Quote` could buy past a cr
 any price, and it honoured genuine ones any number of times. A sub-tick `Price` rounded to
 zero. Resting quantity could wrap a price level's depth negative. Identifiers accepted terminal
 escapes, newlines and look-alike characters that print identically to another instrument. The
-CLI also stopped silently ignoring stray arguments. [KNOWN_GAPS.md](KNOWN_GAPS.md) has S-1 to S-5.
+CLI also stopped silently ignoring stray arguments. A follow-up pass checked every method that
+acts on an object its caller could have built. It found that one already-confirmed trade made
+the settlement sweep lose the trades it had already settled. It also found that lifecycle
+reasons could carry terminal escapes. [KNOWN_GAPS.md](KNOWN_GAPS.md) has S-1 to S-7.
 
 **M25 complete** — **OTC negotiation splits into a quote step and an accept step, with
 `negotiate` kept as sugar for both.** `OtcNegotiationVenue.negotiate` always priced and
