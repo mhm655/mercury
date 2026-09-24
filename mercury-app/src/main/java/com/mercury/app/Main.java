@@ -15,7 +15,7 @@ import java.util.function.Consumer;
  *
  * <p>Only this and the demos it dispatches to know a console exists. Everything in the engine
  * returns values; presentation stops in this module, which is why the engine can be driven
- * equally well by a test, a benchmark, or the Spring module that arrives later.
+ * equally well by a test, a benchmark, or the Spring API the design proposal draws up (§10.2).
  *
  * <pre>
  *   mvn -q -DskipTests package

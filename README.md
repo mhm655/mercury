@@ -11,7 +11,7 @@ byte reproducible.
 
 ## In thirty seconds
 
-Three claims, each checkable in about a minute, and each one the kind a reader can disprove:
+Four claims, each checkable in about a minute, and each one the kind a reader can disprove:
 
 - **A sixth instrument was added without editing a single existing file.** An interest-rate
   cap: one commit, four new files, zero modified — `git show --stat` settles it. That is the
@@ -24,6 +24,10 @@ Three claims, each checkable in about a minute, and each one the kind a reader c
   lock it was built to beat ([the numbers](docs/BENCHMARKS.md)).
 - **The engine is byte-for-byte reproducible, and the report further down is its output** —
   not a transcription of it. A test fails if this README drifts from what the jar prints.
+- **I attacked it, and it broke seven times.** Each finding is written up with the test that
+  reproduced it before the fix. The worst was that a hand-built OTC quote could buy past a
+  credit limit at any price. The two holes left open are recorded as deliberate, with the
+  reason ([S-1 to S-7](docs/KNOWN_GAPS.md)).
 
 ```bash
 mvn -q -DskipTests package && java -jar mercury-app/target/mercury.jar walkthrough
