@@ -1,6 +1,5 @@
 package com.mercury.core.id;
 
-import java.util.Objects;
 
 /**
  * Identifies a single order resting in, or passing through, an order book.
@@ -13,11 +12,7 @@ import java.util.Objects;
 public record OrderId(String value) implements DomainId {
 
     public OrderId {
-        Objects.requireNonNull(value, "value");
-        value = value.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("Order id must not be blank");
-        }
+        value = IdText.require(value, "Order id");
     }
 
     public static OrderId of(String value) {

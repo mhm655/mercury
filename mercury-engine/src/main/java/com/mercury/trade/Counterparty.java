@@ -32,6 +32,16 @@ public record Counterparty(CounterpartyId id, String name, CreditLimit creditLim
         if (name.isBlank()) {
             throw new IllegalArgumentException("A counterparty must have a name");
         }
+        // Unlike an id, a name may be any script - but never a control or format character,
+        // which would let it rewrite the terminal or reverse the text it is printed beside.
+        name.codePoints()
+                .filter(c -> Character.isISOControl(c) || Character.getType(c) == Character.FORMAT)
+                .findFirst()
+                .ifPresent(c -> {
+                    throw new IllegalArgumentException(
+                            "A counterparty name must not contain control or format characters, "
+                                    + "but has U+%04X".formatted(c));
+                });
     }
 
     @Override

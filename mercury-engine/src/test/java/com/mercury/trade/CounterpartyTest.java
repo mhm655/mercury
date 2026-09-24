@@ -20,6 +20,20 @@ class CounterpartyTest {
     }
 
     @Test
+    void rejectsANameCarryingControlOrFormatCharacters() {
+        for (String hostile : new String[] {"Acme\u001b[2J", "Acme\nFORGED", "Acme\u202Elatipac"}) {
+            assertThatThrownBy(() -> new Counterparty(CounterpartyId.of("CPTY-ACME"), hostile, LIMIT))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void acceptsANameInAnyScript() {
+        assertThat(new Counterparty(CounterpartyId.of("CPTY-ZURICH"), "Z\u00FCrcher Kantonalbank", LIMIT)
+                .name()).isEqualTo("Z\u00FCrcher Kantonalbank");
+    }
+
+    @Test
     void twoCounterpartiesWithTheSameIdAreEqual() {
         Counterparty first = new Counterparty(CounterpartyId.of("CPTY-ACME"), "Acme Capital", LIMIT);
         Counterparty renamed = new Counterparty(CounterpartyId.of("CPTY-ACME"), "Acme Capital LLC",

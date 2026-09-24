@@ -1,6 +1,5 @@
 package com.mercury.core.id;
 
-import java.util.Objects;
 
 /**
  * Identifies a counterparty Mercury faces on OTC trades.
@@ -13,11 +12,7 @@ import java.util.Objects;
 public record CounterpartyId(String value) implements DomainId {
 
     public CounterpartyId {
-        Objects.requireNonNull(value, "value");
-        value = value.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("Counterparty id must not be blank");
-        }
+        value = IdText.require(value, "Counterparty id");
     }
 
     public static CounterpartyId of(String value) {

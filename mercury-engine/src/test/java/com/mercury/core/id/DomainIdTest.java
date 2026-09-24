@@ -64,6 +64,34 @@ class DomainIdTest {
     }
 
     @Test
+    @DisplayName("all identifier types reject text that could forge or disguise output")
+    void rejectsHostileText() {
+        // Ids are printed verbatim into the report, the TUI and every exception message, so:
+        List<String> hostile = List.of(
+                "AAPL\u001b[2J",          // an ANSI escape that clears the reader's terminal
+                "AAPL\nTRD-9 FORGED",      // a newline that forges an extra line of output
+                "AA\rPL",                  // a carriage return that overwrites the line
+                "\u0391APL",               // Greek capital alpha: looks exactly like AAPL
+                "AAPL\u202E",              // a bidi override that reverses what follows
+                "AA\u200BPL",              // a zero-width space: two ids that print the same
+                "A".repeat(65));           // unbounded length is a memory and layout attack
+        FACTORIES.forEach((name, factory) -> hostile.forEach(text ->
+                assertThatThrownBy(() -> factory.apply(text)).as("%s with %s", name, text)
+                        .isInstanceOf(IllegalArgumentException.class)));
+    }
+
+    @Test
+    @DisplayName("all identifier types accept the printable ASCII the engine uses")
+    void acceptsOrdinaryIds() {
+        FACTORIES.forEach((name, factory) -> {
+            assertThat(factory.apply("AAPL-C-200").value()).as("%s", name).isEqualTo("AAPL-C-200");
+            assertThat(factory.apply("US EQUITY_BOOK/2.1").value()).as("%s", name)
+                    .isEqualTo("US EQUITY_BOOK/2.1");
+            assertThat(factory.apply("A".repeat(64)).value()).as("%s", name).hasSize(64);
+        });
+    }
+
+    @Test
     @DisplayName("all identifier types reject null")
     void rejectsNull() {
         FACTORIES.forEach((name, factory) ->

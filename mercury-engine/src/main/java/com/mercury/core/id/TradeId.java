@@ -1,6 +1,5 @@
 package com.mercury.core.id;
 
-import java.util.Objects;
 
 /**
  * Identifies an executed trade, from booking through to settlement.
@@ -13,11 +12,7 @@ import java.util.Objects;
 public record TradeId(String value) implements DomainId {
 
     public TradeId {
-        Objects.requireNonNull(value, "value");
-        value = value.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("Trade id must not be blank");
-        }
+        value = IdText.require(value, "Trade id");
     }
 
     public static TradeId of(String value) {

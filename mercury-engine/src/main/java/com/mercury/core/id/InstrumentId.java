@@ -1,6 +1,5 @@
 package com.mercury.core.id;
 
-import java.util.Objects;
 
 /**
  * Identifies an instrument (a stock, bond, option, forward or swap).
@@ -13,11 +12,7 @@ import java.util.Objects;
 public record InstrumentId(String value) implements DomainId {
 
     public InstrumentId {
-        Objects.requireNonNull(value, "value");
-        value = value.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("Instrument id must not be blank");
-        }
+        value = IdText.require(value, "Instrument id");
     }
 
     public static InstrumentId of(String value) {

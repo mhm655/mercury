@@ -1,6 +1,5 @@
 package com.mercury.core.id;
 
-import java.util.Objects;
 
 /**
  * Identifies a portfolio of positions and cash.
@@ -13,11 +12,7 @@ import java.util.Objects;
 public record PortfolioId(String value) implements DomainId {
 
     public PortfolioId {
-        Objects.requireNonNull(value, "value");
-        value = value.trim();
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException("Portfolio id must not be blank");
-        }
+        value = IdText.require(value, "Portfolio id");
     }
 
     public static PortfolioId of(String value) {
