@@ -5,7 +5,9 @@ import com.mercury.marketdata.MarketDataSnapshot;
 import com.mercury.portfolio.PortfolioLedger;
 import com.mercury.portfolio.PortfolioValuation;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -35,26 +37,50 @@ public final class Main {
         DEMOS.put("tui", TuiDemo::main);
     }
 
+    private static final Set<String> HELP = Set.of("help", "--help", "-h");
+
+    /** The conventional exit status for a command-line usage error. */
+    static final int USAGE_ERROR = 2;
+
     private Main() {
     }
 
     public static void main(String[] args) {
-        if (args.length == 0 || args[0].equals("report")) {
+        int status = run(args);
+        if (status != 0) {
+            System.exit(status);
+        }
+    }
+
+    /** Runs one command and returns its exit status, so it can be tested without exiting. */
+    static int run(String[] args) {
+        if (args.length > 1) {
+            // Refused rather than ignored: "report --csv" silently printing the ordinary
+            // report would tell the reader an option they asked for had been honoured.
+            System.err.println("unexpected argument: " + args[1]);
+            System.err.print(usage());
+            return USAGE_ERROR;
+        }
+        // Case-insensitive, so "REPORT" or "Walkthrough" is not reported as an unknown command.
+        String command = args.length == 0 ? "report" : args[0].strip().toLowerCase(Locale.ROOT);
+        if (command.equals("report")) {
             printReport();
             printOtherCommands();
-            return;
+            return 0;
         }
-        Consumer<String[]> demo = DEMOS.get(args[0]);
+        Consumer<String[]> demo = DEMOS.get(command);
         if (demo != null) {
             demo.accept(new String[0]);
             printOtherCommands();
-            return;
+            return 0;
         }
-        boolean askedForHelp = args[0].equals("help") || args[0].equals("--help");
-        (askedForHelp ? System.out : System.err).print(usage());
-        if (!askedForHelp) {
-            System.exit(2);
+        if (HELP.contains(command)) {
+            System.out.print(usage());
+            return 0;
         }
+        System.err.println("unknown command: " + args[0]);
+        System.err.print(usage());
+        return USAGE_ERROR;
     }
 
     private static void printReport() {
@@ -130,6 +156,7 @@ public final class Main {
                   risk         Gamma/Vega against closed form, historical VaR
                   montecarlo   Monte Carlo pricing convergence, VaR and Expected Shortfall
                   tui          the walkthrough replayed one step at a time (Enter to advance)
+                  help         this list
                 """;
     }
 }

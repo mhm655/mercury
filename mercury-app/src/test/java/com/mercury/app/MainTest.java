@@ -53,6 +53,31 @@ class MainTest {
     }
 
     @Test
+    void everyHelpSpellingSucceedsAndPrintsTheSameList() {
+        for (String spelling : new String[] {"help", "--help", "-h", "HELP"}) {
+            assertThat(statusOf(spelling)).as(spelling).isZero();
+            assertThat(run(spelling)).as(spelling).isEqualTo(run("help"));
+        }
+    }
+
+    @Test
+    void commandsAreCaseInsensitive() {
+        assertThat(run("REPORT")).isEqualTo(run("report"));
+    }
+
+    @Test
+    void anUnknownCommandIsAUsageErrorThatNamesIt() {
+        assertThat(statusOf("bogus")).isEqualTo(Main.USAGE_ERROR);
+        assertThat(errorStreamOf("bogus")).contains("unknown command: bogus", "walkthrough");
+    }
+
+    @Test
+    void anExtraArgumentIsRefusedRatherThanSilentlyIgnored() {
+        assertThat(statusOf("report", "--csv")).isEqualTo(Main.USAGE_ERROR);
+        assertThat(errorStreamOf("report", "--csv")).contains("unexpected argument: --csv");
+    }
+
+    @Test
     void everyRunNamesTheCommandsItDidNotUse() {
         // The default command used to print the report and stop, so four of the five things
         // this jar demonstrates were reachable only by reading the README's table first.
@@ -66,8 +91,21 @@ class MainTest {
         //   java -jar mercury.jar > golden/valuation-report.txt
         // so anything helpful printed on stdout would land in the golden file, and from there
         // into the README block that same test compares against. This is the guard on that.
-        assertThat(run()).doesNotContain("Five commands in this jar");
+        assertThat(run()).doesNotContain("commands in this jar");
         assertThat(run()).isEqualTo(run("report"));
+    }
+
+    private static int statusOf(String... args) {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+        System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+        try {
+            return Main.run(args);
+        } finally {
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+        }
     }
 
     private static String run(String... args) {
@@ -75,7 +113,7 @@ class MainTest {
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
         System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
         try {
-            Main.main(args);
+            Main.run(args);
         } finally {
             System.setOut(original);
         }
@@ -89,7 +127,7 @@ class MainTest {
         System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
         System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
         try {
-            Main.main(args);
+            Main.run(args);
         } finally {
             System.setOut(originalOut);
             System.setErr(originalErr);
